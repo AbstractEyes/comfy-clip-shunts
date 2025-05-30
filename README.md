@@ -1,28 +1,35 @@
-# Handholding Guidance Adapter ComfyUI Custom Nodes for Experimental Dual Stream Shunt
+# Comfy CLIP Shunts
 
-A small set of unique adapters meant to bridge the dual_stream_shunt trained for guiding prompt embeddings and diffusion.
+This repository provides a collection of **ComfyUI** custom nodes implementing experimental "dual stream" shunt adapters. The adapters bridge `T5` language model embeddings to CLIP conditioning vectors, allowing more advanced prompt guidance during image generation.
 
-Baseline is implemented.
+## Features
 
-Clone into the `comfyui/custom_nodes/comfy-abs-shunt-adapters` directory.
+- Loading T5 models and shunt adapter weights on demand
+- Utilities for stacking, scheduling and previewing adapters
+- Helper functions to visualize the effect of a shunt
+- Model manager with simple caching and unloading
 
-Directory should be structured as follows:
-* `comfyui/custom_nodes/comfy-abs-shunt-adapters/`
-  * `__init__.py`
-  * `configs.py`
-  * `dual_stream_shunt_adapter.py`
-  * `gitignore`
-  * `README.md`
-  * `nodes.py`
+## Installation
 
-Download the weights here;
-For CLIP_G:
-https://huggingface.co/AbstractPhil/t5-flan-base-vit-bigG-14-dual-stream-adapter
+1. Clone or copy this folder into your `comfyui/custom_nodes` directory:
 
-For CLIP_L:
-https://huggingface.co/AbstractPhil/t5-flan-base-vit-bigL-14-dual-stream-adapter
+```bash
+comfyui/custom_nodes/comfy-clip-shunts/
+```
 
-Place the downloaded weights in the `comfyui/models/shunt_guides` directory.
+2. Download the shunt weights from [HuggingFace](https://huggingface.co/AbstractPhil):
+   - [t5-flan-base-vit-bigG-14-dual-stream-adapter](https://huggingface.co/AbstractPhil/t5-flan-base-vit-bigG-14-dual-stream-adapter)
+   - [t5-flan-base-vit-bigL-14-dual-stream-adapter](https://huggingface.co/AbstractPhil/t5-flan-base-vit-bigL-14-dual-stream-adapter)
 
-It caches the t5-flan-base model wherever the huggingface cache is set, so you can set it to your own directory by setting the `HF_HOME` environment variable.
+3. Place the downloaded `.safetensors` files in `comfyui/models/shunt_guides`.
+
+The T5 model itself is cached via HuggingFace; you can override the default cache by setting the `HF_HOME` environment variable.
+
+## Usage
+
+After installation, the nodes become available in the ComfyUI interface under the `adapter` categories. Load a T5 model with **T5LoaderTest**, then load one or more shunts with **LoadAdapterShunt** and plug them into the conditioning nodes provided by ComfyUI.
+
+## License
+
+This project is released under the terms of the MIT License. See `LICENSE` for details.
 
