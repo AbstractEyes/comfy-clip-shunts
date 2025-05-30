@@ -67,4 +67,7 @@ print("Loading ABS Shunt Suite...")
 print("✅ Shunt adapters initialized")
 print("⚡ Ready to bridge T5 → CLIP embeddings")
 
-__all__ = [NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS]
+__all__ = [
+    "NODE_CLASS_MAPPINGS",
+    "NODE_DISPLAY_NAME_MAPPINGS",
+]
