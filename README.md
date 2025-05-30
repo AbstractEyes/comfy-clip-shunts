@@ -2,6 +2,8 @@
 
 This repository provides a collection of **ComfyUI** custom nodes implementing experimental "dual stream" shunt adapters. The adapters bridge `T5` language model embeddings to CLIP conditioning vectors, allowing more advanced prompt guidance during image generation.
 
+This is heavily set up and programmed by AI passively, so keep in mind that this may be prone to error and halucination.
+
 ## Features
 
 - Loading T5 models and shunt adapter weights on demand
