@@ -2,13 +2,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .configs import T5_CONFIGS, T5_SHUNT_REPOS
+from .configs import T5_CONFIGS, HARMONIC_SHUNT_REPOS
 
 
 
 # ─── Residual Pocket Block ───────────────────────────────────
 class BottleneckResBlock(nn.Module):
-    def __init__(self, dim, kernel=3, dropout=0.1):
+    def __init__(self, dim, kernel=3, dropout=0.0):
         super().__init__()
         self.norm = nn.LayerNorm(dim)
         self.conv = nn.Conv1d(dim, dim, kernel_size=kernel, padding=kernel // 2, groups=1)
@@ -41,7 +41,7 @@ class TwoStreamShuntAdapter(nn.Module):
 
         use_norm   = config.get("layer_norm", True)
         use_do     = config.get("use_dropout", True)
-        do_p       = config.get("dropout", 0.1)
+        do_p       = config.get("dropout", 0.0)
         proj_depth = config.get("proj_layers", 2)
 
         def build_projection(input_dim, output_dim):

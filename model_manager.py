@@ -12,12 +12,26 @@ from transformers import AutoModel, AutoTokenizer, AutoModelForSeq2SeqLM
 
 logger = logging.getLogger(__name__)
 
+# -------------------------------------------------------------------------------------------------------------------- #
+# WARNING: ENABLING THIS TRUST_REMOTE_CODE FLAG WILL ALLOW EXECUTION OF ARBITRARY CODE FROM THE MODEL REPOSITORY.
+# USE WITH EXTREME CAUTION, AS IT CAN POTENTIALLY EXECUTE MALICIOUS CODE FROM UNTRUSTED SOURCES.
+
+TRUST_REMOTE_CODE = False  # Set to True only if you trust the source of the models you are loading.
+
+# I advise leaving this OFF for any production or sensitive environments, and for any government or enterprise use.
+# Ensure you fully trust the model repository and its maintainers and reviewing the code thoroughly.
+# You cannot ONLY trust an AI's response to the question of whether it is safe to enable this flag,
+#   as it may not have the full context of security implications or the specific model's behavior.
+# -------------------------------------------------------------------------------------------------------------------- #
+# COMFYUI operates within a form of sandbox, but enabling remote code execution can still pose many unseen risks.
+# -------------------------------------------------------------------------------------------------------------------- #
+
 
 class ModelType(Enum):
     """Enum for different model types"""
     SHUNT_ADAPTER = "shunt_adapter"
     T5_MODEL = "t5_model"
-    BERT_MODEL = "bert_model"
+    BERT_MODEL = "bert"
     GENERIC = "generic"
 
 
@@ -30,6 +44,7 @@ class ModelInfo:
     device: torch.device
     dtype: torch.dtype
     metadata: Dict[str, Any] = None
+    trust_remote_code: bool = TRUST_REMOTE_CODE  # Use global setting by default
 
 
 class ModelManager:
@@ -103,11 +118,12 @@ class ModelManager:
                 raise FileNotFoundError(f"Could not find adapter file for {adapter_id}")
 
             # Initialize adapter
+            # if the filename ends with t5-vit-l-14-dual_shunt_booru_13_000_000.safetensors we set attention heads to 4, else we set to 12
             adapter = TwoStreamShuntAdapter(config=config)
 
             # Load weights
             state_dict = load_file(file_path)
-            adapter.load_state_dict(state_dict, strict=True)
+            adapter.load_state_dict(state_dict, strict=False)
 
             # Move to device and dtype
             device = device or self.device
@@ -131,13 +147,98 @@ class ModelManager:
             logger.error(f"Failed to load adapter {adapter_id}: {e}")
             return None
 
+    def load_encoder_model(self,
+                           model_type: str, # use this to see if it's compatible with the current model manager
+                           model_id: str,
+                           model_name_or_path: str,
+                           device: Optional[torch.device] = None,
+                           dtype: Optional[torch.dtype] = None,
+                           force_reload: bool = False,
+                           trust_remote_code: Optional[bool] = None  # Overrides the global TRUST_REMOTE_CODE setting.
+    ) -> Optional[nn.Module]:
+        """
+        Load an encoder model (e.g., BERT, T5) and return it.
+
+        Args:
+            model_type: Type of the model (e.g., "bert", "t5")
+            model_id: Unique identifier for the model
+            model_name_or_path: Model name or path
+            device: Target device
+            dtype: Target dtype
+            force_reload: Force reload even if cached
+
+        Returns:
+            Loaded model or None if failed
+        """
+        if model_type == "bert" or model_type == "nomic_bert":
+            return self.load_bert_model(model_id, model_name_or_path, device, dtype, force_reload, trust_remote_code)
+        elif model_type == "t5":
+            return self.load_t5_model(model_id, model_name_or_path, device, dtype, force_reload, trust_remote_code)
+        else:
+            logger.error(f"Unsupported model type: {model_type}")
+            return None
+
+    def load_bert_model(
+            self,
+            model_id: str,
+            model_name_or_path: str,
+            device: Optional[torch.device] = None,
+            dtype: Optional[torch.dtype] = None,
+            force_reload: bool = False,
+            trust_remote_code: Optional[bool] = None  # Overrides the global TRUST_REMOTE_CODE setting.
+    ) -> Optional[Tuple[nn.Module, Any]]:
+        """
+        Load a BERT model and tokenizer.
+
+        Returns:
+            Tuple of (model, tokenizer) or None if failed
+        """
+        if not force_reload and self.is_loaded(model_id):
+            logger.info(f"Using cached BERT model: {model_id}")
+            model_info = self.get_model(model_id)
+            return model_info.model, model_info.metadata.get("tokenizer")
+
+        try:
+            device = device or self.device
+            dtype = dtype or torch.float32
+
+            # Load tokenizer and model
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_name_or_path,
+                trust_remote_code=trust_remote_code if trust_remote_code is not None else TRUST_REMOTE_CODE  # Use the global flag for remote code execution
+            )
+            model = AutoModel.from_pretrained(
+                model_name_or_path,
+                torch_dtype=dtype,
+                trust_remote_code=trust_remote_code if trust_remote_code is not None else TRUST_REMOTE_CODE  # Use the global flag for remote code execution
+            ).to(device)
+
+            # Cache the model
+            self.models[model_id] = ModelInfo(
+                model=model,
+                model_type=ModelType.BERT_MODEL,
+                config={"model_name": model_name_or_path},
+                device=device,
+                dtype=dtype,
+                metadata={"tokenizer": tokenizer},
+                trust_remote_code=trust_remote_code if trust_remote_code is not None else TRUST_REMOTE_CODE
+            )
+
+            logger.info(f"Successfully loaded BERT model: {model_id}")
+            return model, tokenizer
+
+        except Exception as e:
+            logger.error(f"Failed to load BERT model {model_id}: {e}")
+            return None
+
     def load_t5_model(
             self,
             model_id: str,
             model_name_or_path: str,
             device: Optional[torch.device] = None,
             dtype: Optional[torch.dtype] = None,
-            force_reload: bool = False
+            force_reload: bool = False,
+            override_remote_code: Optional[bool] = None # Overrides the global TRUST_REMOTE_CODE setting.
     ) -> Optional[Tuple[nn.Module, Any]]:
         """
         Load a T5 model and tokenizer.
@@ -153,12 +254,16 @@ class ModelManager:
         try:
             device = device or self.device
             dtype = dtype or torch.float32
-
+            trust_remote_code = override_remote_code if override_remote_code is not None else TRUST_REMOTE_CODE
             # Load tokenizer and model
-            tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_name_or_path,
+                trust_remote_code=trust_remote_code  # Use the global flag for remote code execution
+            )
             model = AutoModelForSeq2SeqLM.from_pretrained(
                 model_name_or_path,
-                torch_dtype=dtype
+                torch_dtype=dtype,
+                trust_remote_code=trust_remote_code  # Use the global flag for remote code execution
             ).to(device)
 
             # Cache the model

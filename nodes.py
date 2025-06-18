@@ -1,12 +1,157 @@
+from typing_extensions import deprecated
+
 import torch
 import logging
 from typing import Optional, Dict, Any
 
-from .configs import T5_CONFIGS, T5_SHUNT_REPOS
+from .configs import T5_CONFIGS, HARMONIC_SHUNT_REPOS, ShuntUtil
 from .model_manager import get_model_manager, ModelType
 
 logger = logging.getLogger(__name__)
 
+
+import torch
+import hashlib
+from .model_manager import get_model_manager
+from .configs import T5_CONFIGS, BERT_CONFIGS
+
+
+
+class EncoderLoader:
+    """
+    Loads T5 or BERT encoder model and prepares tokenized context window.
+    Returns a complete CONDITIONING_PIPE config block for downstream interpolation, masking, and scheduling.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model_type": (["t5", "bert"], {"default": "bert"}),
+                "model_name": (
+                    ["bert-base-uncased", "nomicai/nomic-bert-2048"],
+                    {"default": "bert-base-uncased"}
+                ),
+                "local_path": ("STRING", {"default": ""}),
+                "context_window": ("STRING", {
+                    "default": "a photo of a robot.",
+                    "multiline": True
+                }),
+                "use_context_window": ("BOOLEAN", {"default": True}),
+                "context_window_size": ("INT", {"default": 1024, "min": 128, "max": 4096}),
+                "sliding_window_size": ("INT", {"default": 77, "min": 1, "max": 2048}),
+                "sliding_window_stride": ("INT", {"default": 33, "min": 1, "max": 2048}),
+                "max_length": ("INT", {"default": 512, "min": 1, "max": 2048}),
+                "folding": ([
+                    "zeus", "helios", "surge", "surge-fold", "fold", "interpolate",
+                    "collapse", "zipper", "concat-flatten", "cascade", "ripple"
+                ], {"default": "surge-fold"}),
+                "folding_scheduler": ([
+                    "none", "tau", "top_k", "top_20k", "top_50k",
+                    "cosine", "cascade", "cos", "sine",
+                    "shockwave", "pulse", "wave"
+                ], {"default": "none"}),
+                "pos_embedding": (["none", "cos", "sine", "cosine_sine_product"], {"default": "none"}),
+                "padding": (["max_length", "longest", "do_not_pad"], {"default": "max_length"}),
+                "device": (["cpu", "cuda", "mps"], {"default": "cuda" if torch.cuda.is_available() else "cpu"}),
+                "trust_remote_code": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Allow execution of remote model code. Use only with trusted sources."
+                }),
+            }
+        }
+
+
+    RETURN_TYPES = ("ENCODER_PIPE",)
+    RETURN_NAMES = ("encoder_pipe",)
+    FUNCTION = "load"
+    CATEGORY = "adapter/testing"
+    DEPRECATED = False
+
+    def load(self,
+             model_type,
+             model_name,
+             local_path,
+             context_window,
+             use_context_window,
+             context_window_size,
+             sliding_window_size,
+             sliding_window_stride,
+             max_length,
+             folding,
+             folding_scheduler,
+             pos_embedding,
+             padding,
+             dtype,
+             device,
+             trust_remote_code):
+
+        model_manager = get_model_manager()
+        device_obj = torch.device(device)
+
+        # Determine source
+        model_config = (T5_CONFIGS if model_type == "t5" else BERT_CONFIGS).get(model_name, {})
+        model_source = local_path or model_config.get("repo_name", model_name)
+        model_id = f"{model_type}_{model_name}_{hashlib.sha1(model_source.encode()).hexdigest()[:10]}"
+
+        # Load model/tokenizer
+        result = model_manager.load_encoder_model(
+            model_type=model_type,
+            model_id=model_id,
+            model_name_or_path=model_source,
+            device=device_obj,
+            dtype=dtype,
+            force_reload=False,
+            trust_remote_code=trust_remote_code
+        )
+        if not result:
+            raise RuntimeError(f"Failed to load encoder model: {model_name}")
+        model, tokenizer = result
+
+        # Tokenize input
+        if use_context_window:
+            tokens = tokenizer(
+                context_window,
+                return_tensors="pt",
+                padding=None if padding == "do_not_pad" else padding,
+                truncation=True,
+                max_length=max_length
+            )
+            input_ids = tokens["input_ids"].to(device_obj)
+            attention_mask = tokens["attention_mask"].to(device_obj)
+        else:
+            input_ids = torch.tensor([[]], dtype=torch.int64).to(device_obj)
+            attention_mask = torch.tensor([[]], dtype=torch.int64).to(device_obj)
+
+        # Build config dictionary for downstream control
+        config_dict = {
+            "model_id": model_id,
+            "model_type": model_type,
+            "model_name": model_name,
+            "source": model_source,
+            "device": str(device),
+            "trust_remote_code": trust_remote_code,
+            "context_window": context_window,
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "config": {
+                "use_context_window": use_context_window,
+                "context_window_size": context_window_size,
+                "sliding_window_size": sliding_window_size,
+                "sliding_window_stride": sliding_window_stride,
+                "max_length": max_length,
+                "folding": folding,
+                "folding_scheduler": folding_scheduler,
+                "pos_embedding": pos_embedding,
+                "padding": padding
+            }
+        }
+
+        return ({
+            "model": model,
+            "tokenizer": tokenizer,
+            "config": config_dict,
+        },)
 
 class T5LoaderTest:
     """
@@ -25,17 +170,18 @@ class T5LoaderTest:
                 "sliding_window_stride": ("INT", {"default": 256, "min": 1, "max": 2048}),
                 "max_length": ("INT", {"default": 77, "min": 1, "max": 512}),
                 "padding": (["max_length", "longest", "do_not_pad"], {"default": "max_length"}),
-                "max_slices": ("INT", {"default": 1, "min": 1, "max": 100}),
+                "max_slices": ("INT", {"default": 10, "min": 1, "max": 100}),
                 "min_slices": ("INT", {"default": 1, "min": 1, "max": 100}),
                 "truncate_option": (["fold", "interpolate", "collapse", "zipper"], {"default": "fold"}),
                 "device": (["cpu", "cuda", "mps"], {"default": "cuda" if torch.cuda.is_available() else "cpu"})
             }
         }
 
-    RETURN_TYPES = ("T5_PIPE",)
-    RETURN_NAMES = ("t5_pipe",)
+    RETURN_TYPES = ("ENCODER_PIPE",)
+    RETURN_NAMES = ("encoder_pipe",)
     FUNCTION = "load"
     CATEGORY = "adapter/testing"
+    DEPRECATED = True
 
     def load(self, model_name, local_path, context_window, use_context_window,
              sliding_window_size, sliding_window_stride, max_length, padding,
@@ -106,10 +252,8 @@ class LoadAdapterShunt:
 
     @classmethod
     def INPUT_TYPES(cls):
-        # Get all available shunts
-        shunt_list = []
-        for shunt_type, shunt_info in T5_SHUNT_REPOS.items():
-            shunt_list.extend(shunt_info["shunts_available"]["shunt_list"])
+        # Get the names from the ShuntsUtil
+        shunt_list = ShuntUtil.get_shunt_names()
 
         return {
             "required": {
@@ -117,13 +261,6 @@ class LoadAdapterShunt:
                     "default": "",
                     "tooltip": "Full path to the adapter .safetensors or .pt file."
                 }),
-                "shunt_type": (
-                    list(T5_SHUNT_REPOS.keys()),
-                    {
-                        "default": list(T5_SHUNT_REPOS.keys())[0],
-                        "tooltip": "The shunt variant (clip_l, clip_g, etc)."
-                    }
-                ),
                 "shunt_name": (
                     shunt_list,
                     {
@@ -145,17 +282,17 @@ class LoadAdapterShunt:
     FUNCTION = "load_adapter"
     CATEGORY = "adapter/shunt"
 
-    def load_adapter(self, adapter_path, shunt_type, shunt_name, device):
+    def load_adapter(self, adapter_path, shunt_name, device):
         """Load adapter using the refactored model manager."""
 
         # Get model manager
         model_manager = get_model_manager()
 
         # Get configuration
-        config_entry = T5_SHUNT_REPOS.get(shunt_type)
+        config_entry = ShuntUtil.get_shunt_by_name(shunt_name)
         if not config_entry:
-            raise ValueError(f"Unknown shunt type: {shunt_type}")
-
+            raise ValueError(f"Unknown shunt type: {shunt_name}")
+        shunt_type = config_entry.get("type", "unknown")
         # Create unique adapter ID
         adapter_id = f"shunt_{shunt_type}_{shunt_name}"
 
@@ -198,7 +335,7 @@ class ShuntConditioning:
         return {
             "required": {
                 "conditioning": ("CONDITIONING", {}),
-                "t5_pipe": ("T5_PIPE", {}),
+                "encoder_pipe": ("ENCODER_PIPE", {}),
                 "adapter": ("ADAPTER", {}),
                 "strength": ("FLOAT", {"default": 1.0, "min": -50.0, "max": 50.0, "step": 0.1}),
                 "delta_mean": ("FLOAT", {"default": 0.0, "min": -10.0, "max": 10.0, "step": 0.1}),
@@ -213,18 +350,19 @@ class ShuntConditioning:
     FUNCTION = "adapt_conditioning"
     CATEGORY = "adapter/shunt"
 
-    def adapt_conditioning(self, conditioning, t5_pipe, adapter, strength,
+    def adapt_conditioning(self, conditioning, encoder_pipe, adapter, strength,
                            delta_mean, log_sigma, gate_probability, g_pred):
 
+        #todo: proper implementation of the attention mask
         logger.info(f"Adapting conditioning with {len(adapter)} adapters")
 
-        device = torch.device(t5_pipe["device"])
+        device = torch.device(encoder_pipe["device"])
 
-        # Get T5 embeddings
+        # Get encoder embeddings
         with torch.no_grad():
-            t5_embeddings = t5_pipe["model"].encoder(
-                input_ids=t5_pipe["input_ids"],
-                attention_mask=t5_pipe.get("attention_mask")
+            encoder_embeddings = encoder_pipe["model"].encoder(
+                input_ids=encoder_pipe["input_ids"],
+                attention_mask=encoder_pipe.get("attention_mask")
             ).last_hidden_state
 
         # Process conditioning
@@ -284,7 +422,7 @@ class ShuntConditioning:
 
                 try:
                     # Forward pass with the sliced conditioning
-                    outputs = adapter_model(t5_embeddings.float(), clip_slice.float())
+                    outputs = adapter_model(encoder_embeddings.float(), clip_slice.float())
 
                     # Unpack outputs
                     if isinstance(outputs, tuple) and len(outputs) == 8:
@@ -438,7 +576,7 @@ class ShuntConditioningAdvanced:
         return {
             "required": {
                 "conditioning": ("CONDITIONING", {}),
-                "t5_pipe": ("T5_PIPE", {}),
+                "encoder_pipe": ("ENCODER_PIPE", {}),
                 "adapter": ("ADAPTER", {}),
                 "strength": ("FLOAT", {"default": 1.0, "min": -50.0, "max": 50.0, "step": 0.1}),
                 "delta_mean": ("FLOAT", {"default": 0.0, "min": -10.0, "max": 10.0, "step": 0.1}),
@@ -457,17 +595,17 @@ class ShuntConditioningAdvanced:
     FUNCTION = "adapt_conditioning"
     CATEGORY = "adapter/advanced"
 
-    def adapt_conditioning(self, conditioning, t5_pipe, adapter, strength,
+    def adapt_conditioning(self, conditioning, encoder_pipe, adapter, strength,
                            delta_mean, log_sigma, gate_probability, g_pred_scale,
                            noise_injection, use_anchor, timestep_start, timestep_end):
 
-        device = torch.device(t5_pipe["device"])
+        device = torch.device(encoder_pipe["device"])
 
         # Get T5 embeddings
         with torch.no_grad():
-            t5_embeddings = t5_pipe["model"].encoder(
-                input_ids=t5_pipe["input_ids"],
-                attention_mask=t5_pipe.get("attention_mask")
+            encoder_embeddings = encoder_pipe["model"].encoder(
+                input_ids=encoder_pipe["input_ids"],
+                attention_mask=encoder_pipe.get("attention_mask")
             ).last_hidden_state
 
         # Track guidance predictions
@@ -507,7 +645,7 @@ class ShuntConditioningAdvanced:
 
                 # Forward pass
                 anchor, delta_mean_out, log_sigma_out, _, _, _, g_pred, gate = \
-                    adapter_model(t5_embeddings.float(), clip_slice.float())
+                    adapter_model(encoder_embeddings.float(), clip_slice.float())
 
                 # Apply modifications with timestep scaling
                 effective_strength = strength
@@ -817,13 +955,14 @@ class EasyShunt:
     def apply_shunt(self, conditioning, shunt_config, custom_strength=-1.0):
         """Apply shunt with minimal configuration"""
         from .model_manager import get_model_manager
-        from .configs import T5_SHUNT_REPOS
+        from .configs import HARMONIC_SHUNT_REPOS
 
         manager = get_model_manager()
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+        #todo: obvious errors need fixing on EasyShunt
         # Load T5 model
-        t5_result = manager.load_t5(
+        t5_result = manager.load_encoder_model(
             name=shunt_config["t5_model"],
             model_path=shunt_config["t5_model"]
         )
@@ -855,10 +994,11 @@ class EasyShunt:
         # Load adapters
         adapters = []
         for shunt_type, shunt_name in zip(shunt_config["shunt_types"], shunt_config["shunt_names"]):
-            config_entry = T5_SHUNT_REPOS.get(shunt_type)
+            config_entry = HARMONIC_SHUNT_REPOS.get(shunt_type)
             if not config_entry:
                 continue
 
+            #todo: test and fix this
             adapter = manager.load_shunt_adapter(
                 name=f"{shunt_type}_{shunt_name}",
                 config=config_entry["config"],
@@ -944,6 +1084,8 @@ class QuickShuntPreview:
     RETURN_NAMES = ("preview",)
     FUNCTION = "preview"
     CATEGORY = "adapter/simple"
+
+    DEPRECATED = True  # Marked as deprecated, use ComfyUI-compatible preview instead
 
 
     def preview(

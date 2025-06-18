@@ -1,4 +1,6 @@
+#from .general_nodes import *
 from .nodes import (
+    EncoderLoader,
     T5LoaderTest,
     ShuntConditioning,
     ShuntConditioningAdvanced,
@@ -16,7 +18,9 @@ from .nodes import (
     SuperiorConditioningPreview
 )
 
+
 NODE_CLASS_MAPPINGS = {
+    "EncoderLoader": EncoderLoader,
     "T5LoaderTest": T5LoaderTest,
     "LoadAdapterShunt": LoadAdapterShunt,
     "ShuntConditioning": ShuntConditioning,
@@ -36,6 +40,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "EncoderLoader": "📦 Encoder Loader",
     "T5LoaderTest": "🚀 T5 Encoder Loader",
     "LoadAdapterShunt": "⚡ Load Shunt Adapter",
     "ShuntConditioning": "🔌 Shunt Conditioning",
@@ -59,7 +64,7 @@ print("""
 ╔══════════════════════════════════════════╗
 ║        🚀 ABS SHUNT SUITE 🚀             ║
 ║    Advanced Bridging System Adapters     ║
-║         ⚡ Version 0.1.0 ⚡               ║
+║         ⚡ Version 0.2.0 ⚡               ║
 ╚══════════════════════════════════════════╝
 """)
 
