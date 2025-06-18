@@ -300,7 +300,8 @@ class LoadAdapterShunt:
         device_obj = torch.device(device)
         repo_id = config_entry.get("repo")
         config = config_entry.get("config", {})
-
+        logging.info(f"Loading adapter '{shunt_name}' of type '{shunt_type}' with ID '{adapter_id}'")
+        logging.info(f"Config: {config}")
         # Load adapter
         adapter = model_manager.load_shunt_adapter(
             adapter_id=adapter_id,

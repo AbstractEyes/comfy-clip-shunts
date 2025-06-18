@@ -4,8 +4,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from .configs import T5_CONFIGS, HARMONIC_SHUNT_REPOS
 
-
-
 # ─── Residual Pocket Block ───────────────────────────────────
 class BottleneckResBlock(nn.Module):
     def __init__(self, dim, kernel=3, dropout=0.0):
@@ -32,8 +30,8 @@ class TwoStreamShuntAdapter(nn.Module):
         super().__init__()
         self.config = config
         self.dtype = config.get("dtype", torch.float32)
-        self.t5_dim = config["t5"]["hidden_size"]
-        self.clip_dim = config["clip"]["hidden_size"]
+        self.t5_dim = config.get("condition_encoders", [])[0].get("hidden_size", 768)
+        self.clip_dim = config.get("modulation_encoders", [])[0].get("hidden_size", 768)
         self.bneck = config["bottleneck"]
         self.heads = config["heads"]
         self.tau_init = config["tau_init"]

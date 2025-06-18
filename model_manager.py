@@ -116,11 +116,9 @@ class ModelManager:
             file_path = self._resolve_file_path(path, repo_id, filename)
             if not file_path:
                 raise FileNotFoundError(f"Could not find adapter file for {adapter_id}")
-
             # Initialize adapter
             # if the filename ends with t5-vit-l-14-dual_shunt_booru_13_000_000.safetensors we set attention heads to 4, else we set to 12
             adapter = TwoStreamShuntAdapter(config=config)
-
             # Load weights
             state_dict = load_file(file_path)
             adapter.load_state_dict(state_dict, strict=False)
@@ -187,6 +185,7 @@ class ModelManager:
             force_reload: bool = False,
             trust_remote_code: Optional[bool] = None  # Overrides the global TRUST_REMOTE_CODE setting.
     ) -> Optional[Tuple[nn.Module, Any]]:
+
         """
         Load a BERT model and tokenizer.
 
