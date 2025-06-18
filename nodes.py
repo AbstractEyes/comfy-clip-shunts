@@ -53,6 +53,7 @@ class EncoderLoader:
                 ], {"default": "none"}),
                 "pos_embedding": (["none", "cos", "sine", "cosine_sine_product"], {"default": "none"}),
                 "padding": (["max_length", "longest", "do_not_pad"], {"default": "max_length"}),
+                "dtype": (["default", "float32", "float16", "bfloat16"], {"default": "default"}),
                 "device": (["cpu", "cuda", "mps"], {"default": "cuda" if torch.cuda.is_available() else "cpu"}),
                 "trust_remote_code": ("BOOLEAN", {
                     "default": False,
@@ -93,6 +94,12 @@ class EncoderLoader:
         model_config = (T5_CONFIGS if model_type == "t5" else BERT_CONFIGS).get(model_name, {})
         model_source = local_path or model_config.get("repo_name", model_name)
         model_id = f"{model_type}_{model_name}_{hashlib.sha1(model_source.encode()).hexdigest()[:10]}"
+
+        dtype = torch.get_default_dtype() if dtype == "default" else {
+            "float32": torch.float32,
+            "float16": torch.float16,
+            "bfloat16": torch.bfloat16
+        }[dtype]
 
         # Load model/tokenizer
         result = model_manager.load_encoder_model(

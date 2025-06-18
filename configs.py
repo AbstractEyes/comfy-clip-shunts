@@ -217,6 +217,7 @@ BERT_CONFIGS = {
     "nomic-bert-2048": {
         "repo_name": "nomic-ai/nomic-bert-2048",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+        "use_remote_code": True,
         "subfolder": "",
     },
     "mobilebert-base-uncased": {
