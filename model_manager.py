@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from safetensors.torch import load_file
-from transformers import AutoModel, AutoTokenizer, AutoModelForSeq2SeqLM
+from transformers import AutoModel, AutoTokenizer, AutoModelForSeq2SeqLM, BertModel, BertTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -202,11 +202,11 @@ class ModelManager:
             dtype = dtype or torch.float32
 
             # Load tokenizer and model
-            tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer = BertTokenizer.from_pretrained(
                 model_name_or_path,
                 trust_remote_code=trust_remote_code if trust_remote_code is not None else TRUST_REMOTE_CODE  # Use the global flag for remote code execution
             )
-            model = AutoModel.from_pretrained(
+            model = BertModel.from_pretrained(
                 model_name_or_path,
                 torch_dtype=dtype,
                 trust_remote_code=trust_remote_code if trust_remote_code is not None else TRUST_REMOTE_CODE  # Use the global flag for remote code execution

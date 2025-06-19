@@ -29,7 +29,7 @@ class EncoderLoader:
             "required": {
                 "model_type": (["t5", "bert"], {"default": "bert"}),
                 "model_name": (
-                    ["bert-base-uncased", "nomicai/nomic-bert-2048"],
+                    ["bert-base-uncased", "nomic-ai/nomic-bert-2048", "AbstractPhil/bert-beatrix-2048"],
                     {"default": "bert-base-uncased"}
                 ),
                 "local_path": ("STRING", {"default": ""}),
@@ -115,20 +115,20 @@ class EncoderLoader:
             raise RuntimeError(f"Failed to load encoder model: {model_name}")
         model, tokenizer = result
 
-        # Tokenize input
-        if use_context_window:
-            tokens = tokenizer(
-                context_window,
-                return_tensors="pt",
-                padding=None if padding == "do_not_pad" else padding,
-                truncation=True,
-                max_length=max_length
-            )
-            input_ids = tokens["input_ids"].to(device_obj)
-            attention_mask = tokens["attention_mask"].to(device_obj)
-        else:
-            input_ids = torch.tensor([[]], dtype=torch.int64).to(device_obj)
-            attention_mask = torch.tensor([[]], dtype=torch.int64).to(device_obj)
+        ## Tokenize input
+        #if use_context_window:
+        #    tokens = tokenizer(
+        #        context_window,
+        #        return_tensors="pt",
+        #        padding=None if padding == "do_not_pad" else padding,
+        #        truncation=True,
+        #        max_length=max_length
+        #    )
+        #    input_ids = tokens["input_ids"].to(device_obj)
+        #    attention_mask = tokens["attention_mask"].to(device_obj)
+        #else:
+        #    input_ids = torch.tensor([[]], dtype=torch.int64).to(device_obj)
+        #    attention_mask = torch.tensor([[]], dtype=torch.int64).to(device_obj)
 
         # Build config dictionary for downstream control
         config_dict = {
@@ -139,8 +139,6 @@ class EncoderLoader:
             "device": str(device),
             "trust_remote_code": trust_remote_code,
             "context_window": context_window,
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
             "config": {
                 "use_context_window": use_context_window,
                 "context_window_size": context_window_size,
@@ -154,7 +152,7 @@ class EncoderLoader:
             }
         }
 
-        return ({
+        return ({ # this is the encoder_pipe paradigm
             "model": model,
             "tokenizer": tokenizer,
             "config": config_dict,
@@ -364,13 +362,27 @@ class ShuntConditioning:
         #todo: proper implementation of the attention mask
         logger.info(f"Adapting conditioning with {len(adapter)} adapters")
 
-        device = torch.device(encoder_pipe["device"])
+        device = torch.device(encoder_pipe.get("config", {}).get("device", "cpu" if not torch.cuda.is_available() else "cuda"))
 
+
+        # todo: revamp the encoder with encoder folding traits
         # Get encoder embeddings
         with torch.no_grad():
+            # tokenize and encode the modulation prompt
+            # generate input_ids and attention_mask
+            tokens = encoder_pipe.get("tokenizer", {})(
+                encoder_pipe.get("prompt", ""),
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=encoder_pipe.get("config", {}).get("max_length", 512)
+            )
+            input_ids = tokens["input_ids"].to(device)
+            attention_mask = tokens["attention_mask"].to(device)
+
             encoder_embeddings = encoder_pipe["model"].encoder(
-                input_ids=encoder_pipe["input_ids"],
-                attention_mask=encoder_pipe.get("attention_mask")
+                input_ids,
+                attention_mask=attention_mask,
             ).last_hidden_state
 
         # Process conditioning
