@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from safetensors.torch import load_file
-from transformers import AutoModel, AutoTokenizer, AutoModelForSeq2SeqLM, BertModel, BertTokenizer
+from transformers import AutoModel, AutoTokenizer, AutoConfig, AutoModelForSeq2SeqLM, BertModel, BertTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,7 @@ class ModelType(Enum):
     SHUNT_ADAPTER = "shunt_adapter"
     T5_MODEL = "t5_model"
     BERT_MODEL = "bert"
+    NOMIC_BERT_MODEL = "nomic_bert"
     GENERIC = "generic"
 
 
@@ -168,7 +169,10 @@ class ModelManager:
         Returns:
             Loaded model or None if failed
         """
-        if model_type == "bert" or model_type == "nomic_bert":
+        if model_type == "bert":
+            return self.load_bert_model(model_id, model_name_or_path, device, dtype, force_reload, trust_remote_code)
+        elif model_type == "nomic_bert":
+            # Nomic BERT is a specific variant of BERT, so we can use the same loading function
             return self.load_bert_model(model_id, model_name_or_path, device, dtype, force_reload, trust_remote_code)
         elif model_type == "t5":
             return self.load_t5_model(model_id, model_name_or_path, device, dtype, force_reload, trust_remote_code)
@@ -201,13 +205,20 @@ class ModelManager:
             device = device or self.device
             dtype = dtype or torch.float32
 
-            # Load tokenizer and model
-            tokenizer = BertTokenizer.from_pretrained(
+            config = AutoConfig.from_pretrained(
                 model_name_or_path,
                 trust_remote_code=trust_remote_code if trust_remote_code is not None else TRUST_REMOTE_CODE  # Use the global flag for remote code execution
             )
-            model = BertModel.from_pretrained(
+
+            # Load tokenizer and model
+            tokenizer = AutoTokenizer.from_pretrained(
                 model_name_or_path,
+                config=config,
+                trust_remote_code=trust_remote_code if trust_remote_code is not None else TRUST_REMOTE_CODE  # Use the global flag for remote code execution
+            )
+            model = AutoModel.from_pretrained(
+                model_name_or_path,
+                config=config,
                 torch_dtype=dtype,
                 trust_remote_code=trust_remote_code if trust_remote_code is not None else TRUST_REMOTE_CODE  # Use the global flag for remote code execution
             ).to(device)

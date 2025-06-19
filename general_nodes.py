@@ -5,6 +5,31 @@ import importlib
 from .configs import ShuntUtil
 import logging
 
+class ABS_ReplaceClip:
+    """
+    A node to replace the current CLIP model with a new one.
+    This is useful for switching between different CLIP models in a pipeline.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "clip": ("CLIP", ),
+            },
+        }
+
+    RETURN_TYPES = ("CLIP", )
+    RETURN_NAMES = ("clip", )
+    FUNCTION = "replace_clip"
+    CATEGORY = "General/CLIP"
+
+    def replace_clip(self, clip):
+        """
+        Replaces the current CLIP model with the provided one.
+        """
+        return (clip, )
+
 
 class ABS_SimpleTextNode:
     """

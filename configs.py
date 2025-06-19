@@ -25,7 +25,6 @@ DEFAULT_REPOS = {
     "bert_base_multilingual_cased": "bert-base-multilingual-cased",
 }
 
-
 HARMONIC_SHUNT_REPOS = {
     "clip_g": {
         "models": ["clip_g", 't5_base'],
@@ -55,7 +54,7 @@ HARMONIC_SHUNT_REPOS = {
             "modulation_encoders": [
                 {
                     "type": "clip_g",
-                    "model": "openai/clip-vit-large-patch14",
+                    "model": "laion/CLIP-ViT-bigG-14-laion2B-s32B-b79K",
                     "hidden_size": 1280
                 }
             ],
@@ -243,46 +242,51 @@ HARMONIC_SHUNT_REPOS = {
 
 # ─── Adapter Configs ─────────────────────────────────────────────
 
-BERT_CONFIGS = {
+MODEL_CONFIGS = {
     "bert-beatrix-2048": {
         "repo_name": "AbstractPhil/bert-beatrix-2048",
+        "type": "nomic_bert",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
         "use_remote_code": True,
         "subfolder": "",
     },
     "nomic-bert-2048": {
         "repo_name": "nomic-ai/nomic-bert-2048",
+        "type": "nomic_bert",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
         "use_remote_code": True,
         "subfolder": "",
     },
     "mobilebert-base-uncased": {
         "repo_name": "google/mobilebert-uncased",
+        "type": "mobilebert",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
         "subfolder": "",
     },
     "bert-base-uncased": {
         "repo_name": "bert-base-uncased",
+        "type": "bert",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
     },
     "bert-large-uncased": {
         "repo_name": "bert-large-uncased",
+        "type": "bert",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
     },
     "bert-base-cased": {
         "repo_name": "bert-base-cased",
+        "type": "bert",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
-    }
-}
-
-T5_CONFIGS = {
+    },
     "t5xxl": {
         "repo_name": "google/t5-xxl-lm-adapt",
+        "type": "t5",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
         "subfolder": "",
     },
     "t5-unchained": {
         "repo_name": "AbstractPhil/t5-unchained",
+        "type": "t5",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
         "subfolder": "",
         "tokenizer": "t5-unchained",
@@ -319,14 +323,17 @@ T5_CONFIGS = {
     },
     "flan-t5-base": {
         "repo_name": "google/flan-t5-base",
+        "type": "t5",
         "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
     },
     "t5-small": {
         "repo_name": "google-t5/t5-small",
+        "type": "t5",
         "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
     },
     "t5_small_human_attentive_try2_pass3": {
         "repo_name": "AbstractPhil/t5_small_human_attentive_try2_pass3",
+        "type": "t5",
         "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
         # the necessary config is present here for posterity in case it fails to load from HuggingFace.
         "subfolder": "",

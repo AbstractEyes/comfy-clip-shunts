@@ -2,7 +2,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .configs import T5_CONFIGS, HARMONIC_SHUNT_REPOS
+from .configs import MODEL_CONFIGS, HARMONIC_SHUNT_REPOS
 
 # ─── Residual Pocket Block ───────────────────────────────────
 class BottleneckResBlock(nn.Module):
@@ -100,10 +100,16 @@ class TwoStreamShuntAdapter(nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, t5_seq: torch.Tensor, clip_seq: torch.Tensor):
+    def forward(self, t5_seq: torch.Tensor, clip_seq: torch.Tensor, config: dict = None):
         if self.config.get("assert_input_dims", True):
             assert t5_seq.size(-1) == self.t5_dim
             assert clip_seq.size(-1) == self.clip_dim
+
+        max_guidance = self.max_guidance if config is None else config.get("max_guidance", 0.0)
+        if max_guidance <= 0:
+            max_guidance = self.max_guidance
+        else:
+            max_guidance = max_guidance * 10.0
 
         t5_b   = self.proj_t5(t5_seq)
         clip_b = self.proj_clip(clip_seq)
@@ -121,7 +127,7 @@ class TwoStreamShuntAdapter(nn.Module):
         log_sigma = self.logsig_proj(h)
 
         g_tok  = self.guidance_proj(h).squeeze(-1)
-        g_pred = g_tok.mean(1, keepdim=True) * self.max_guidance
+        g_pred = g_tok.mean(1, keepdim=True) * max_guidance
 
         return anchor, delta, log_sigma, attn_t2c, attn_c2t, self.tau, g_pred, self.gate_proj(h)
 

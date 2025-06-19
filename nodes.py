@@ -4,7 +4,7 @@ import torch
 import logging
 from typing import Optional, Dict, Any
 
-from .configs import T5_CONFIGS, HARMONIC_SHUNT_REPOS, ShuntUtil
+from .configs import HARMONIC_SHUNT_REPOS, ShuntUtil
 from .model_manager import get_model_manager, ModelType
 
 logger = logging.getLogger(__name__)
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 import torch
 import hashlib
 from .model_manager import get_model_manager
-from .configs import T5_CONFIGS, BERT_CONFIGS
+from .configs import MODEL_CONFIGS
 
 
 
@@ -27,9 +27,8 @@ class EncoderLoader:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model_type": (["t5", "bert"], {"default": "bert"}),
                 "model_name": (
-                    ["bert-base-uncased", "nomic-ai/nomic-bert-2048", "AbstractPhil/bert-beatrix-2048"],
+                    list(MODEL_CONFIGS.keys()),
                     {"default": "bert-base-uncased"}
                 ),
                 "local_path": ("STRING", {"default": ""}),
@@ -70,7 +69,6 @@ class EncoderLoader:
     DEPRECATED = False
 
     def load(self,
-             model_type,
              model_name,
              local_path,
              context_window,
@@ -91,7 +89,8 @@ class EncoderLoader:
         device_obj = torch.device(device)
 
         # Determine source
-        model_config = (T5_CONFIGS if model_type == "t5" else BERT_CONFIGS).get(model_name, {})
+        model_config = MODEL_CONFIGS.get(model_name, {})
+        model_type = model_config.get("type", "unknown")
         model_source = local_path or model_config.get("repo_name", model_name)
         model_id = f"{model_type}_{model_name}_{hashlib.sha1(model_source.encode()).hexdigest()[:10]}"
 
@@ -114,21 +113,6 @@ class EncoderLoader:
         if not result:
             raise RuntimeError(f"Failed to load encoder model: {model_name}")
         model, tokenizer = result
-
-        ## Tokenize input
-        #if use_context_window:
-        #    tokens = tokenizer(
-        #        context_window,
-        #        return_tensors="pt",
-        #        padding=None if padding == "do_not_pad" else padding,
-        #        truncation=True,
-        #        max_length=max_length
-        #    )
-        #    input_ids = tokens["input_ids"].to(device_obj)
-        #    attention_mask = tokens["attention_mask"].to(device_obj)
-        #else:
-        #    input_ids = torch.tensor([[]], dtype=torch.int64).to(device_obj)
-        #    attention_mask = torch.tensor([[]], dtype=torch.int64).to(device_obj)
 
         # Build config dictionary for downstream control
         config_dict = {
@@ -167,7 +151,7 @@ class T5LoaderTest:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model_name": (list(T5_CONFIGS.keys()), {"default": "google/flan-t5-base"}),
+                "model_name": (list(MODEL_CONFIGS.keys()), {"default": "google/flan-t5-base"}),
                 "local_path": ("STRING", {"default": "", "tooltip": "Local path override. If empty, use HuggingFace."}),
                 "context_window": ("STRING", {"default": "a photo of a robot.", "multiline": True}),
                 "use_context_window": ("BOOLEAN", {"default": True}),
@@ -197,7 +181,7 @@ class T5LoaderTest:
         model_manager = get_model_manager()
 
         # Determine model source
-        model_config = T5_CONFIGS.get(model_name, {})
+        model_config = MODEL_CONFIGS.get(model_name, {})
         model_source = local_path or model_config.get("repo_name", "")
 
         if not model_source:
@@ -359,31 +343,60 @@ class ShuntConditioning:
     def adapt_conditioning(self, conditioning, encoder_pipe, adapter, strength,
                            delta_mean, log_sigma, gate_probability, g_pred):
 
-        #todo: proper implementation of the attention mask
         logger.info(f"Adapting conditioning with {len(adapter)} adapters")
 
-        device = torch.device(encoder_pipe.get("config", {}).get("device", "cpu" if not torch.cuda.is_available() else "cuda"))
+        device = torch.device(
+            encoder_pipe.get("config", {}).get("device", "cpu" if not torch.cuda.is_available() else "cuda"))
 
-
-        # todo: revamp the encoder with encoder folding traits
         # Get encoder embeddings
         with torch.no_grad():
-            # tokenize and encode the modulation prompt
-            # generate input_ids and attention_mask
-            tokens = encoder_pipe.get("tokenizer", {})(
-                encoder_pipe.get("prompt", ""),
+            # Get configuration from encoder_pipe
+            config = encoder_pipe.get("config", {})
+            encoder_config = config.get("config", {})
+
+            # Get tokenizer and model
+            tokenizer = encoder_pipe.get("tokenizer")
+            model = encoder_pipe.get("model")
+
+            # Get prompt from config
+            prompt = config.get("context_window", "")
+
+            # Tokenize with proper handling
+            padding_type = encoder_config.get("padding", "max_length")
+            max_length = encoder_config.get("max_length", 512)
+
+            tokens = tokenizer(
+                prompt,
                 return_tensors="pt",
-                padding=True,
+                padding=padding_type if padding_type != "do_not_pad" else False,
                 truncation=True,
-                max_length=encoder_pipe.get("config", {}).get("max_length", 512)
+                max_length=max_length
             )
+
             input_ids = tokens["input_ids"].to(device)
             attention_mask = tokens["attention_mask"].to(device)
 
-            encoder_embeddings = encoder_pipe["model"].encoder(
-                input_ids,
-                attention_mask=attention_mask,
-            ).last_hidden_state
+            # Check model type and get embeddings accordingly
+            model_type = config.get("model_type", "")
+
+            if model_type == "t5":
+                # T5 models have an encoder attribute
+                logger.info(f"Using T5 model for encoding with input_ids shape: {input_ids.shape}")
+                encoder_embeddings = model.encoder(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                ).last_hidden_state
+            elif model_type in ["bert", "nomic_bert"]:
+                # BERT models (including Nomic BERT) use the model directly
+                logger.info(f"Using BERT model for encoding with input_ids shape: {input_ids.shape}")
+                model_output = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    return_dict=True
+                )
+                encoder_embeddings = model_output.last_hidden_state
+            else:
+                raise ValueError(f"Unsupported model type: {model_type}")
 
         # Process conditioning
         adapted_conditioning = []
@@ -399,19 +412,21 @@ class ShuntConditioning:
             for adapter_idx, adapter_info in enumerate(adapter):
                 adapter_model = adapter_info["adapter"].to(device)
                 adapter_config = adapter_info["config"]
-
                 # Determine adapter type and slice conditioning accordingly
-                clip_dim = adapter_config.get("clip", {}).get("hidden_size", 768)
+                clip_dim = adapter_config.get("hidden_size", 768)  # Default to 768 if not specified
+                logger.info(f"Adapter {adapter_idx} has clip_dim: {clip_dim}")
                 total_dim = cond_tensor.size(-1)
 
                 if clip_dim == 768:  # CLIP-L
                     # Take first 768 dimensions
+                    logger.info(f"Using CLIP-L adapter with {clip_dim} dimensions")
                     clip_slice = cond_tensor[:, :, :768]
                     slice_start = 0
                     slice_end = 768
                     adapter_type = "clip_l"
                 elif clip_dim == 1280:  # CLIP-G
                     # SDXL conditioning is typically CLIP-L (768) + CLIP-G (1280) = 2048
+                    logger.info(f"Using CLIP-G adapter with {clip_dim} dimensions")
                     if total_dim >= 2048:
                         # Take from 768 to 2048 (the CLIP-G portion)
                         clip_slice = cond_tensor[:, :, 768:2048]
@@ -442,8 +457,9 @@ class ShuntConditioning:
 
                 try:
                     # Forward pass with the sliced conditioning
+                    logger.info(f"Adapter {adapter_idx} processing slice: {clip_slice.shape}")
                     outputs = adapter_model(encoder_embeddings.float(), clip_slice.float())
-
+                    logger.info(f"Adapter {adapter_idx} outputs: {outputs}")
                     # Unpack outputs
                     if isinstance(outputs, tuple) and len(outputs) == 8:
                         anchor, delta_mean_adapter, log_sigma_adapter, _, _, _, g_pred_adapter, gate_adapter = outputs
@@ -487,7 +503,6 @@ class ShuntConditioning:
             raise RuntimeError("No conditioning was successfully adapted")
 
         return (adapted_conditioning,)
-
 
 class StackShuntAdapters:
     """Stack multiple adapters together."""
