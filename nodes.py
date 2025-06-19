@@ -318,7 +318,7 @@ class LoadAdapterShunt:
 
 
 class ShuntConditioning:
-    """Apply adapter to conditioning with automatic slicing for CLIP-L/G"""
+    """Apply adapter to conditioning with full feature parity to Gradio app"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -329,19 +329,26 @@ class ShuntConditioning:
                 "adapter": ("ADAPTER", {}),
                 "strength": ("FLOAT", {"default": 1.0, "min": -50.0, "max": 50.0, "step": 0.1}),
                 "delta_mean": ("FLOAT", {"default": 0.0, "min": -10.0, "max": 10.0, "step": 0.1}),
+                "delta_scale": ("FLOAT", {"default": 0.2, "min": -15.0, "max": 15.0, "step": 0.1}),
                 "log_sigma": ("FLOAT", {"default": 0.0, "min": -10.0, "max": 10.0, "step": 0.1}),
-                "gate_probability": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "g_pred": ("FLOAT", {"default": 0.0, "min": -10.0, "max": 10.0})
+                "sigma_scale": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 15.0, "step": 0.1}),
+                "gate_probability": ("FLOAT", {"default": 0.27, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "g_pred": ("FLOAT", {"default": 0.0, "min": -10.0, "max": 10.0}),
+                "gpred_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 20.0, "step": 0.01}),
+                "noise_injection": ("FLOAT", {"default": 0.55, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "use_anchor": ("BOOLEAN", {"default": True}),
             }
         }
 
-    RETURN_TYPES = ("CONDITIONING",)
-    RETURN_NAMES = ("adapted_conditioning",)
+    RETURN_TYPES = ("CONDITIONING", "STRING")
+    RETURN_NAMES = ("adapted_conditioning", "statistics")
     FUNCTION = "adapt_conditioning"
     CATEGORY = "adapter/shunt"
 
     def adapt_conditioning(self, conditioning, encoder_pipe, adapter, strength,
-                           delta_mean, log_sigma, gate_probability, g_pred):
+                           delta_mean, delta_scale, log_sigma, sigma_scale,
+                           gate_probability, g_pred, gpred_scale, noise_injection,
+                           use_anchor):
 
         logger.info(f"Adapting conditioning with {len(adapter)} adapters")
 
@@ -359,14 +366,14 @@ class ShuntConditioning:
             model = encoder_pipe.get("model")
 
             # Get prompt from config
-            prompt = config.get("context_window", "")
+            context_prompt = config.get("context_window", "")
 
             # Tokenize with proper handling
             padding_type = encoder_config.get("padding", "max_length")
             max_length = encoder_config.get("max_length", 512)
 
             tokens = tokenizer(
-                prompt,
+                context_prompt,
                 return_tensors="pt",
                 padding=padding_type if padding_type != "do_not_pad" else False,
                 truncation=True,
@@ -380,15 +387,11 @@ class ShuntConditioning:
             model_type = config.get("model_type", "")
 
             if model_type == "t5":
-                # T5 models have an encoder attribute
-                logger.info(f"Using T5 model for encoding with input_ids shape: {input_ids.shape}")
                 encoder_embeddings = model.encoder(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
                 ).last_hidden_state
             elif model_type in ["bert", "nomic_bert"]:
-                # BERT models (including Nomic BERT) use the model directly
-                logger.info(f"Using BERT model for encoding with input_ids shape: {input_ids.shape}")
                 model_output = model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
@@ -397,6 +400,9 @@ class ShuntConditioning:
                 encoder_embeddings = model_output.last_hidden_state
             else:
                 raise ValueError(f"Unsupported model type: {model_type}")
+
+        # Statistics collection
+        all_stats = []
 
         # Process conditioning
         adapted_conditioning = []
@@ -412,28 +418,22 @@ class ShuntConditioning:
             for adapter_idx, adapter_info in enumerate(adapter):
                 adapter_model = adapter_info["adapter"].to(device)
                 adapter_config = adapter_info["config"]
+
                 # Determine adapter type and slice conditioning accordingly
-                clip_dim = adapter_config.get("hidden_size", 768)  # Default to 768 if not specified
-                logger.info(f"Adapter {adapter_idx} has clip_dim: {clip_dim}")
+                clip_dim = adapter_config.get("hidden_size", 768)
                 total_dim = cond_tensor.size(-1)
 
                 if clip_dim == 768:  # CLIP-L
-                    # Take first 768 dimensions
-                    logger.info(f"Using CLIP-L adapter with {clip_dim} dimensions")
                     clip_slice = cond_tensor[:, :, :768]
                     slice_start = 0
                     slice_end = 768
                     adapter_type = "clip_l"
                 elif clip_dim == 1280:  # CLIP-G
-                    # SDXL conditioning is typically CLIP-L (768) + CLIP-G (1280) = 2048
-                    logger.info(f"Using CLIP-G adapter with {clip_dim} dimensions")
                     if total_dim >= 2048:
-                        # Take from 768 to 2048 (the CLIP-G portion)
                         clip_slice = cond_tensor[:, :, 768:2048]
                         slice_start = 768
                         slice_end = 2048
                     else:
-                        # Fallback for non-standard conditioning
                         clip_slice = cond_tensor[:, :, 768:]
                         slice_start = 768
                         slice_end = total_dim
@@ -442,49 +442,77 @@ class ShuntConditioning:
                     logger.warning(f"Unknown CLIP dimension {clip_dim}, skipping adapter")
                     continue
 
-                logger.info(
-                    f"Conditioning total dim: {total_dim}, extracting {adapter_type} [{slice_start}:{slice_end}]")
-
-                # Validate slice dimensions
-                if clip_slice.size(-1) != clip_dim:
-                    logger.error(
-                        f"Expected {clip_dim} dims for {adapter_type}, but slice has {clip_slice.size(-1)}. "
-                        f"Conditioning tensor total size: {cond_tensor.size(-1)}"
-                    )
-                    continue
-
                 logger.info(f"Applying {adapter_type} adapter to dims [{slice_start}:{slice_end}]")
 
                 try:
                     # Forward pass with the sliced conditioning
-                    logger.info(f"Adapter {adapter_idx} processing slice: {clip_slice.shape}")
-                    outputs = adapter_model(encoder_embeddings.float(), clip_slice.float())
-                    logger.info(f"Adapter {adapter_idx} outputs: {outputs}")
+                    gen_config = {
+                        "max_guidance": g_pred,
+                    }
+                    outputs = adapter_model(encoder_embeddings.float(), clip_slice.float(), config=gen_config)
+
                     # Unpack outputs
                     if isinstance(outputs, tuple) and len(outputs) == 8:
-                        anchor, delta_mean_adapter, log_sigma_adapter, _, _, _, g_pred_adapter, gate_adapter = outputs
+                        anchor, delta_mean_adapter, log_sigma_adapter, _, _, tau, g_pred_out, gate_adapter = outputs
                     else:
                         raise ValueError(f"Unexpected adapter output format: {type(outputs)}")
 
-                    # Apply modifications
-                    gate = gate_adapter * gate_probability
-                    delta = (delta_mean_adapter + delta_mean) * strength * gate
+                    # Scale delta values (MISSING IN ORIGINAL)
+                    delta = delta_mean_adapter * delta_scale
+
+                    # Apply delta mean offset
+                    delta = delta + delta_mean
+
+                    # Apply g_pred scaling to gate (MISSING IN ORIGINAL)
+                    gate = gate_adapter * g_pred_out * gpred_scale
+
+                    # Apply sigmoid and gate probability (SIGMOID MISSING IN ORIGINAL)
+                    gate_scaled = torch.sigmoid(gate) * gate_probability
+
+                    # Compute final delta with strength and gate
+                    delta_final = delta * strength * gate_scaled
 
                     # Resize if needed
-                    if delta.shape[1] != clip_slice.shape[1]:
-                        logger.info(f"Resizing delta from {delta.shape} to match slice {clip_slice.shape}")
-                        delta = torch.nn.functional.interpolate(
-                            delta.transpose(1, 2),
+                    if delta_final.shape[1] != clip_slice.shape[1]:
+                        logger.info(f"Resizing delta from {delta_final.shape} to match slice {clip_slice.shape}")
+                        delta_final = torch.nn.functional.interpolate(
+                            delta_final.transpose(1, 2),
                             size=clip_slice.size(1),
                             mode="nearest"
                         ).transpose(1, 2)
 
-                    # Apply delta only to the appropriate slice
-                    cond_tensor[:, :, slice_start:slice_end] = (
-                            clip_slice.float() + delta
-                    ).type_as(cond_tensor)
+                    # Apply delta to create modified clip
+                    clip_modified = clip_slice.float() + delta_final
+
+                    # Apply sigma-based noise if specified (MISSING IN ORIGINAL)
+                    if sigma_scale > 0:
+                        sigma = torch.exp(log_sigma_adapter * sigma_scale)
+                        clip_modified += torch.randn_like(clip_modified) * sigma
+
+                    # Apply anchor mixing if enabled (MISSING IN ORIGINAL)
+                    if use_anchor:
+                        clip_modified = clip_modified * (1 - gate_scaled) + anchor * gate_scaled
+
+                    # Add additional noise if specified (MISSING IN ORIGINAL)
+                    if noise_injection > 0:
+                        clip_modified += torch.randn_like(clip_modified) * noise_injection
+
+                    # Apply modified slice back to conditioning
+                    cond_tensor[:, :, slice_start:slice_end] = clip_modified.type_as(cond_tensor)
 
                     modified_ranges.append((slice_start, slice_end, adapter_type))
+
+                    # Collect statistics (MISSING IN ORIGINAL)
+                    stats = {
+                        "adapter_type": adapter_type,
+                        "g_pred": float(g_pred_out.mean().item() if hasattr(g_pred_out, 'mean') else g_pred_out),
+                        "tau": float(tau.mean().item() if hasattr(tau, 'mean') else tau),
+                        "gate_mean": float(gate_scaled.mean().item()),
+                        "delta_mean": float(delta_final.mean().item()),
+                        "delta_std": float(delta_final.std().item())
+                    }
+                    all_stats.append(stats)
+
                     logger.info(f"Successfully applied {adapter_type} adapter")
 
                 except Exception as e:
@@ -502,7 +530,13 @@ class ShuntConditioning:
         if not adapted_conditioning:
             raise RuntimeError("No conditioning was successfully adapted")
 
-        return (adapted_conditioning,)
+        # Format statistics string
+        stats_str = "Adapter Statistics:\n"
+        for stat in all_stats:
+            stats_str += f"{stat['adapter_type']}: g_pred={stat['g_pred']:.3f}, τ={stat['tau']:.3f}, "
+            stats_str += f"gate_mean={stat['gate_mean']:.3f}, delta_std={stat['delta_std']:.3f}\n"
+
+        return (adapted_conditioning, stats_str)
 
 class StackShuntAdapters:
     """Stack multiple adapters together."""
