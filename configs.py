@@ -4,8 +4,8 @@ import logging
 
 
 DEFAULT_REPOS = {
-    "clip_g": "laion/CLIP-ViT-bigG-14-laion2B-s32B-b79K",
-    "vit-bigG-14": "laion/CLIP-ViT-bigG-14-laion2B-s32B-b79K",
+    "clip_g": "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k",
+    "vit-bigG-14": "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k",
     "clip_l": "openai/clip-vit-large-patch14",
     "vit-l-14": "openai/clip-vit-large-patch14",
     "clip_l_4h": "openai/clip-vit-large-patch14",
@@ -54,7 +54,7 @@ HARMONIC_SHUNT_REPOS = {
             "modulation_encoders": [
                 {
                     "type": "clip_g",
-                    "model": "laion/CLIP-ViT-bigG-14-laion2B-s32B-b79K",
+                    "model": "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k",
                     "hidden_size": 1280
                 }
             ],
@@ -66,8 +66,45 @@ HARMONIC_SHUNT_REPOS = {
             "routing": {"type": "cross_attention", "enable_causal_mask": False, "bidirectional": True},
             "version": "v0.3.2"
         },
-
     },
+    "clip_g_8h": {
+        "models": ["clip_g", 'bert_beatrix-2048'],
+        "repo": "AbstractPhil/bert-beatrix-2048-vit-bigG-14-dual-shunt-adapter",
+        "shunts_available": {
+            "shunt_type_name": "DualStreamAdapter-G",
+            "config_file_name": "config.json",
+            "shunt_list": [
+                "dual_shunt_g_booru_no_caption_noised_e1_step_3000.safetensors",
+                "dual_shunt_g_booru_no_caption_noised_e1_step_5000.safetensors",
+                "dual_shunt_g_booru_no_caption_noised_e1_step_7000.safetensors",
+                "dual_shunt_g_booru_no_caption_noised_e1_step_10000.safetensors",
+                "dual_shunt_g_booru_no_caption_noised_e1_step_14000.safetensors",
+            ],
+        },
+        "config": {
+            "adapter_id": "006", "name": "DualShuntAdapter-G",
+            "condition_encoders": [{
+                "type": "t5_base",
+                "model": "AbstractPhil/bert-beatrix-2048",
+                "hidden_size": 768
+            }],
+            "modulation_encoders": [
+                {
+                    "type": "clip_g",
+                    "model": "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k",
+                    "hidden_size": 1280
+                }
+            ],
+            "hidden_size": 1280,  # This is the adapter's output size
+            "bottleneck": 640, "heads": 8,
+            "max_guidance": 10.0, "tau_init": 0.1,
+            "proj_layers": 2, "layer_norm": True, "dropout": 0.0,
+            "use_dropout": False, "use_proj_stack": True, "assert_input_dims": True,
+            "routing": {"type": "cross_attention", "enable_causal_mask": False, "bidirectional": True},
+            "version": "v0.3.2"
+        },
+    },
+#
     "clip_l_4h_bert": {
         "models": ["clip_l", "bert-beatrix-2048"],
         "repo": "AbstractPhil/bert-beatrix-2048-vit-l-14-dual-shunt-adapter",
