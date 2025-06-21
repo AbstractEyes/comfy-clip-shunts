@@ -280,7 +280,7 @@ class LoadAdapterShunt:
         config_entry = ShuntUtil.get_shunt_by_name(shunt_name)
         if not config_entry:
             raise ValueError(f"Unknown shunt type: {shunt_name}")
-        shunt_type = config_entry.get("type", "unknown")
+        shunt_type = config_entry.get("shunt_type_name", "unknown")
         # Create unique adapter ID
         adapter_id = f"shunt_{shunt_type}_{shunt_name}"
 
@@ -298,7 +298,8 @@ class LoadAdapterShunt:
             repo_id=repo_id if not adapter_path else None,
             filename=shunt_name if not adapter_path else None,
             device=device_obj,
-            dtype=torch.float32
+            dtype=torch.float32,
+            force_reload=False
         )
 
         if not adapter:

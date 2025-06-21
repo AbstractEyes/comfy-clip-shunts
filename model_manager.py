@@ -119,15 +119,21 @@ class ModelManager:
                 raise FileNotFoundError(f"Could not find adapter file for {adapter_id}")
             # Initialize adapter
             # if the filename ends with t5-vit-l-14-dual_shunt_booru_13_000_000.safetensors we set attention heads to 4, else we set to 12
+            logger.info(f"Loading adapter {adapter_id} from {file_path}")
             adapter = TwoStreamShuntAdapter(config=config)
+            logger.info(f"Initialized adapter {adapter_id} with config: {config}")
             # Load weights
             state_dict = load_file(file_path)
+            logger.info(f"Loaded state_dict for adapter {adapter_id} from {file_path}")
             adapter.load_state_dict(state_dict, strict=False)
+            logger.info(f"Adapter {adapter_id} state_dict loaded successfully")
 
             # Move to device and dtype
             device = device or self.device
             dtype = dtype or torch.float32
+            logger.info(f"Moving adapter {adapter_id} to device: {device}, dtype: {dtype}")
             adapter = adapter.to(device=device, dtype=dtype)
+            logger.info(f"Adapter {adapter_id} moved to device and dtype successfully")
 
             # Cache the model
             self.models[adapter_id] = ModelInfo(
@@ -138,12 +144,14 @@ class ModelManager:
                 dtype=dtype,
                 metadata={"file_path": str(file_path)}
             )
+            logger.info(f"Adapter {adapter_id} cached successfully")
 
             logger.info(f"Successfully loaded adapter: {adapter_id}")
             return adapter
 
         except Exception as e:
-            logger.error(f"Failed to load adapter {adapter_id}: {e}")
+            logger.error(f"Failed to load adapter {adapter_id} from {path or repo_id}/{filename}: {e}")
+            logger.debug(f"Traceback: {e.__traceback__}")
             return None
 
     def load_encoder_model(self,

@@ -33,3 +33,7 @@ class ShuntStackConfig:
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
+class ShuntStackBuilder:
+    # Builds the representative conditioning stack for the Shunt adapters
+    pass
+

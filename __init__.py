@@ -18,7 +18,6 @@ from .nodes import (
     SuperiorConditioningPreview
 )
 
-
 NODE_CLASS_MAPPINGS = {
     "EncoderLoader": EncoderLoader,
     "T5LoaderTest": T5LoaderTest,

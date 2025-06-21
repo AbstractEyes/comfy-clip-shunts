@@ -258,20 +258,21 @@ HARMONIC_SHUNT_REPOS = {
         },
     },
     "clip_l": {
-        "models": ["vit-l-14", 'flan-t5-base'],
+        "models": ['flan-t5-base', "vit-l-14"],
+        "repo": "AbstractPhil/t5-flan-base-vit-l-14-dual-stream-adapter",
         "config": {
             "adapter_id": "002",
             "name": "DualShuntAdapter",
-            "condition_encoders": {
+            "condition_encoders": [{
                 "type": "t5_base",
                 "model": "google/flan-t5-base",
                 "hidden_size": 768
-            },
-            "modulation_encoders": {
+            }],
+            "modulation_encoders": [{
                 "type": "clip_l",
                 "model": "openai/clip-vit-large-patch14",
                 "hidden_size": 768
-            },
+            }],
             "hidden_size": 768,  # This is the adapter's output size
             "bottleneck": 384, "heads": 12,
             "max_guidance": 10.0, "tau_init": 0.1,
@@ -280,7 +281,6 @@ HARMONIC_SHUNT_REPOS = {
             "routing": {"type": "cross_attention", "enable_causal_mask": False, "bidirectional": True},
             "version": "v0.3.2"
         },
-        "repo": "AbstractPhil/t5-flan-base-vit-l-14-dual-stream-adapter",
         "shunts_available": {
             "shunt_type_name": "DualStreamAdapter-L",
             "config_file_name": "config.json",
