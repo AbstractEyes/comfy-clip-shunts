@@ -16,4 +16,16 @@ class AdapterPipe:
     def forward(self, input1, input2):
         ...
 
+class EncoderPipe(AdapterPipe):
+    def forward(self, input1, input2):
+        for adapter in self.adapters:
+            input1, input2 = adapter(input1, input2)
+        return input1, input2
+
+
+class ConditioningPipe(AdapterPipe):
+    def forward(self, input1, input2):
+        for adapter in self.adapters:
+            input1, input2 = adapter(input1, input2)
+        return input1, input2
 

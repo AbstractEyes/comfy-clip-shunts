@@ -214,6 +214,7 @@ class ModelManager:
             tokenizer = AutoTokenizer.from_pretrained(
                 model_name_or_path,
                 config=config,
+                use_special_tokens=True,  # Ensure special tokens are used
                 trust_remote_code=trust_remote_code if trust_remote_code is not None else TRUST_REMOTE_CODE  # Use the global flag for remote code execution
             )
             model = AutoModel.from_pretrained(

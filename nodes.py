@@ -16,7 +16,6 @@ from .model_manager import get_model_manager
 from .configs import MODEL_CONFIGS
 
 
-
 class EncoderLoader:
     """
     Loads T5 or BERT encoder model and prepares tokenized context window.
@@ -266,8 +265,8 @@ class LoadAdapterShunt:
             }
         }
 
-    RETURN_TYPES = ("ADAPTER",)
-    RETURN_NAMES = ("shunt_adapter",)
+    RETURN_TYPES = ("ADAPTER_PIPE",)
+    RETURN_NAMES = ("adapter_pipe",)
     FUNCTION = "load_adapter"
     CATEGORY = "adapter/shunt"
 
@@ -317,8 +316,62 @@ class LoadAdapterShunt:
         }],)
 
 
+class ShuntConfig:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "strength": ("FLOAT", {"default": 1.5, "min": -50.0, "max": 50.0, "step": 0.1}),
+                "delta_mean": ("FLOAT", {"default": 0.5, "min": -10.0, "max": 10.0, "step": 0.1}),
+                "delta_scale": ("FLOAT", {"default": 1.0, "min": -15.0, "max": 15.0, "step": 0.1}),
+                "log_sigma": ("FLOAT", {"default": 0.5, "min": -10.0, "max": 10.0, "step": 0.1}),
+                "sigma_scale": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 15.0, "step": 0.1}),
+                "gate_probability": ("FLOAT", {"default": 0.27, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "g_pred": ("FLOAT", {"default": 2.0, "min": -10.0, "max": 10.0}),
+                "gpred_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 20.0, "step": 0.01}),
+                "noise_injection": ("FLOAT", {"default": 0.00, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "use_anchor": ("BOOLEAN", {"default": True}),
+            },
+        }
+
+    RETURN_TYPES = ("ADAPTER_CONFIG",)
+    RETURN_NAMES = ("config",)
+    FUNCTION = "get_config"
+    CATEGORY = "adapter/shunt"
+    DEPRECATED = False
+    def get_config(self, strength, delta_mean, delta_scale, log_sigma,
+                     sigma_scale, gate_probability, g_pred, gpred_scale,
+                        noise_injection, use_anchor):
+        """Return a configuration dictionary for shunt adapters."""
+        config = {
+            "strength": strength,
+            "delta_mean": delta_mean,
+            "delta_scale": delta_scale,
+            "log_sigma": log_sigma,
+            "sigma_scale": sigma_scale,
+            "gate_probability": gate_probability,
+            "g_pred": g_pred,
+            "gpred_scale": gpred_scale,
+            "noise_injection": noise_injection,
+            "use_anchor": use_anchor
+        }
+        return ([{
+            "config": config,
+            "config_id": "shunt_config",
+            "description": "Configuration for shunt adapters",
+            "version": 1.0
+        }],)
+
+
+
+class ShuntSampler:
+    # meant to house the sampling logic for shunt adapters
+    # default scheduler and sampler logic is used if none is provided
+    pass
+
+
 class ShuntConditioning:
-    """Apply adapter to conditioning with full feature parity to Gradio app"""
+    """Apply adapter to conditioning"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -326,15 +379,15 @@ class ShuntConditioning:
             "required": {
                 "conditioning": ("CONDITIONING", {}),
                 "encoder_pipe": ("ENCODER_PIPE", {}),
-                "adapter": ("ADAPTER", {}),
+                "adapter_pipe": ("ADAPTER_PIPE", {}),
                 "strength": ("FLOAT", {"default": 1.5, "min": -50.0, "max": 50.0, "step": 0.1}),
                 "delta_mean": ("FLOAT", {"default": 0.5, "min": -10.0, "max": 10.0, "step": 0.1}),
                 "delta_scale": ("FLOAT", {"default": 1.0, "min": -15.0, "max": 15.0, "step": 0.1}),
                 "log_sigma": ("FLOAT", {"default": 0.5, "min": -10.0, "max": 10.0, "step": 0.1}),
                 "sigma_scale": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 15.0, "step": 0.1}),
                 "gate_probability": ("FLOAT", {"default": 0.27, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "g_pred": ("FLOAT", {"default": 5.0, "min": -10.0, "max": 10.0}),
-                "gpred_scale": ("FLOAT", {"default": 3.0, "min": 0.0, "max": 20.0, "step": 0.01}),
+                "g_pred": ("FLOAT", {"default": 2.0, "min": -10.0, "max": 10.0}),
+                "gpred_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 20.0, "step": 0.01}),
                 "noise_injection": ("FLOAT", {"default": 0.00, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "use_anchor": ("BOOLEAN", {"default": True}),
             }
@@ -345,12 +398,12 @@ class ShuntConditioning:
     FUNCTION = "adapt_conditioning"
     CATEGORY = "adapter/shunt"
 
-    def adapt_conditioning(self, conditioning, encoder_pipe, adapter, strength,
+    def adapt_conditioning(self, conditioning, encoder_pipe, adapter_pipe, strength,
                            delta_mean, delta_scale, log_sigma, sigma_scale,
                            gate_probability, g_pred, gpred_scale, noise_injection,
                            use_anchor):
 
-        logger.info(f"Adapting conditioning with {len(adapter)} adapters")
+        logger.info(f"Adapting conditioning with {len(adapter_pipe)} adapters")
 
         device = torch.device(
             encoder_pipe.get("config", {}).get("device", "cpu" if not torch.cuda.is_available() else "cuda"))
@@ -415,7 +468,7 @@ class ShuntConditioning:
             modified_ranges = []
 
             # Apply each adapter
-            for adapter_idx, adapter_info in enumerate(adapter):
+            for adapter_idx, adapter_info in enumerate(adapter_pipe):
                 adapter_model = adapter_info["adapter"].to(device)
                 adapter_config = adapter_info["config"]
 
@@ -545,13 +598,13 @@ class StackShuntAdapters:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "adapter_1": ("ADAPTER", {}),
-                "adapter_2": ("ADAPTER", {}),
+                "adapter_1": ("ADAPTER_PIPE", {}),
+                "adapter_2": ("ADAPTER_PIPE", {}),
             }
         }
 
     RETURN_NAMES = ("adapters",)
-    RETURN_TYPES = ("ADAPTER",)
+    RETURN_TYPES = ("ADAPTER_PIPE",)
     FUNCTION = "stack_adapters"
     CATEGORY = "adapter/shunt"
 
@@ -646,7 +699,7 @@ class ShuntConditioningAdvanced:
             "required": {
                 "conditioning": ("CONDITIONING", {}),
                 "encoder_pipe": ("ENCODER_PIPE", {}),
-                "adapter": ("ADAPTER", {}),
+                "adapter_pipe": ("ADAPTER_PIPE", {}),
                 "strength": ("FLOAT", {"default": 1.0, "min": -50.0, "max": 50.0, "step": 0.1}),
                 "delta_mean": ("FLOAT", {"default": 0.0, "min": -10.0, "max": 10.0, "step": 0.1}),
                 "log_sigma": ("FLOAT", {"default": 0.0, "min": -10.0, "max": 10.0, "step": 0.1}),
@@ -664,7 +717,7 @@ class ShuntConditioningAdvanced:
     FUNCTION = "adapt_conditioning"
     CATEGORY = "adapter/advanced"
 
-    def adapt_conditioning(self, conditioning, encoder_pipe, adapter, strength,
+    def adapt_conditioning(self, conditioning, encoder_pipe, adapter_pipe, strength,
                            delta_mean, log_sigma, gate_probability, g_pred_scale,
                            noise_injection, use_anchor, timestep_start, timestep_end):
 
@@ -687,7 +740,7 @@ class ShuntConditioningAdvanced:
             total_dim = cond_tensor.size(-1)
 
             # Apply each adapter
-            for adapter_info in adapter:
+            for adapter_info in adapter_pipe:
                 adapter_model = adapter_info["adapter"].to(device)
                 adapter_config = adapter_info["config"]
 
@@ -764,7 +817,7 @@ class ShuntScheduler:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "adapter": ("ADAPTER", {}),
+                "adapter_pipe": ("ADAPTER_PIPE", {}),
                 "schedule_type": (["constant", "linear", "cosine", "exponential"], {}),
                 "start_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.1}),
                 "end_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.1}),
@@ -773,16 +826,16 @@ class ShuntScheduler:
             }
         }
 
-    RETURN_TYPES = ("ADAPTER",)
+    RETURN_TYPES = ("ADAPTER_PIPE",)
     RETURN_NAMES = ("scheduled_adapter",)
     FUNCTION = "schedule"
     CATEGORY = "adapter/scheduling"
 
-    def schedule(self, adapter, schedule_type, start_strength, end_strength,
+    def schedule(self, adapter_pipe, schedule_type, start_strength, end_strength,
                  timestep_start, timestep_end):
         scheduled_adapters = []
 
-        for adapter_info in adapter:
+        for adapter_info in adapter_pipe:
             scheduled_info = adapter_info.copy()
             scheduled_info.update({
                 "timestep_start": timestep_start,
@@ -874,30 +927,30 @@ class MergeShunts:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "adapter_1": ("ADAPTER", {}),
-                "adapter_2": ("ADAPTER", {}),
+                "adapter_pipe_1": ("ADAPTER_PIPE", {}),
+                "adapter_pipe_2": ("ADAPTER_PIPE", {}),
                 "weight_1": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.1}),
                 "weight_2": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.1}),
                 "merge_type": (["weighted_sum", "max", "min", "multiply"], {}),
             }
         }
 
-    RETURN_TYPES = ("ADAPTER",)
-    RETURN_NAMES = ("merged_adapter",)
+    RETURN_TYPES = ("ADAPTER_PIPE",)
+    RETURN_NAMES = ("merged_adapter_pipes",)
     FUNCTION = "merge"
     CATEGORY = "adapter/advanced"
 
-    def merge(self, adapter_1, adapter_2, weight_1, weight_2, merge_type):
+    def merge(self, adapter_pipe_1, adapter_pipe_2, weight_1, weight_2, merge_type):
         # This would require modifying the adapter models themselves
         # For now, just return a list with both adapters and adjusted weights
         merged = []
 
-        for a in adapter_1:
+        for a in adapter_pipe_1:
             a_copy = a.copy()
             a_copy["merge_weight"] = weight_1
             merged.append(a_copy)
 
-        for a in adapter_2:
+        for a in adapter_pipe_2:
             a_copy = a.copy()
             a_copy["merge_weight"] = weight_2
             merged.append(a_copy)
