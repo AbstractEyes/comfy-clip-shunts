@@ -36,10 +36,10 @@ class EncoderLoader:
                     "multiline": True
                 }),
                 "use_context_window": ("BOOLEAN", {"default": True}),
-                "context_window_size": ("INT", {"default": 1024, "min": 128, "max": 4096}),
+                "context_window_size": ("INT", {"default": 1024, "min": 77, "max": 8192}),
                 "sliding_window_size": ("INT", {"default": 77, "min": 1, "max": 2048}),
                 "sliding_window_stride": ("INT", {"default": 33, "min": 1, "max": 2048}),
-                "max_length": ("INT", {"default": 512, "min": 1, "max": 2048}),
+                "max_length": ("INT", {"default": 512, "min": 1, "max": 8192}),
                 "folding": ([
                     "zeus", "helios", "surge", "surge-fold", "fold", "interpolate",
                     "collapse", "zipper", "concat-flatten", "cascade", "ripple"
@@ -385,12 +385,16 @@ class ShuntConditioning:
                 "delta_mean": ("FLOAT", {"default": 0.5, "min": -10.0, "max": 10.0, "step": 0.1}),
                 "delta_scale": ("FLOAT", {"default": 1.0, "min": -15.0, "max": 15.0, "step": 0.1}),
                 "log_sigma": ("FLOAT", {"default": 0.5, "min": -10.0, "max": 10.0, "step": 0.1}),
-                "sigma_scale": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 15.0, "step": 0.1}),
+                "sigma_scale": ("FLOAT", {"default": 0.1, "min": -15.0, "max": 15.0, "step": 0.1}),
                 "gate_probability": ("FLOAT", {"default": 0.27, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "g_pred": ("FLOAT", {"default": 2.0, "min": -10.0, "max": 10.0}),
-                "gpred_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 20.0, "step": 0.01}),
+                "g_pred": ("FLOAT", {"default": 7.5, "min": -100.0, "max": 100.0, "step": 0.01}),
+                "gpred_scale": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step": 0.01}),
                 "noise_injection": ("FLOAT", {"default": 0.00, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "use_anchor": ("BOOLEAN", {"default": True}),
+                "normalized_pool": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Normalize and pool adapter outputs instead of accumulating them sequentially"
+                }),
             }
         }
 
@@ -402,9 +406,9 @@ class ShuntConditioning:
     def adapt_conditioning(self, conditioning, encoder_pipe, adapter_pipe, strength,
                            delta_mean, delta_scale, log_sigma, sigma_scale,
                            gate_probability, g_pred, gpred_scale, noise_injection,
-                           use_anchor):
+                           use_anchor, normalized_pool):
 
-        logger.info(f"Adapting conditioning with {len(adapter_pipe)} adapters")
+        logger.info(f"Adapting conditioning with {len(adapter_pipe)} adapters (normalized_pool={normalized_pool})")
 
         device = torch.device(
             encoder_pipe.get("config", {}).get("device", "cpu" if not torch.cuda.is_available() else "cuda"))
@@ -457,6 +461,7 @@ class ShuntConditioning:
 
         # Statistics collection
         all_stats = []
+        modifications_tracker = {'clip_l': [], 'clip_g': []}
 
         # Process conditioning
         adapted_conditioning = []
@@ -464,6 +469,10 @@ class ShuntConditioning:
             cond_tensor = cond_tensor.clone().to(device)
 
             logger.info(f"Processing conditioning {cond_idx}: shape {cond_tensor.shape}")
+
+            # For normalized pooling, collect all modifications
+            if normalized_pool:
+                modifications = {'clip_l': [], 'clip_g': []}
 
             # Track which parts of the conditioning have been modified
             modified_ranges = []
@@ -511,67 +520,158 @@ class ShuntConditioning:
                     else:
                         raise ValueError(f"Unexpected adapter output format: {type(outputs)}")
 
-                    # Scale delta values (MISSING IN ORIGINAL)
+                    # Scale delta values
                     delta = delta_mean_adapter * delta_scale
 
                     # Apply delta mean offset
                     delta = delta + delta_mean
 
-                    # Apply g_pred scaling to gate (MISSING IN ORIGINAL)
+                    # Apply g_pred scaling to gate
                     gate = gate_adapter * g_pred_out * gpred_scale
 
-                    # Apply sigmoid and gate probability (SIGMOID MISSING IN ORIGINAL)
+                    # Apply sigmoid and gate probability
                     gate_scaled = torch.sigmoid(gate) * gate_probability
 
-                    # Compute final delta with strength and gate
-                    delta_final = delta * strength * gate_scaled
-
                     # Resize if needed
-                    if delta_final.shape[1] != clip_slice.shape[1]:
-                        logger.info(f"Resizing delta from {delta_final.shape} to match slice {clip_slice.shape}")
-                        delta_final = torch.nn.functional.interpolate(
-                            delta_final.transpose(1, 2),
+                    if delta.shape[1] != clip_slice.shape[1]:
+                        logger.info(f"Resizing delta from {delta.shape} to match slice {clip_slice.shape}")
+                        delta = torch.nn.functional.interpolate(
+                            delta.transpose(1, 2),
                             size=clip_slice.size(1),
                             mode="nearest"
                         ).transpose(1, 2)
 
-                    # Apply delta to create modified clip
-                    clip_modified = clip_slice.float() + delta_final
+                    if anchor.shape[1] != clip_slice.shape[1]:
+                        anchor = torch.nn.functional.interpolate(
+                            anchor.transpose(1, 2),
+                            size=clip_slice.size(1),
+                            mode="nearest"
+                        ).transpose(1, 2)
 
-                    # Apply sigma-based noise if specified (MISSING IN ORIGINAL)
-                    if sigma_scale > 0:
-                        sigma = torch.exp(log_sigma_adapter * sigma_scale)
-                        clip_modified += torch.randn_like(clip_modified) * sigma
+                    if normalized_pool:
+                        # Collect modifications for later pooling
+                        adapter_weight = adapter_info.get("merge_weight", 1.0)
+                        modifications[adapter_type].append({
+                            'delta': delta,
+                            'gate': gate_scaled,
+                            'anchor': anchor,
+                            'weight': adapter_weight,
+                            'sigma': torch.exp(log_sigma_adapter * sigma_scale) if sigma_scale > 0 else None,
+                            'g_pred': g_pred_out,
+                            'tau': tau
+                        })
+                        modifications_tracker[adapter_type].append({
+                            'gate_mean': float(gate_scaled.mean().item()),
+                            'delta_mag': float(delta.abs().mean().item()),
+                            'weight': adapter_weight
+                        })
+                    else:
+                        # Compute final delta with strength and gate
+                        delta_final = delta * strength * gate_scaled
 
-                    # Apply anchor mixing if enabled (MISSING IN ORIGINAL)
-                    if use_anchor:
-                        clip_modified = clip_modified * (1 - gate_scaled) + anchor * gate_scaled
+                        # Apply delta to create modified clip
+                        clip_modified = clip_slice.float() + delta_final
 
-                    # Add additional noise if specified (MISSING IN ORIGINAL)
-                    if noise_injection > 0:
-                        clip_modified += torch.randn_like(clip_modified) * noise_injection
+                        # Apply sigma-based noise if specified
+                        if sigma_scale > 0:
+                            sigma = torch.exp(log_sigma_adapter * sigma_scale)
+                            clip_modified += torch.randn_like(clip_modified) * sigma
 
-                    # Apply modified slice back to conditioning
-                    cond_tensor[:, :, slice_start:slice_end] = clip_modified.type_as(cond_tensor)
+                        # Apply anchor mixing if enabled
+                        if use_anchor:
+                            # Correct implementation: blend between original and anchor, then add delta
+                            clip_modified = clip_slice * (1 - gate_scaled) + anchor * gate_scaled + delta_final
 
-                    modified_ranges.append((slice_start, slice_end, adapter_type))
+                        # Add additional noise if specified
+                        if noise_injection > 0:
+                            clip_modified += torch.randn_like(clip_modified) * noise_injection
 
-                    # Collect statistics (MISSING IN ORIGINAL)
-                    stats = {
-                        "adapter_type": adapter_type,
-                        "g_pred": float(g_pred_out.mean().item() if hasattr(g_pred_out, 'mean') else g_pred_out),
-                        "tau": float(tau.mean().item() if hasattr(tau, 'mean') else tau),
-                        "gate_mean": float(gate_scaled.mean().item()),
-                        "delta_mean": float(delta_final.mean().item()),
-                        "delta_std": float(delta_final.std().item())
-                    }
-                    all_stats.append(stats)
+                        # Apply modified slice back to conditioning
+                        cond_tensor[:, :, slice_start:slice_end] = clip_modified.type_as(cond_tensor)
+
+                        modified_ranges.append((slice_start, slice_end, adapter_type))
+
+                        # Collect statistics
+                        stats = {
+                            "adapter_type": adapter_type,
+                            "g_pred": float(g_pred_out.mean().item() if hasattr(g_pred_out, 'mean') else g_pred_out),
+                            "tau": float(tau.mean().item() if hasattr(tau, 'mean') else tau),
+                            "gate_mean": float(gate_scaled.mean().item()),
+                            "delta_mean": float(delta_final.mean().item()),
+                            "delta_std": float(delta_final.std().item())
+                        }
+                        all_stats.append(stats)
 
                     logger.info(f"Successfully applied {adapter_type} adapter")
 
                 except Exception as e:
                     logger.error(f"Error applying adapter {adapter_idx}: {e}")
                     continue
+
+            # Apply normalized pooling if enabled
+            if normalized_pool:
+                for adapter_type, mods in modifications.items():
+                    if not mods:
+                        continue
+
+                    # Determine slice range
+                    if adapter_type == 'clip_l':
+                        slice_start, slice_end = 0, 768
+                    else:  # clip_g
+                        slice_start, slice_end = 768, min(2048, total_dim)
+
+                    clip_slice = cond_tensor[:, :, slice_start:slice_end].float()
+
+                    # Compute pooled modifications
+                    if use_anchor:
+                        # Weighted average of anchors
+                        total_weight = sum(m['weight'] * m['gate'].mean() for m in mods)
+                        if total_weight > 0:
+                            pooled_anchor = sum(
+                                m['anchor'] * m['gate'] * m['weight'] / total_weight
+                                for m in mods
+                            )
+                            # Compute average gate strength
+                            avg_gate = sum(m['gate'] * m['weight'] for m in mods) / len(mods)
+                            # Blend toward pooled anchor
+                            clip_modified = clip_slice * (1 - avg_gate) + pooled_anchor * avg_gate
+                        else:
+                            clip_modified = clip_slice
+                    else:
+                        clip_modified = clip_slice
+
+                    # Pool deltas with normalization
+                    if len(mods) > 0:
+                        # Average deltas weighted by their gates and adapter weights
+                        pooled_delta = torch.zeros_like(clip_slice)
+                        total_contribution = 0
+
+                        for m in mods:
+                            contribution = m['gate'] * m['weight']
+                            pooled_delta += m['delta'] * contribution
+                            total_contribution += contribution.mean()
+
+                        # Normalize by total contribution
+                        if total_contribution > 0:
+                            pooled_delta = pooled_delta / len(mods)  # Average instead of sum
+                            pooled_delta = pooled_delta * strength
+                            clip_modified = clip_modified + pooled_delta
+
+                    # Apply pooled noise if any adapter requested it
+                    if sigma_scale > 0:
+                        # RMS pooling of sigmas
+                        sigma_values = [m['sigma'] for m in mods if m['sigma'] is not None]
+                        if sigma_values:
+                            pooled_sigma = torch.sqrt(sum(s ** 2 for s in sigma_values) / len(sigma_values))
+                            clip_modified += torch.randn_like(clip_modified) * pooled_sigma
+
+                    # Apply final noise injection
+                    if noise_injection > 0:
+                        clip_modified += torch.randn_like(clip_modified) * noise_injection
+
+                    # Update conditioning
+                    cond_tensor[:, :, slice_start:slice_end] = clip_modified.type_as(cond_tensor)
+                    modified_ranges.append((slice_start, slice_end, adapter_type))
 
             # Log what was modified
             if modified_ranges:
@@ -585,13 +685,60 @@ class ShuntConditioning:
             raise RuntimeError("No conditioning was successfully adapted")
 
         # Format statistics string
-        stats_str = "Adapter Statistics:\n"
-        for stat in all_stats:
-            stats_str += f"{stat['adapter_type']}: g_pred={stat['g_pred']:.3f}, τ={stat['tau']:.3f}, "
-            stats_str += f"gate_mean={stat['gate_mean']:.3f}, delta_std={stat['delta_std']:.3f}\n"
+        if normalized_pool:
+            # Collect pooling statistics
+            stats_str = "Normalized Pooling Statistics:\n"
+            stats_str += f"Total Adapters: {len(adapter_pipe)}\n"
+
+            for adapter_type in ['clip_l', 'clip_g']:
+                mods = modifications_tracker[adapter_type]
+                if mods:
+                    stats_str += f"\n{adapter_type.upper()}:\n"
+                    stats_str += f"  Contributors: {len(mods)}\n"
+
+                    # Average gate strength across all adapters of this type
+                    avg_gate = sum(m['gate_mean'] for m in mods) / len(mods)
+                    stats_str += f"  Avg Gate Strength: {avg_gate:.3f}\n"
+
+                    # Total delta magnitude after pooling
+                    pooled_delta_mag = sum(m['delta_mag'] * m['weight'] for m in mods) / len(mods)
+                    stats_str += f"  Pooled Delta Magnitude: {pooled_delta_mag:.3f}\n"
+
+                    # Contribution variance (how different are the adapters)
+                    if len(mods) > 1:
+                        gate_values = [m['gate_mean'] for m in mods]
+                        gate_variance = np.var(gate_values)
+                        stats_str += f"  Gate Variance: {gate_variance:.4f}\n"
+
+                    # Effective strength after pooling
+                    effective_strength = pooled_delta_mag * avg_gate * strength
+                    stats_str += f"  Effective Strength: {effective_strength:.3f}\n"
+        else:
+            # Original sequential statistics
+            stats_str = "Adapter Statistics (Sequential):\n"
+            for i, stat in enumerate(all_stats):
+                stats_str += f"\nAdapter {i} ({stat['adapter_type']}):\n"
+                stats_str += f"  g_pred: {stat['g_pred']:.3f}\n"
+                stats_str += f"  τ: {stat['tau']:.3f}\n"
+                stats_str += f"  gate_mean: {stat['gate_mean']:.3f}\n"
+                stats_str += f"  delta_mean: {stat['delta_mean']:.3f}\n"
+                stats_str += f"  delta_std: {stat['delta_std']:.3f}\n"
+
+        # Add overall modification statistics
+        if adapted_conditioning and conditioning:
+            # Compare original vs adapted
+            orig_cond = conditioning[0][0].to(device)
+            adapt_cond = adapted_conditioning[0][0].to(device)
+
+            total_change = (adapt_cond - orig_cond).abs().mean().item()
+            max_change = (adapt_cond - orig_cond).abs().max().item()
+
+            stats_str += f"\nOverall Modification:\n"
+            stats_str += f"  Mean Change: {total_change:.6f}\n"
+            stats_str += f"  Max Change: {max_change:.6f}\n"
+            stats_str += f"  Modified Tokens: {((adapt_cond - orig_cond).abs() > 1e-6).float().mean().item() * 100:.1f}%\n"
 
         return (adapted_conditioning, stats_str)
-
 class StackShuntAdapters:
     """Stack multiple adapters together."""
 

@@ -108,8 +108,8 @@ class TwoStreamShuntAdapter(nn.Module):
         max_guidance = self.max_guidance if config is None else config.get("max_guidance", 0.0)
         if max_guidance <= 0:
             max_guidance = self.max_guidance
-        else:
-            max_guidance = max_guidance * 10.0
+        if max_guidance <= 0:
+            max_guidance = 10
 
         t5_b   = self.proj_t5(t5_seq)
         clip_b = self.proj_clip(clip_seq)
