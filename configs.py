@@ -304,7 +304,7 @@ HARMONIC_SHUNT_REPOS = {
             }],
             "modulation_encoders": [{
                 "type": "clip_l",
-                "model": "openai/clip-vit-large-patch14",
+                "model": "AbstractPhil/clips/NAI-11-epsilon_clip_l.safetensors",
                 "hidden_size": 768
             }],
             "hidden_size": 768,  # This is the adapter's output size
