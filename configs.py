@@ -291,6 +291,48 @@ HARMONIC_SHUNT_REPOS = {
             ],
         },
     },
+    #AbstractPhil/bert-beatrix-2048-noobxl-epsilon-v11-dual-shunt-adapter_clip_g
+    "clip_g_noob": {
+        "models": ['bert-beatrix-2048', "clip_g"],
+        "repo": "AbstractPhil/bert-beatrix-2048-noobxl-epsilon-v11-dual-shunt-adapter_clip_g",
+        "config": {
+            "adapter_id": "006",
+            "name": "DualShuntAdapter",
+            "condition_encoders": [{
+                "type": "bert_beatrix",
+                "model": "AbstractPhil/bert-beatrix-2048",
+                "hidden_size": 768
+            }],
+            "modulation_encoders": [{
+                "type": "clip_g",
+                "model": "AbstractPhil/clips/NAI-11-epsilon_clip_g.safetensors",
+                "hidden_size": 1280
+            }],
+            "hidden_size": 1280,  # This is the adapter's output size
+            "bottleneck": 640, "heads": 8,
+            "max_guidance": 10.0, "tau_init": 0.1,
+            "proj_layers": 2, "layer_norm": True, "dropout": 0.0,
+            "use_dropout": False, "use_proj_stack": True, "assert_input_dims": True,
+            "routing": {"type": "cross_attention", "enable_causal_mask": False, "bidirectional": True},
+            "version": "v0.3.2"
+        },
+        "shunts_available": {
+            "shunt_type_name": "DualStreamAdapter-G",
+            "config_file_name": "config.json",
+            "shunt_list": [
+                "dual_shunt_g_noob_no_caption_e1_step_1000.safetensors",
+                "dual_shunt_g_noob_no_caption_e1_step_2000.safetensors",
+                "dual_shunt_g_noob_no_caption_e1_step_3000.safetensors",
+                "dual_shunt_g_noob_no_caption_e1_step_4000.safetensors",
+                "dual_shunt_g_noob_no_caption_e1_step_5000.safetensors",
+                "dual_shunt_g_noob_no_caption_e1_step_6000.safetensors",
+                "dual_shunt_g_noob_no_caption_e1_step_7000.safetensors",
+                "dual_shunt_g_noob_no_caption_e1_step_8000.safetensors",
+            ]
+        },
+    },
+
+
     "clip_l_noob": {
         "models": ['bert-beatrix-2048', "vit-l-14"],
         "repo": "AbstractPhil/bert-beatrix-2048-noobxl-epsilon-v11-dual-shunt-adapter",
@@ -327,6 +369,29 @@ HARMONIC_SHUNT_REPOS = {
                 "beatrix_dual_shunt_l_noob_e1_step_30000.safetensors",
                 "beatrix_dual_shunt_l_noob_e1_step_35000.safetensors",
                 "beatrix_dual_shunt_l_noob_e1_step_40000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_45000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_50000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_55000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_60000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_65000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_70000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_75000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_80000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_85000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_90000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_100000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_120000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_140000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_150000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_160000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_180000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_200000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_225000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_250000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_275000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_300000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_310000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_314000.safetensors",
             ],
         },
     }
