@@ -290,6 +290,45 @@ HARMONIC_SHUNT_REPOS = {
                 "t5-vit-l-14-dual_shunt_summarize.safetensors",
             ],
         },
+    },
+    "clip_l_noob": {
+        "models": ['bert-beatrix-2048', "vit-l-14"],
+        "repo": "AbstractPhil/bert-beatrix-2048-noobxl-epsilon-v11-dual-shunt-adapter",
+        "config": {
+            "adapter_id": "002",
+            "name": "DualShuntAdapter",
+            "condition_encoders": [{
+                "type": "bert_beatrix",
+                "model": "AbstractPhil/bert-beatrix-2048",
+                "hidden_size": 768
+            }],
+            "modulation_encoders": [{
+                "type": "clip_l",
+                "model": "openai/clip-vit-large-patch14",
+                "hidden_size": 768
+            }],
+            "hidden_size": 768,  # This is the adapter's output size
+            "bottleneck": 384, "heads": 4,
+            "max_guidance": 10.0, "tau_init": 0.1,
+            "proj_layers": 2, "layer_norm": True, "dropout": 0.0,
+            "use_dropout": False, "use_proj_stack": True, "assert_input_dims": True,
+            "routing": {"type": "cross_attention", "enable_causal_mask": False, "bidirectional": True},
+            "version": "v0.3.2"
+        },
+        "shunts_available": {
+            "shunt_type_name": "DualStreamAdapter-L",
+            "config_file_name": "config.json",
+            "shunt_list": [
+                "beatrix_dual_shunt_l_noob_e1_step_5000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_10000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_15000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_20000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_25000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_30000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_35000.safetensors",
+                "beatrix_dual_shunt_l_noob_e1_step_40000.safetensors",
+            ],
+        },
     }
 }
 
