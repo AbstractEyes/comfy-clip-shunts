@@ -12,6 +12,7 @@ from transformers import AutoModel, AutoTokenizer, AutoConfig, AutoModelForSeq2S
 
 logger = logging.getLogger(__name__)
 
+
 # -------------------------------------------------------------------------------------------------------------------- #
 # WARNING: ENABLING THIS TRUST_REMOTE_CODE FLAG WILL ALLOW EXECUTION OF ARBITRARY CODE FROM THE MODEL REPOSITORY.
 # USE WITH EXTREME CAUTION, AS IT CAN POTENTIALLY EXECUTE MALICIOUS CODE FROM UNTRUSTED SOURCES.
@@ -111,7 +112,7 @@ class ModelManager:
 
         try:
             # Import here to avoid circular imports
-            from .dual_stream_adapter_model import TwoStreamShuntAdapter
+            from .dual_stream_adapter_model import ConditionModulationShuntAdapter
 
             # Determine file location
             file_path = self._resolve_file_path(path, repo_id, filename)
@@ -120,7 +121,7 @@ class ModelManager:
             # Initialize adapter
             # if the filename ends with t5-vit-l-14-dual_shunt_booru_13_000_000.safetensors we set attention heads to 4, else we set to 12
             logger.info(f"Loading adapter {adapter_id} from {file_path}")
-            adapter = TwoStreamShuntAdapter(config=config)
+            adapter = ConditionModulationShuntAdapter(config=config)
             logger.info(f"Initialized adapter {adapter_id} with config: {config}")
             # Load weights
             state_dict = load_file(file_path)

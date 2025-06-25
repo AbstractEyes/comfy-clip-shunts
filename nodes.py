@@ -9,11 +9,10 @@ from .model_manager import get_model_manager, ModelType
 
 logger = logging.getLogger(__name__)
 
-
 import torch
 import hashlib
 from .model_manager import get_model_manager
-from .configs import MODEL_CONFIGS
+from .configs import ENCODER_CONFIGS, ShuntData, EncoderData
 
 
 class EncoderLoader:
@@ -27,7 +26,7 @@ class EncoderLoader:
         return {
             "required": {
                 "model_name": (
-                    list(MODEL_CONFIGS.keys()),
+                    list(ENCODER_CONFIGS.keys()),
                     {"default": "bert-base-uncased"}
                 ),
                 "local_path": ("STRING", {"default": ""}),
@@ -88,7 +87,7 @@ class EncoderLoader:
         device_obj = torch.device(device)
 
         # Determine source
-        model_config = MODEL_CONFIGS.get(model_name, {})
+        model_config = ENCODER_CONFIGS.get(model_name, {})
         model_type = model_config.get("type", "unknown")
         model_source = local_path or model_config.get("repo_name", model_name)
         model_id = f"{model_type}_{model_name}_{hashlib.sha1(model_source.encode()).hexdigest()[:10]}"
@@ -141,6 +140,108 @@ class EncoderLoader:
             "config": config_dict,
         },)
 
+class SimpleEncoderLoader:
+    """
+    Loads a simple encoder model and prepares tokenized context window.
+    Returns a complete CONDITIONING_PIPE config block for downstream interpolation, masking, and scheduling.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model_name": (list(ENCODER_CONFIGS.keys()), {"default": "beatrix-bert-2048"}),
+                "device": (["cpu", "cuda", "mps"], {"default": "cuda" if torch.cuda.is_available() else "cpu"}),
+                "trust_remote_code": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Allow execution of remote model code. Use only with trusted sources."
+                }),
+            }
+        }
+
+    RETURN_TYPES = ("ENCODER_PIPE",)
+    RETURN_NAMES = ("encoder_pipe",)
+    FUNCTION = "load"
+    CATEGORY = "adapter/testing"
+    DEPRECATED = False
+
+    def load(self, model_name, device, trust_remote_code):
+        """Load an encoder with defaulted configuration to allow simplistic loading process.
+            This still loads all the more advanced features from the advanced system, but it's all set to default.
+        """
+
+        model_manager = get_model_manager()
+        device_obj = torch.device(device)
+        # Determine source
+        model_config:Optional[EncoderData] = ShuntUtil.get_encoder_by_model_name(model_name)
+        if not model_config:
+            raise ValueError(f"No configuration found for model '{model_name}'.")
+
+        """
+        class EncoderData:
+            def __init__(self,
+                         name: str,
+                         file: str,
+                         repo: str,
+                         config: dict,
+                         type: str = "t5"):
+                self.name = name
+                self.file = file
+                self.repo = repo
+                self.config = config
+                self.type = type
+
+        """
+
+        # load using the model managers load_encoder_model method
+        # using the correct model archetype and paradigm we
+        model_type = model_config.type
+        model_source = model_config.repo
+        model_id = f"{model_type}_{model_name}_{hashlib.sha1(model_source.encode()).hexdigest()[:10]}"
+        result = model_manager.load_encoder_model(
+            model_type=model_type,
+            model_id=model_id,
+            model_name_or_path=model_source,
+            device=device_obj,
+            dtype=torch.float32,  # Default dtype
+            force_reload=False,
+            trust_remote_code=trust_remote_code  # Default to not trusting remote code
+        )
+        if not result:
+            raise RuntimeError(f"Failed to load encoder model: {model_name}")
+        model, tokenizer = result
+        # Build config dictionary for downstream control
+        config_dict = {
+            "model_id": model_id,
+            "model_type": model_type,
+            "model_name": model_name,
+            "source": model_source,
+            "device": str(device),
+            "trust_remote_code": False,  # Default to not trusting remote code
+            "config": {
+                # attempt to seek the config details from the model config, then default if not found
+                "max_length": model_config.config.get("max_length", 77),
+                "padding": model_config.config.get("padding", "max_length"),
+                "sliding_window_size": model_config.config.get("sliding_window_size", 77),
+                "sliding_window_stride": model_config.config.get("sliding_window_stride", 33),
+                "use_context_window": model_config.config.get("use_context_window", True),
+                "context_window_size": model_config.config.get("context_window_size", 77),
+                "folding": model_config.config.get("folding", "surge-fold"),
+                "folding_scheduler": model_config.config.get("folding_scheduler", "none"),
+                "pos_embedding": model_config.config.get("pos_embedding", "none"),
+                "min_slices": model_config.config.get("min_slices", 1),
+                "max_slices": model_config.config.get("max_slices", 10),
+                "truncate_option": model_config.config.get("truncate_option", "fold"),
+                "sliding_window": model_config.config.get("sliding_window", True),
+            }
+        }
+        return ({
+            "model": model,
+            "tokenizer": tokenizer,
+            "config": config_dict,
+        },)
+
+
 class T5LoaderTest:
     """
     Loads T5 encoder-decoder model and prepares tokenized context for adapters.
@@ -150,7 +251,7 @@ class T5LoaderTest:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model_name": (list(MODEL_CONFIGS.keys()), {"default": "google/flan-t5-base"}),
+                "model_name": (list(ENCODER_CONFIGS.keys()), {"default": "google/flan-t5-base"}),
                 "local_path": ("STRING", {"default": "", "tooltip": "Local path override. If empty, use HuggingFace."}),
                 "context_window": ("STRING", {"default": "a photo of a robot.", "multiline": True}),
                 "use_context_window": ("BOOLEAN", {"default": True}),
@@ -180,7 +281,7 @@ class T5LoaderTest:
         model_manager = get_model_manager()
 
         # Determine model source
-        model_config = MODEL_CONFIGS.get(model_name, {})
+        model_config = ENCODER_CONFIGS.get(model_name, {})
         model_source = local_path or model_config.get("repo_name", "")
 
         if not model_source:
@@ -234,6 +335,62 @@ class T5LoaderTest:
                     "model_id": model_id  # Include for tracking
                 },)
 
+class LoadShuntSimple:
+    """Load a shunt adapter with simplified model management."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "shunt_name": ("STRING", {
+                    "default": "",
+                    "tooltip": "Name of the shunt adapter to load."
+                }),
+            }
+        }
+
+    RETURN_TYPES = ("ADAPTER_PIPE",)
+    RETURN_NAMES = ("adapter_pipe",)
+    FUNCTION = "load_adapter"
+    CATEGORY = "loader/shunt"
+
+    def load_adapter(self, shunt_name):
+        """Load adapter using the model manager."""
+        model_manager = get_model_manager()
+        device_obj = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        shunt_data: Optional[ShuntData] = ShuntUtil.get_shunt_by_name(shunt_name)
+
+        if shunt_data:
+            shunt_name = shunt_data.file
+            shunt_type = shunt_data.shunt_type_name
+            adapter_id = f"shunt_{shunt_type}_{shunt_name}"
+
+            logging.info(f"Loading adapter '{shunt_name}' of type '{shunt_type}' with Name '{adapter_id}'")
+            logging.info(f"Config: {shunt_data.config}")
+
+            # Load adapter
+            adapter = model_manager.load_shunt_adapter(
+                adapter_id=adapter_id,
+                config=shunt_data.config,
+                repo_id=shunt_data.repo,
+                filename=shunt_name,
+                device=device_obj,
+                dtype=torch.float32,
+                force_reload=False
+            )
+
+            if not adapter:
+                raise RuntimeError(f"Failed to load adapter '{shunt_name}' of type '{shunt_type}'")
+
+            logger.info(f"Successfully loaded adapter: {adapter_id}")
+
+            return ([{
+                "adapter": adapter,
+                "adapter_id": adapter_id,
+                "config": shunt_data.config
+            }],)
+
 
 class LoadAdapterShunt:
     """Load a shunt adapter with improved model management."""
@@ -277,45 +434,85 @@ class LoadAdapterShunt:
         model_manager = get_model_manager()
 
         # Get configuration
-        config_entry = ShuntUtil.get_shunt_by_name(shunt_name)
-        if not config_entry:
-            raise ValueError(f"Unknown shunt type: {shunt_name}")
-        shunt_type = config_entry.get("shunt_type_name", "unknown")
-        # Create unique adapter ID
-        adapter_id = f"shunt_{shunt_type}_{shunt_name}"
+        config_entry:Optional[ShuntData] = ShuntUtil.get_shunt_by_name(shunt_name)
 
-        # Prepare loading parameters
-        device_obj = torch.device(device)
-        repo_id = config_entry.get("repo")
-        config = config_entry.get("config", {})
-        logging.info(f"Loading adapter '{shunt_name}' of type '{shunt_type}' with ID '{adapter_id}'")
-        logging.info(f"Config: {config}")
+        if not config_entry:
+            raise ValueError(f"No configuration found for shunt '{shunt_name}'.")
+        shunt_name = config_entry.file
+        shunt_type = config_entry.shunt_type_name
+        adapter_id = f"shunt_{shunt_type}_{shunt_name}"
+        logger.info(f"Loading adapter '{shunt_name}' of type '{shunt_type}' with ID '{adapter_id}'")
         # Load adapter
+        device_obj = torch.device(device)
         adapter = model_manager.load_shunt_adapter(
             adapter_id=adapter_id,
-            config=config,
-            path=adapter_path if adapter_path else None,
-            repo_id=repo_id if not adapter_path else None,
-            filename=shunt_name if not adapter_path else None,
+            config=config_entry.config,
+            repo_id=config_entry.repo,
+            filename=adapter_path or shunt_name,
             device=device_obj,
-            dtype=torch.float32,
+            dtype=torch.float32,  # Default dtype
             force_reload=False
         )
-
         if not adapter:
             raise RuntimeError(f"Failed to load adapter '{shunt_name}' of type '{shunt_type}'")
-
         logger.info(f"Successfully loaded adapter: {adapter_id}")
-
         return ([{
             "adapter": adapter,
             "adapter_id": adapter_id,
-            "config": config,
-            "timestep_start": 0.0,
-            "timestep_end": 1.0,
-            "config_overrides": None
+            "config": config_entry.config
         }],)
 
+
+class EncodeClipShunted:
+    # intercepts the non-encoded clip instead of the conditioning to prepare more complex streamlines with multiple different clips
+    # takes in encoder pipelines, clip pipelines, adapter pipelines, and text pipelines.
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "clip": ("CLIP", {}),
+                "adapter_pipe": ("ADAPTER_PIPE", {}),
+                "encoder_pipe": ("ENCODER_PIPE", {}),
+                "positive_prompt": ("STRING", {"default": "A photo of a robot.", "multiline": True}),
+                "negative_prompt": ("STRING", {"default": "watermark, greyscale, monochrome", "multiline": True}),
+            },
+            "optional": {
+                "conditioning_sampler": ("CONDITIONING_SAMPLER", {}),
+                "encoder_config": ("ENCODER_CONFIG", {}),
+                "encoder_schedule": ("ENCODER_SCHEDULE", {}),
+                "clip_config": ("CLIP_CONFIG", {}),
+                "adapter_config": ("ADAPTER_CONFIG", {}),
+                "positive_prompt_schedule": ("PROMPT_SCHEDULE", {}),
+                "negative_prompt_schedule": ("PROMPT_SCHEDULE", {}),
+            }
+        }
+
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING")
+    RETURN_NAMES = ("positive_conditionings", "negative_conditionings")
+
+    FUNCTION = "encode"
+    CATEGORY = "encode/clip_shunt"
+
+    def encode(self,
+               clip,
+               adapter_pipe,
+               encoder_pipe,
+               positive_prompt,
+               negative_prompt,
+               conditioning_sampler=None,
+               encoder_config=None,
+               encoder_schedule=None,
+               clip_config=None,
+               adapter_config=None,
+               positive_prompt_schedule=None,
+               negative_prompt_schedule=None):
+        """
+        Encode the provided prompts using the specified CLIP and adapter pipelines.
+        Returns positive and negative conditionings.
+        """
+        # stub for the encode function, requires multiple structures before application is possible.
+
+        return (None, None,)#positive_conditioning, negative_conditioning)
 
 class ShuntConfig:
     @classmethod
@@ -371,8 +568,45 @@ class ShuntSampler:
     pass
 
 
+import torch
+import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
+
+import torch
+import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
+
+import torch
+import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
+
+import torch
+import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
+
+import torch
+import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
+
+import torch
+import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 class ShuntConditioning:
-    """Apply adapter to conditioning"""
+    """Apply adapter to conditioning with fixed math and proper gate handling"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -381,19 +615,26 @@ class ShuntConditioning:
                 "conditioning": ("CONDITIONING", {}),
                 "encoder_pipe": ("ENCODER_PIPE", {}),
                 "adapter_pipe": ("ADAPTER_PIPE", {}),
-                "strength": ("FLOAT", {"default": 1.5, "min": -50.0, "max": 50.0, "step": 0.1}),
-                "delta_mean": ("FLOAT", {"default": 0.5, "min": -10.0, "max": 10.0, "step": 0.1}),
-                "delta_scale": ("FLOAT", {"default": 1.0, "min": -15.0, "max": 15.0, "step": 0.1}),
-                "log_sigma": ("FLOAT", {"default": 0.5, "min": -10.0, "max": 10.0, "step": 0.1}),
-                "sigma_scale": ("FLOAT", {"default": 0.1, "min": -15.0, "max": 15.0, "step": 0.1}),
-                "gate_probability": ("FLOAT", {"default": 0.27, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "g_pred": ("FLOAT", {"default": 7.5, "min": -100.0, "max": 100.0, "step": 0.01}),
-                "gpred_scale": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step": 0.01}),
-                "noise_injection": ("FLOAT", {"default": 0.00, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.1}),
+                "delta_mean": ("FLOAT", {"default": 0.0, "min": -2.0, "max": 2.0, "step": 0.1}),
+                "delta_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 5.0, "step": 0.1}),
+                "sigma_scale": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.1}),
+                "gate_probability": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "gate_threshold": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 0.5, "step": 0.01}),
+                "noise_injection": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 0.5, "step": 0.01}),
                 "use_anchor": ("BOOLEAN", {"default": True}),
                 "normalized_pool": ("BOOLEAN", {
                     "default": False,
                     "tooltip": "Normalize and pool adapter outputs instead of accumulating them sequentially"
+                }),
+            },
+            "optional": {
+                "guidance_scale": ("FLOAT", {
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 20.0,
+                    "step": 0.1,
+                    "tooltip": "Override adapter's guidance prediction. 0 = use adapter's prediction"
                 }),
             }
         }
@@ -404,14 +645,14 @@ class ShuntConditioning:
     CATEGORY = "adapter/shunt"
 
     def adapt_conditioning(self, conditioning, encoder_pipe, adapter_pipe, strength,
-                           delta_mean, delta_scale, log_sigma, sigma_scale,
-                           gate_probability, g_pred, gpred_scale, noise_injection,
-                           use_anchor, normalized_pool):
+                           delta_mean, delta_scale, sigma_scale,
+                           gate_probability, gate_threshold, noise_injection,
+                           use_anchor, normalized_pool, guidance_scale=0.0):
 
         logger.info(f"Adapting conditioning with {len(adapter_pipe)} adapters (normalized_pool={normalized_pool})")
 
         device = torch.device(
-            encoder_pipe.get("config", {}).get("device", "cpu" if not torch.cuda.is_available() else "cuda"))
+            encoder_pipe.get("config", {}).get("device", "cuda" if torch.cuda.is_available() else "cpu"))
 
         # Get encoder embeddings
         with torch.no_grad():
@@ -462,6 +703,7 @@ class ShuntConditioning:
         # Statistics collection
         all_stats = []
         modifications_tracker = {'clip_l': [], 'clip_g': []}
+        all_guidance_predictions = []
 
         # Process conditioning
         adapted_conditioning = []
@@ -510,33 +752,49 @@ class ShuntConditioning:
                 try:
                     # Forward pass with the sliced conditioning
                     gen_config = {
-                        "max_guidance": g_pred,
+                        "max_guidance": guidance_scale if guidance_scale > 0 else 10.0,
                     }
                     outputs = adapter_model(encoder_embeddings.float(), clip_slice.float(), config=gen_config)
 
                     # Unpack outputs
                     if isinstance(outputs, tuple) and len(outputs) == 8:
-                        anchor, delta_mean_adapter, log_sigma_adapter, _, _, tau, g_pred_out, gate_adapter = outputs
+                        anchor, delta_adapter, log_sigma_adapter, _, _, tau, g_pred_out, gate_adapter = outputs
                     else:
                         raise ValueError(f"Unexpected adapter output format: {type(outputs)}")
 
+                    # Collect guidance predictions
+                    if g_pred_out is not None:
+                        all_guidance_predictions.append(float(g_pred_out.mean().item()))
+
+                    # Note: delta_adapter already has gate multiplication from adapter forward pass
                     # Scale delta values
-                    delta = delta_mean_adapter * delta_scale
+                    delta = delta_adapter * delta_scale
 
                     # Apply delta mean offset
                     delta = delta + delta_mean
 
-                    # Apply g_pred scaling to gate
-                    gate = gate_adapter * g_pred_out * gpred_scale
+                    # Process gate - it comes from the adapter as raw values
+                    gate_scaled = gate_adapter * gate_probability
 
-                    # Apply sigmoid and gate probability
-                    gate_scaled = torch.sigmoid(gate) * gate_probability
+                    # Apply gate threshold masking
+                    gate_mask = (gate_scaled > gate_threshold).float()
+                    gate_masked = gate_scaled * gate_mask
 
                     # Resize if needed
                     if delta.shape[1] != clip_slice.shape[1]:
                         logger.info(f"Resizing delta from {delta.shape} to match slice {clip_slice.shape}")
                         delta = torch.nn.functional.interpolate(
                             delta.transpose(1, 2),
+                            size=clip_slice.size(1),
+                            mode="nearest"
+                        ).transpose(1, 2)
+                        gate_masked = torch.nn.functional.interpolate(
+                            gate_masked.transpose(1, 2),
+                            size=clip_slice.size(1),
+                            mode="nearest"
+                        ).transpose(1, 2)
+                        gate_mask = torch.nn.functional.interpolate(
+                            gate_mask.transpose(1, 2),
                             size=clip_slice.size(1),
                             mode="nearest"
                         ).transpose(1, 2)
@@ -553,38 +811,51 @@ class ShuntConditioning:
                         adapter_weight = adapter_info.get("merge_weight", 1.0)
                         modifications[adapter_type].append({
                             'delta': delta,
-                            'gate': gate_scaled,
+                            'gate': gate_masked,
+                            'gate_mask': gate_mask,
                             'anchor': anchor,
                             'weight': adapter_weight,
-                            'sigma': torch.exp(log_sigma_adapter * sigma_scale) if sigma_scale > 0 else None,
+                            'log_sigma': log_sigma_adapter,
                             'g_pred': g_pred_out,
                             'tau': tau
                         })
                         modifications_tracker[adapter_type].append({
-                            'gate_mean': float(gate_scaled.mean().item()),
+                            'gate_mean': float(gate_masked.mean().item()),
                             'delta_mag': float(delta.abs().mean().item()),
                             'weight': adapter_weight
                         })
                     else:
-                        # Compute final delta with strength and gate
-                        delta_final = delta * strength * gate_scaled
+                        # Sequential application using ConditioningShifter
+                        from .conditioning_shifter import ConditioningShifter, AdapterOutput, ShiftConfig
 
-                        # Apply delta to create modified clip
-                        clip_modified = clip_slice.float() + delta_final
+                        # Package adapter output
+                        adapter_output = AdapterOutput(
+                            anchor=anchor,
+                            delta=delta,
+                            gate=gate_masked,
+                            log_sigma=log_sigma_adapter,
+                            tau=tau,
+                            g_pred=g_pred_out
+                        )
 
-                        # Apply sigma-based noise if specified
-                        if sigma_scale > 0:
-                            sigma = torch.exp(log_sigma_adapter * sigma_scale)
-                            clip_modified += torch.randn_like(clip_modified) * sigma
+                        # Create shift config
+                        shift_config = ShiftConfig(
+                            strength=strength,
+                            delta_mean=delta_mean,
+                            delta_scale=delta_scale,
+                            sigma_scale=sigma_scale,
+                            gate_probability=gate_probability,
+                            gate_threshold=gate_threshold,
+                            noise_injection=noise_injection,
+                            use_anchor=use_anchor
+                        )
 
-                        # Apply anchor mixing if enabled
-                        if use_anchor:
-                            # Correct implementation: blend between original and anchor, then add delta
-                            clip_modified = clip_slice * (1 - gate_scaled) + anchor * gate_scaled + delta_final
-
-                        # Add additional noise if specified
-                        if noise_injection > 0:
-                            clip_modified += torch.randn_like(clip_modified) * noise_injection
+                        # Apply using shifter
+                        clip_modified = ConditioningShifter.apply_adapter_output(
+                            clip_slice,
+                            adapter_output,
+                            shift_config
+                        )
 
                         # Apply modified slice back to conditioning
                         cond_tensor[:, :, slice_start:slice_end] = clip_modified.type_as(cond_tensor)
@@ -592,13 +863,22 @@ class ShuntConditioning:
                         modified_ranges.append((slice_start, slice_end, adapter_type))
 
                         # Collect statistics
+                        with torch.no_grad():
+                            active_positions = gate_mask.sum().item()
+                            total_positions = gate_mask.numel()
+                            # Calculate delta_final for stats (same as in shifter)
+                            delta_with_scale = delta * delta_scale + delta_mean
+                            delta_final_stats = delta_with_scale * strength
+
                         stats = {
                             "adapter_type": adapter_type,
                             "g_pred": float(g_pred_out.mean().item() if hasattr(g_pred_out, 'mean') else g_pred_out),
                             "tau": float(tau.mean().item() if hasattr(tau, 'mean') else tau),
-                            "gate_mean": float(gate_scaled.mean().item()),
-                            "delta_mean": float(delta_final.mean().item()),
-                            "delta_std": float(delta_final.std().item())
+                            "gate_mean": float(gate_masked.mean().item()),
+                            "gate_threshold": gate_threshold,
+                            "active_positions": f"{active_positions}/{total_positions} ({active_positions / total_positions * 100:.1f}%)",
+                            "delta_mean": float(delta_final_stats.mean().item()),
+                            "delta_std": float(delta_final_stats.std().item())
                         }
                         all_stats.append(stats)
 
@@ -606,11 +886,15 @@ class ShuntConditioning:
 
                 except Exception as e:
                     logger.error(f"Error applying adapter {adapter_idx}: {e}")
+                    import traceback
+                    traceback.print_exc()
                     continue
 
             # Apply normalized pooling if enabled
-            if normalized_pool:
-                for adapter_type, mods in modifications.items():
+            if normalized_pool and modifications:
+                # Process each adapter type separately
+                for adapter_type in ['clip_l', 'clip_g']:
+                    mods = modifications.get(adapter_type, [])
                     if not mods:
                         continue
 
@@ -618,60 +902,76 @@ class ShuntConditioning:
                     if adapter_type == 'clip_l':
                         slice_start, slice_end = 0, 768
                     else:  # clip_g
-                        slice_start, slice_end = 768, min(2048, total_dim)
+                        slice_start, slice_end = 768, min(2048, cond_tensor.size(-1))
+
+                    # Skip if slice doesn't exist
+                    if slice_start >= cond_tensor.size(-1):
+                        continue
 
                     clip_slice = cond_tensor[:, :, slice_start:slice_end].float()
 
-                    # Compute pooled modifications
+                    logger.info(f"Pooling {len(mods)} {adapter_type} adapters")
+
+                    # Calculate total weight for normalization
+                    total_weight = sum(m['weight'] for m in mods)
+                    if total_weight == 0:
+                        total_weight = len(mods)
+
+                    # Initialize pooled result with original
+                    clip_modified = clip_slice.clone()
+
                     if use_anchor:
-                        # Weighted average of anchors
-                        total_weight = sum(m['weight'] * m['gate'].mean() for m in mods)
-                        if total_weight > 0:
-                            pooled_anchor = sum(
-                                m['anchor'] * m['gate'] * m['weight'] / total_weight
-                                for m in mods
-                            )
-                            # Compute average gate strength
-                            avg_gate = sum(m['gate'] * m['weight'] for m in mods) / len(mods)
-                            # Blend toward pooled anchor
-                            clip_modified = clip_slice * (1 - avg_gate) + pooled_anchor * avg_gate
-                        else:
-                            clip_modified = clip_slice
-                    else:
-                        clip_modified = clip_slice
+                        # Weighted average of anchors and gates
+                        pooled_anchor = torch.zeros_like(clip_slice)
+                        pooled_gate = torch.zeros_like(clip_slice[..., 0:1])  # Shape: [batch, seq, 1]
 
-                    # Pool deltas with normalization
-                    if len(mods) > 0:
-                        # Average deltas weighted by their gates and adapter weights
+                        for mod in mods:
+                            weight = mod['weight'] / total_weight
+                            pooled_anchor += mod['anchor'] * weight
+                            pooled_gate += mod['gate'] * weight
+
+                        # Apply pooled modification
                         pooled_delta = torch.zeros_like(clip_slice)
-                        total_contribution = 0
+                        for mod in mods:
+                            weight = mod['weight'] / total_weight
+                            pooled_delta += mod['delta'] * weight
 
-                        for m in mods:
-                            contribution = m['gate'] * m['weight']
-                            pooled_delta += m['delta'] * contribution
-                            total_contribution += contribution.mean()
+                        pooled_delta = pooled_delta * strength
 
-                        # Normalize by total contribution
-                        if total_contribution > 0:
-                            pooled_delta = pooled_delta / len(mods)  # Average instead of sum
-                            pooled_delta = pooled_delta * strength
-                            clip_modified = clip_modified + pooled_delta
+                        # Blend using pooled gate (broadcast gate from [B,S,1] to [B,S,D])
+                        clip_modified = clip_slice * (1 - pooled_gate) + (pooled_anchor + pooled_delta) * pooled_gate
+                    else:
+                        # Simple additive pooling
+                        pooled_delta = torch.zeros_like(clip_slice)
+                        pooled_gate = torch.zeros_like(clip_slice[..., 0:1])  # Shape: [batch, seq, 1]
 
-                    # Apply pooled noise if any adapter requested it
-                    if sigma_scale > 0:
-                        # RMS pooling of sigmas
-                        sigma_values = [m['sigma'] for m in mods if m['sigma'] is not None]
-                        if sigma_values:
-                            pooled_sigma = torch.sqrt(sum(s ** 2 for s in sigma_values) / len(sigma_values))
-                            clip_modified += torch.randn_like(clip_modified) * pooled_sigma
+                        for mod in mods:
+                            weight = mod['weight'] / total_weight
+                            pooled_delta += mod['delta'] * weight
+                            pooled_gate += mod['gate'] * weight
 
-                    # Apply final noise injection
-                    if noise_injection > 0:
+                        pooled_delta = pooled_delta * strength
+
+                        # Apply with broadcasting
+                        clip_modified = clip_slice + (pooled_delta * pooled_gate)
+
+                    # Handle noise (log_sigma has full dimensions like delta)
+                    if sigma_scale > 0 and noise_injection > 0:
+                        pooled_log_sigma = torch.zeros_like(clip_slice)
+                        for mod in mods:
+                            weight = mod['weight'] / total_weight
+                            pooled_log_sigma += mod['log_sigma'] * weight
+
+                        pooled_sigma = torch.exp(pooled_log_sigma * sigma_scale)
+                        clip_modified += torch.randn_like(clip_modified) * pooled_sigma * noise_injection
+                    elif noise_injection > 0:
                         clip_modified += torch.randn_like(clip_modified) * noise_injection
 
                     # Update conditioning
                     cond_tensor[:, :, slice_start:slice_end] = clip_modified.type_as(cond_tensor)
                     modified_ranges.append((slice_start, slice_end, adapter_type))
+
+                    logger.info(f"Pooled {adapter_type} modification applied to range [{slice_start}:{slice_end}]")
 
             # Log what was modified
             if modified_ranges:
@@ -686,7 +986,7 @@ class ShuntConditioning:
 
         # Format statistics string
         if normalized_pool:
-            # Collect pooling statistics
+            # Pooling statistics
             stats_str = "Normalized Pooling Statistics:\n"
             stats_str += f"Total Adapters: {len(adapter_pipe)}\n"
 
@@ -696,33 +996,34 @@ class ShuntConditioning:
                     stats_str += f"\n{adapter_type.upper()}:\n"
                     stats_str += f"  Contributors: {len(mods)}\n"
 
-                    # Average gate strength across all adapters of this type
+                    # Average stats
                     avg_gate = sum(m['gate_mean'] for m in mods) / len(mods)
                     stats_str += f"  Avg Gate Strength: {avg_gate:.3f}\n"
 
-                    # Total delta magnitude after pooling
                     pooled_delta_mag = sum(m['delta_mag'] * m['weight'] for m in mods) / len(mods)
                     stats_str += f"  Pooled Delta Magnitude: {pooled_delta_mag:.3f}\n"
 
-                    # Contribution variance (how different are the adapters)
-                    if len(mods) > 1:
-                        gate_values = [m['gate_mean'] for m in mods]
-                        gate_variance = np.var(gate_values)
-                        stats_str += f"  Gate Variance: {gate_variance:.4f}\n"
-
-                    # Effective strength after pooling
                     effective_strength = pooled_delta_mag * avg_gate * strength
                     stats_str += f"  Effective Strength: {effective_strength:.3f}\n"
         else:
-            # Original sequential statistics
+            # Sequential statistics
             stats_str = "Adapter Statistics (Sequential):\n"
             for i, stat in enumerate(all_stats):
                 stats_str += f"\nAdapter {i} ({stat['adapter_type']}):\n"
                 stats_str += f"  g_pred: {stat['g_pred']:.3f}\n"
                 stats_str += f"  τ: {stat['tau']:.3f}\n"
                 stats_str += f"  gate_mean: {stat['gate_mean']:.3f}\n"
+                stats_str += f"  active_positions: {stat['active_positions']}\n"
                 stats_str += f"  delta_mean: {stat['delta_mean']:.3f}\n"
                 stats_str += f"  delta_std: {stat['delta_std']:.3f}\n"
+
+        # Add guidance prediction summary
+        if all_guidance_predictions:
+            avg_guidance = np.mean(all_guidance_predictions)
+            stats_str += f"\nGuidance Predictions:\n"
+            stats_str += f"  Average: {avg_guidance:.2f}\n"
+            if guidance_scale > 0:
+                stats_str += f"  Override: {guidance_scale:.2f}\n"
 
         # Add overall modification statistics
         if adapted_conditioning and conditioning:
@@ -739,6 +1040,8 @@ class ShuntConditioning:
             stats_str += f"  Modified Tokens: {((adapt_cond - orig_cond).abs() > 1e-6).float().mean().item() * 100:.1f}%\n"
 
         return (adapted_conditioning, stats_str)
+
+
 class StackShuntAdapters:
     """Stack multiple adapters together."""
 

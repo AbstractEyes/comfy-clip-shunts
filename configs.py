@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Optional
 import logging
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_REPOS = {
@@ -27,21 +28,21 @@ DEFAULT_REPOS = {
 
 HARMONIC_SHUNT_REPOS = {
     "clip_g": {
-        "models": ["clip_g", 't5_base'],
+        "models": ['t5_base', "clip_g"],
         "repo": "AbstractPhil/t5-flan-base-vit-bigG-14-dual-stream-adapter",
         "shunts_available": {
             "shunt_type_name": "DualStreamAdapter-G",
             "config_file_name": "config.json",
             "shunt_list": [
-                "t5-flan-vit-bigG-14-dual_shunt_caption.safetensors",
-                "t5-flan-vit-bigG-14-dual_shunt_no_caption_e1.safetensors",
-                "t5-flan-vit-bigG-14-dual_shunt_no_caption_e2.safetensors",
-                "t5-flan-vit-bigG-14-dual_shunt_no_caption_e3.safetensors",
-                "t5-flan-vit-bigG-14-dual_shunt_summarize.safetensors",
-                "dual_shunt_omega_no_caption_e1_step_10000.safetensors",
-                "dual_shunt_omega_no_caption_noised_e1_step_1000.safetensors",
-                "dual_shunt_omega_no_caption_noised_e1_step_4000.safetensors",
-                "dual_shunt_omega_no_caption_noised_e1_step_10000.safetensors",
+                {"name": "flan-t5-base+clip_g:caption", "file": "t5-flan-vit-bigG-14-dual_shunt_caption.safetensors" },
+                {"name": "flan-t5-base+clip_g:noise-e1", "file": "t5-flan-vit-bigG-14-dual_shunt_no_caption_e1.safetensors" },
+                {"name": "flan-t5-base+clip_g:noise-e3", "file": "t5-flan-vit-bigG-14-dual_shunt_no_caption_e2.safetensors" },
+                {"name": "flan-t5-base+clip_g:noise-e3", "file": "t5-flan-vit-bigG-14-dual_shunt_no_caption_e3.safetensors" },
+                {"name": "flan-t5-base+clip_g:summarize", "file": "t5-flan-vit-bigG-14-dual_shunt_summarize.safetensors" },
+                {"name": "flan-t5-base+clip_g_omega32:noise-10000", "file": "dual_shunt_omega_no_caption_e1_step_10000.safetensors" },
+                {"name": "flan-t5-base+clip_g_omega32:noise-1000", "file": "dual_shunt_omega_no_caption_noised_e1_step_1000.safetensors" },
+                {"name": "flan-t5-base+clip_g_omega32:noise-4000", "file": "dual_shunt_omega_no_caption_noised_e1_step_4000.safetensors" },
+                {"name": "flan-t5-base+clip_g_omega32:noise-10000v2", "file": "dual_shunt_omega_no_caption_noised_e1_step_10000.safetensors" },
             ],
         },
         "config": {
@@ -68,33 +69,33 @@ HARMONIC_SHUNT_REPOS = {
         },
     },
     "clip_g_8h": {
-        "models": ["clip_g", 'bert_beatrix-2048'],
+        "models": ['bert_beatrix-2048', "clip_g"],
         "repo": "AbstractPhil/bert-beatrix-2048-vit-bigG-14-dual-shunt-adapter",
         "shunts_available": {
             "shunt_type_name": "DualStreamAdapter-G",
             "config_file_name": "config.json",
             "shunt_list": [
-                "dual_shunt_g_booru_no_caption_noised_e1_step_3000.safetensors",
-                "dual_shunt_g_booru_no_caption_noised_e1_step_5000.safetensors",
-                "dual_shunt_g_booru_no_caption_noised_e1_step_7000.safetensors",
-                "dual_shunt_g_booru_no_caption_noised_e1_step_10000.safetensors",
-                "dual_shunt_g_booru_no_caption_noised_e1_step_14000.safetensors",
-                "dual_shunt_g_booru_no_caption_noised_e1_step_20000.safetensors",
-                "dual_shunt_g_booru_no_caption_noised_e1_step_25000.safetensors",
-                "dual_shunt_g_booru_no_caption_noised_e1_step_30000.safetensors",
-                "dual_shunt_g_booru_no_caption_noised_e1_final.safetensors",
-                "dual_shunt_g_laion_no_caption_e1.safetensors",
-                "dual_shunt_g_laion_no_caption_e2.safetensors",
-                "dual_shunt_g_laion_no_caption_e5.safetensors",
-                "dual_shunt_g_laion_no_caption_e8.safetensors",
-                "dual_shunt_g_laion_no_caption_e10.safetensors",
-                "dual_shunt_g_laion_no_caption_e12.safetensors",
-                "dual_shunt_g_laion_no_caption_e15.safetensors",
-                "dual_shunt_g_laion_no_caption_e16.safetensors",
-                "dual_shunt_g_laion_no_caption_e17.safetensors",
-                "dual_shunt_g_laion_no_caption_e18.safetensors",
-                "dual_shunt_g_laion_no_caption_e19.safetensors",
-                "dual_shunt_g_laion_no_caption_e20.safetensors",
+                {"name": "beatrix+clip_g-laion_v1_8h:noise-e1", "file": "dual_shunt_g_laion_no_caption_e1.safetensors"},
+                {"name": "beatrix+clip_g-booru_v1_8h:noise-3000", "file": "dual_shunt_g_booru_no_caption_noised_e1_step_3000.safetensors"},
+                {"name": "beatrix+clip_g-booru_v1_8h:noise-5000", "file": "dual_shunt_g_booru_no_caption_noised_e1_step_5000.safetensors"},
+                {"name": "beatrix+clip_g-booru_v1_8h:noise-7000", "file": "dual_shunt_g_booru_no_caption_noised_e1_step_7000.safetensors"},
+                {"name": "beatrix+clip_g-booru_v1_8h:noise-10000", "file": "dual_shunt_g_booru_no_caption_noised_e1_step_10000.safetensors"},
+                {"name": "beatrix+clip_g-booru_v1_8h:noise-14000", "file": "dual_shunt_g_booru_no_caption_noised_e1_step_14000.safetensors"},
+                {"name": "beatrix+clip_g-booru_v1_8h:noise-20000", "file": "dual_shunt_g_booru_no_caption_noised_e1_step_20000.safetensors"},
+                {"name": "beatrix+clip_g-booru_v1_8h:noise-25000", "file": "dual_shunt_g_booru_no_caption_noised_e1_step_25000.safetensors"},
+                {"name": "beatrix+clip_g-booru_v1_8h:noise-30000", "file": "dual_shunt_g_booru_no_caption_noised_e1_step_30000.safetensors"},
+                {"name": "beatrix+clip_g-booru_v1_8h:noise-e1", "file": "dual_shunt_g_booru_no_caption_noised_e1_final.safetensors"},
+                {"name": "beatrix+clip_g-laion_v1_8h:noise-e2", "file": "dual_shunt_g_laion_no_caption_e2.safetensors"},
+                {"name": "beatrix+clip_g-laion_v1_8h:noise-e5", "file": "dual_shunt_g_laion_no_caption_e5.safetensors"},
+                {"name": "beatrix+clip_g-laion_v1_8h:noise-e8", "file": "dual_shunt_g_laion_no_caption_e8.safetensors"},
+                {"name": "beatrix+clip_g-laion_v1_8h:noise-e10", "file": "dual_shunt_g_laion_no_caption_e10.safetensors"},
+                {"name": "beatrix+clip_g-laion_v1_8h:noise-e12", "file": "dual_shunt_g_laion_no_caption_e12.safetensors"},
+                {"name": "beatrix+clip_g-laion_v1_8h:noise-e15", "file": "dual_shunt_g_laion_no_caption_e15.safetensors"},
+                {"name": "beatrix+clip_g-laion_v1_8h:noise-e16", "file": "dual_shunt_g_laion_no_caption_e16.safetensors"},
+                {"name": "beatrix+clip_g-laion_v1_8h:noise-e17", "file": "dual_shunt_g_laion_no_caption_e17.safetensors"},
+                {"name": "beatrix+clip_g-laion_v1_8h:noise-e18", "file": "dual_shunt_g_laion_no_caption_e18.safetensors"},
+                {"name": "beatrix+clip_g-laion_v1_8h:noise-e19", "file": "dual_shunt_g_laion_no_caption_e19.safetensors"},
+                {"name": "beatrix+clip_g-laion_v1_8h:noise-e20", "file": "dual_shunt_g_laion_no_caption_e20.safetensors"},
             ],
         },
         "config": {
@@ -122,17 +123,17 @@ HARMONIC_SHUNT_REPOS = {
     },
 #
     "clip_l_4h_bert": {
-        "models": ["clip_l", "bert-beatrix-2048"],
+        "models": ["bert-beatrix-2048", "clip_l"],
         "repo": "AbstractPhil/bert-beatrix-2048-vit-l-14-dual-shunt-adapter",
         "shunts_available": {
             "shunt_type_name": "DualStreamAdapter-L",
             "config_file_name": "config.json",
             "shunt_list": [
-                "dual_shunt_l_booru_no_caption_noised_e1_step_5000.safetensors",
-                "dual_shunt_l_booru_no_caption_noised_e1_step_10000.safetensors",
-                "dual_shunt_l_booru_no_caption_noised_e1_step_15000.safetensors",
-                "dual_shunt_l_booru_no_caption_noised_e1_step_20000.safetensors",
-                "dual_shunt_l_booru_no_caption_noised_e1_step_25000.safetensors",
+                {"name": "beatrix+clip_l-4h:noise_5000", "file": "dual_shunt_l_booru_no_caption_noised_e1_step_5000.safetensors"},
+                {"name": "beatrix+clip_l-4h:noise_10000", "file": "dual_shunt_l_booru_no_caption_noised_e1_step_10000.safetensors"},
+                {"name": "beatrix+clip_l-4h:noise_15000", "file": "dual_shunt_l_booru_no_caption_noised_e1_step_15000.safetensors"},
+                {"name": "beatrix+clip_l-4h:noise_20000", "file": "dual_shunt_l_booru_no_caption_noised_e1_step_20000.safetensors"},
+                {"name": "beatrix+clip_l-4h:noise_25000", "file": "dual_shunt_l_booru_no_caption_noised_e1_step_25000.safetensors"},
             ],
         },
         "config": {
@@ -164,8 +165,8 @@ HARMONIC_SHUNT_REPOS = {
             "shunt_type_name": "DualStreamAdapter-L",
             "config_file_name": "config.json",
             "shunt_list": [
-                "t5-vit-l-14-dual_shunt_booru_13_000_000.safetensors",
-                "t5-vit-l-14-dual_shunt_booru_51_200_000.safetensors"
+                {"name": "t5+clip_l_4h:noise_13m", "file": "t5-vit-l-14-dual_shunt_booru_13_000_000.safetensors"},
+                {"name": "t5+clip_l_4h:noise_51.2m", "file": "t5-vit-l-14-dual_shunt_booru_51_200_000.safetensors"}
             ],
         },
         "config": {
@@ -197,7 +198,7 @@ HARMONIC_SHUNT_REPOS = {
             "shunt_type_name": "HarmonicBank-x52",
             "config_file_name": "config.json",
             "shunt_list": [
-                "AbstractPhil/beatrix-x52-v0001.safetensors",
+                {"name": "beatrix-x52", "file": "AbstractPhil/beatrix-x52-v0001.safetensors"},
             ]
         },
         "config": {
@@ -285,9 +286,9 @@ HARMONIC_SHUNT_REPOS = {
             "shunt_type_name": "DualStreamAdapter-L",
             "config_file_name": "config.json",
             "shunt_list": [
-                "t5-vit-l-14-dual_shunt_caption.safetensors",
-                "t5-vit-l-14-dual_shunt_no_caption.safetensors",
-                "t5-vit-l-14-dual_shunt_summarize.safetensors",
+                {"name": "t5+clip_l_12h:caption-20m", "file": "t5-vit-l-14-dual_shunt_caption.safetensors" },
+                {"name": "t5+clip_l_12h:noise-20m", "file": "t5-vit-l-14-dual_shunt_no_caption.safetensors" },
+                {"name": "t5+clip_l_12h:summarize-20m", "file": "t5-vit-l-14-dual_shunt_summarize.safetensors" },
             ],
         },
     },
@@ -320,14 +321,14 @@ HARMONIC_SHUNT_REPOS = {
             "shunt_type_name": "DualStreamAdapter-G",
             "config_file_name": "config.json",
             "shunt_list": [
-                "dual_shunt_g_noob_no_caption_e1_step_1000.safetensors",
-                "dual_shunt_g_noob_no_caption_e1_step_2000.safetensors",
-                "dual_shunt_g_noob_no_caption_e1_step_3000.safetensors",
-                "dual_shunt_g_noob_no_caption_e1_step_4000.safetensors",
-                "dual_shunt_g_noob_no_caption_e1_step_5000.safetensors",
-                "dual_shunt_g_noob_no_caption_e1_step_6000.safetensors",
-                "dual_shunt_g_noob_no_caption_e1_step_7000.safetensors",
-                "dual_shunt_g_noob_no_caption_e1_step_8000.safetensors",
+                {"name": "beatrix+noob_g_8h:noised-1000", "file": "dual_shunt_g_noob_no_caption_e1_step_1000.safetensors"},
+                {"name": "beatrix+noob_g_8h:noised-2000", "file": "dual_shunt_g_noob_no_caption_e1_step_2000.safetensors"},
+                {"name": "beatrix+noob_g_8h:noised-3000", "file": "dual_shunt_g_noob_no_caption_e1_step_3000.safetensors"},
+                {"name": "beatrix+noob_g_8h:noised-4000", "file": "dual_shunt_g_noob_no_caption_e1_step_4000.safetensors"},
+                {"name": "beatrix+noob_g_8h:noised-5000", "file": "dual_shunt_g_noob_no_caption_e1_step_5000.safetensors"},
+                {"name": "beatrix+noob_g_8h:noised-6000", "file": "dual_shunt_g_noob_no_caption_e1_step_6000.safetensors"},
+                {"name": "beatrix+noob_g_8h:noised-7000", "file": "dual_shunt_g_noob_no_caption_e1_step_7000.safetensors"},
+                {"name": "beatrix+noob_g_8h:noised-8000", "file": "dual_shunt_g_noob_no_caption_e1_step_8000.safetensors"},
             ]
         },
     },
@@ -361,37 +362,37 @@ HARMONIC_SHUNT_REPOS = {
             "shunt_type_name": "DualStreamAdapter-L",
             "config_file_name": "config.json",
             "shunt_list": [
-                "beatrix_dual_shunt_l_noob_e1_step_5000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_10000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_15000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_20000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_25000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_30000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_35000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_40000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_45000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_50000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_55000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_60000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_65000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_70000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_75000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_80000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_85000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_90000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_100000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_120000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_140000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_150000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_160000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_180000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_200000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_225000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_250000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_275000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_300000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_310000.safetensors",
-                "beatrix_dual_shunt_l_noob_e1_step_314000.safetensors",
+                {"name": "beatrix+noob_l_4h:noise-5000", "file": "beatrix_dual_shunt_l_noob_e1_step_5000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-10000", "file": "beatrix_dual_shunt_l_noob_e1_step_10000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-15000", "file": "beatrix_dual_shunt_l_noob_e1_step_15000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-20000", "file": "beatrix_dual_shunt_l_noob_e1_step_20000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-25000", "file": "beatrix_dual_shunt_l_noob_e1_step_25000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-30000", "file": "beatrix_dual_shunt_l_noob_e1_step_30000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-35000", "file": "beatrix_dual_shunt_l_noob_e1_step_35000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-40000", "file": "beatrix_dual_shunt_l_noob_e1_step_40000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-45000", "file": "beatrix_dual_shunt_l_noob_e1_step_45000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-50000", "file": "beatrix_dual_shunt_l_noob_e1_step_50000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-55000", "file": "beatrix_dual_shunt_l_noob_e1_step_55000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-60000", "file": "beatrix_dual_shunt_l_noob_e1_step_60000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-65000", "file": "beatrix_dual_shunt_l_noob_e1_step_65000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-70000", "file": "beatrix_dual_shunt_l_noob_e1_step_70000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-75000", "file": "beatrix_dual_shunt_l_noob_e1_step_75000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-80000", "file": "beatrix_dual_shunt_l_noob_e1_step_80000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-85000", "file": "beatrix_dual_shunt_l_noob_e1_step_85000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-90000", "file": "beatrix_dual_shunt_l_noob_e1_step_90000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-100000", "file": "beatrix_dual_shunt_l_noob_e1_step_100000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-120000", "file": "beatrix_dual_shunt_l_noob_e1_step_120000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-140000", "file": "beatrix_dual_shunt_l_noob_e1_step_140000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-150000", "file": "beatrix_dual_shunt_l_noob_e1_step_150000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-160000", "file": "beatrix_dual_shunt_l_noob_e1_step_160000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-180000", "file": "beatrix_dual_shunt_l_noob_e1_step_180000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-200000", "file": "beatrix_dual_shunt_l_noob_e1_step_200000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-225000", "file": "beatrix_dual_shunt_l_noob_e1_step_225000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-250000", "file": "beatrix_dual_shunt_l_noob_e1_step_250000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-275000", "file": "beatrix_dual_shunt_l_noob_e1_step_275000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-300000", "file": "beatrix_dual_shunt_l_noob_e1_step_300000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-310000", "file": "beatrix_dual_shunt_l_noob_e1_step_310000.safetensors"},
+                {"name": "beatrix+noob_l_4h:noise-314000", "file": "beatrix_dual_shunt_l_noob_e1_step_314000.safetensors"},
             ],
         },
     }
@@ -399,9 +400,10 @@ HARMONIC_SHUNT_REPOS = {
 
 # ─── Adapter Configs ─────────────────────────────────────────────
 
-MODEL_CONFIGS = {
+ENCODER_CONFIGS = {
     "bert-beatrix-2048": {
         "repo_name": "AbstractPhil/bert-beatrix-2048",
+        "name": "bert-beatrix-2048",
         "type": "nomic_bert",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
         "use_remote_code": True,
@@ -409,6 +411,7 @@ MODEL_CONFIGS = {
     },
     "nomic-bert-2048": {
         "repo_name": "nomic-ai/nomic-bert-2048",
+        "name": "nomic-bert-2048",
         "type": "nomic_bert",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
         "use_remote_code": True,
@@ -416,33 +419,39 @@ MODEL_CONFIGS = {
     },
     "mobilebert-base-uncased": {
         "repo_name": "google/mobilebert-uncased",
+        "name": "mobilebert-base-uncased",
         "type": "mobilebert",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
         "subfolder": "",
     },
     "bert-base-uncased": {
         "repo_name": "bert-base-uncased",
+        "name": "bert-base-uncased",
         "type": "bert",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
     },
     "bert-large-uncased": {
         "repo_name": "bert-large-uncased",
+        "name": "bert-large-uncased",
         "type": "bert",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
     },
     "bert-base-cased": {
         "repo_name": "bert-base-cased",
+        "name": "bert-base-cased",
         "type": "bert",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
     },
     "t5xxl": {
         "repo_name": "google/t5-xxl-lm-adapt",
+        "name": "t5-xxl",
         "type": "t5",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
         "subfolder": "",
     },
     "t5-unchained": {
         "repo_name": "AbstractPhil/t5-unchained",
+        "name": "t5-unchained",
         "type": "t5",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
         "subfolder": "",
@@ -480,16 +489,19 @@ MODEL_CONFIGS = {
     },
     "flan-t5-base": {
         "repo_name": "google/flan-t5-base",
+        "name": "flan-t5-base",
         "type": "t5",
         "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
     },
     "t5-small": {
         "repo_name": "google-t5/t5-small",
+        "name": "t5-small",
         "type": "t5",
         "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
     },
     "t5_small_human_attentive_try2_pass3": {
         "repo_name": "AbstractPhil/t5_small_human_attentive_try2_pass3",
+        "name": "t5_small_human_attentive_try2_pass3",
         "type": "t5",
         "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
         # the necessary config is present here for posterity in case it fails to load from HuggingFace.
@@ -542,32 +554,100 @@ MODEL_CONFIGS = {
 }
 
 
-
-SHUNTS = []
+SHUNT_DATAS: list[ShuntData] = []
 """ 
     Populates the shunts list with available shunts from all the shunt dictionaries.
 """
+
+ENCODER_DATAS: list[EncoderData] = []
+
+
+class EncoderData:
+    """
+    Represents an encoder configuration with its associated properties.
+    """
+    def __init__(self,
+                 name: str,
+                 file: str,
+                 repo: str,
+                 config: dict,
+                 type: str = "t5",):
+        self.name = name
+        self.file = file
+        self.repo = repo
+        self.config = config
+        self.type = type
+
+for encoder_dict in ENCODER_CONFIGS.values():
+    if "repo_name" in encoder_dict:
+        repo_name = encoder_dict["repo_name"]
+        file_name = encoder_dict.get("file_name", "")
+        # populate the encoders list with a reference to the encoder dictionary
+        ENCODER_DATAS.append(EncoderData(
+            name=encoder_dict["name"],
+            file=file_name,
+            repo=repo_name,
+            config=encoder_dict.get("config", {}),
+            type=encoder_dict.get("type", "unknown")
+        ))
+
+class ShuntData:
+    """
+    Represents a shunt configuration with its associated properties.
+    """
+
+    def __init__(self, name: str, file: str, repo: str, config: dict, expected: list[str], modulation_encoders: list[dict], condition_encoders: list[dict], shunt_type_name: str, config_file_name: str):
+        self.name = name
+        self.file = file
+        self.repo = repo
+        self.config = config
+        self.expected = expected
+        self.modulation_encoders = modulation_encoders
+        self.condition_encoders = condition_encoders
+        self.shunt_type_name = shunt_type_name
+        self.config_file_name = config_file_name
+
 
 for shunt_dict in HARMONIC_SHUNT_REPOS.values():
     if "shunts_available" in shunt_dict:
         shunts = shunt_dict["shunts_available"]["shunt_list"]
         for shunt in shunts:
+            name, file_name = shunt.get("name"), shunt.get("file")
             # populate the shunts list with a reference to the shunt dictionary
-            SHUNTS.append({
-                "name": shunt,
-                "repo": shunt_dict["repo"],
-                "config": shunt_dict["config"],
-                "expected": shunt_dict["models"],
-                "modulation_encoders": shunt_dict["config"]["modulation_encoders"],
-                "condition_encoders": shunt_dict["config"]["condition_encoders"],
-                "shunt_type_name": shunt_dict["shunts_available"]["shunt_type_name"],
-                "config_file_name": shunt_dict["shunts_available"]["config_file_name"]
-            })
-
+            SHUNT_DATAS.append(ShuntData(
+                name=name,
+                file=file_name,
+                repo=shunt_dict["repo"],
+                config=shunt_dict["config"],
+                expected=shunt_dict["models"],
+                modulation_encoders=shunt_dict["config"]["modulation_encoders"],
+                condition_encoders=shunt_dict["config"]["condition_encoders"],
+                shunt_type_name=shunt_dict["shunts_available"]["shunt_type_name"],
+                config_file_name=shunt_dict["shunts_available"]["config_file_name"]
+            ))
 
 
 
 class ShuntUtil:
+
+    @staticmethod
+    def get_encoder_by_model_name(model_name: str) -> Optional[EncoderData]:
+        """
+        Returns the encoder configuration dictionary by its model name.
+        Args:
+            model_name (str): The name of the model to retrieve.
+
+        Returns:
+            Optional[EncoderData]: The encoder configuration dictionary if found, otherwise None.
+        """
+        logger.info(f"Searching for encoder with model name: {model_name}")
+        logger.info(f"Available encoders: {[encoder.name for encoder in ENCODER_DATAS]}")
+        for encoder in ENCODER_DATAS:
+            logger.info(f"Checking encoder: {encoder.name} against model name: {model_name}")
+            if encoder.name == model_name:
+                return encoder
+        logger.warning(f"Encoder '{model_name}' not found.")
+        return None
 
     @staticmethod
     def get_encoder_repos_by_shunt_name(shunt_name: str) -> list[str]:
@@ -587,28 +667,16 @@ class ShuntUtil:
                 if model in DEFAULT_REPOS:
                     prepared.append(DEFAULT_REPOS[model])
                 else:
-                    logging.warning(f"Model '{model}' not found in default repositories.")
+
+                    logger.warning(f"Model '{model}' not found in default repositories.")
             return prepared
         else:
-            logging.warning(f"Shunt '{shunt_name}' not found.")
+            logger.warning(f"Shunt '{shunt_name}' not found.")
 
         return None
 
     @staticmethod
-    def get_shunts_by_expected_model(model_name: str) -> list[dict]:
-        """
-        Returns a list of shunt configurations that match the expected model name.
-
-        Args:
-            model_name (str): The name of the model to filter shunts by.
-
-        Returns:
-            list[dict]: A list of shunt configuration dictionaries.
-        """
-        return [shunt for shunt in SHUNTS if model_name in shunt["repo"]]
-
-    @staticmethod
-    def get_shunt_by_name(name: str) -> Optional[dict]:
+    def get_shunt_by_name(name: str) -> Optional[ShuntData]:
         """
         Returns the shunt configuration dictionary by its name.
 
@@ -618,10 +686,10 @@ class ShuntUtil:
         Returns:
             Optional[dict]: The shunt configuration dictionary if found, otherwise None.
         """
-        for shunt in SHUNTS:
-            if shunt["name"] == name:
+        for shunt in SHUNT_DATAS:
+            if shunt.name == name:
                 return shunt
-        logging.warning(f"Shunt '{name}' not found.")
+        logger.warning(f"Shunt '{name}' not found.")
         return None
 
     @staticmethod
@@ -632,21 +700,4 @@ class ShuntUtil:
         Returns:
             list[str]: List of shunt names.
         """
-        return [shunt["name"] for shunt in SHUNTS]
-
-
-    @staticmethod
-    def get_shunt_config_by_name(name: str) -> Optional[dict]:
-        """
-        Returns the shunt configuration by its name.
-
-        Args:
-            name (str): The name of the shunt to retrieve.
-
-        Returns:
-            Optional[dict]: The shunt configuration dictionary if found, otherwise None.
-        """
-        shunt = ShuntUtil.get_shunt_by_name(name)
-        if shunt:
-            return shunt["config"]
-        return None
+        return [shunt.name for shunt in SHUNT_DATAS]
