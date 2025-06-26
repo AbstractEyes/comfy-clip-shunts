@@ -4,6 +4,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+
+
 DEFAULT_REPOS = {
     "clip_g": "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k",
     "vit-bigG-14": "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k",
@@ -554,6 +556,36 @@ ENCODER_CONFIGS = {
 }
 
 
+# load these shunts in groups with types
+GROUPED_SHUNTS = {
+    # these are automatically loaded by the simple shunt organizer
+    # for sdxl, they should have clip_l and clip_g
+    # for flux, they should have clip_l or t5xxl or t5-unchained
+    # for hidream, they can have clip_l, t5xxl, t5-unchained, or flan-t5-base, or llama - but llama isn't ready yet
+    "beatrix": {
+        "booru_sdxl_x2": [
+            # clip_l heavy using 4 head shunts
+            "beatrix+clip_l-4h:noise_25000",
+            "beatrix+clip_g-booru_v1_8h:noise-30000"
+        ],
+        "noob_sdxl_x2": [
+            # clip_l heavy using 4 head shunts
+            "beatrix+noob_g_8h:noised-8000",
+            "beatrix+noob_l_4h:noise-314000",
+        ],
+        "booru_": [
+        ],
+    },
+    "flan-t5-base": {
+        "booru_sdxl_12h": [
+        ]
+
+    }
+
+}
+
+
+
 SHUNT_DATAS: list[ShuntData] = []
 """ 
     Populates the shunts list with available shunts from all the shunt dictionaries.
@@ -701,3 +733,4 @@ class ShuntUtil:
             list[str]: List of shunt names.
         """
         return [shunt.name for shunt in SHUNT_DATAS]
+

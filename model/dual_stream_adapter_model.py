@@ -1,7 +1,6 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from .configs import ENCODER_CONFIGS, HARMONIC_SHUNT_REPOS
 
 

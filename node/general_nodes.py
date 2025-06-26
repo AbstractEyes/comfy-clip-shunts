@@ -2,7 +2,7 @@ import comfy
 import comfy.utils
 import importlib
 
-from .configs import ShuntUtil
+from ..model.configs import ShuntUtil
 import logging
 
 logger = logging.getLogger(__name__)

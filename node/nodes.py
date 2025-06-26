@@ -1,18 +1,12 @@
-from typing_extensions import deprecated
-
-import torch
 import logging
-from typing import Optional, Dict, Any
 
-from .configs import HARMONIC_SHUNT_REPOS, ShuntUtil
-from .model_manager import get_model_manager, ModelType
+from ..model.configs import ShuntUtil
 
 logger = logging.getLogger(__name__)
 
-import torch
 import hashlib
-from .model_manager import get_model_manager
-from .configs import ENCODER_CONFIGS, ShuntData, EncoderData
+from ..model.model_manager import get_model_manager
+from ..model.configs import ENCODER_CONFIGS, ShuntData, EncoderData
 
 
 class EncoderLoader:
@@ -568,7 +562,7 @@ class ShuntSampler:
     pass
 
 
-from .conditioning_shifter import ShiftConfig, ConditioningShifter
+from ..utils.conditioning_shifter import ShiftConfig, ConditioningShifter
 
 class ShuntConditioning:
     """Orchestrates the conditioning modification process"""
@@ -580,19 +574,19 @@ class ShuntConditioning:
                 "conditioning": ("CONDITIONING", {}),
                 "encoder_pipe": ("ENCODER_PIPE", {}),
                 "adapter_pipe": ("ADAPTER_PIPE", {}),
-                "strength": ("FLOAT", {"default": 0.5, "min": -10.0, "max": 10.0, "step": 0.1}),
-                "delta_mean": ("FLOAT", {"default": 0.3, "min": -2.0, "max": 2.0, "step": 0.1}),
-                "delta_scale": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 5.0, "step": 0.1}),
-                "sigma_scale": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 2.0, "step": 0.1}),
-                "gate_probability": ("FLOAT", {"default": 0.50, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "gate_threshold": ("FLOAT", {"default": 0.27, "min": 0.0, "max": 0.5, "step": 0.01}),
-                "noise_injection": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 0.5, "step": 0.01}),
+                "strength": ("FLOAT", {"default": 0.5, "min": -10.0, "max": 10.00, "step": 0.1}),
+                "delta_mean": ("FLOAT", {"default": 0.3, "min": -2.0, "max": 2.00, "step": 0.1}),
+                "delta_scale": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 5.00, "step": 0.1}),
+                "sigma_scale": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 2.00, "step": 0.1}),
+                "gate_probability": ("FLOAT", {"default": 0.50, "min": 0.0, "max": 1.00, "step": 0.01}),
+                "gate_threshold": ("FLOAT", {"default": 0.27, "min": 0.0, "max": 1.00, "step": 0.01}),
+                "noise_injection": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 0.99, "step": 0.01}),
                 "use_anchor": ("BOOLEAN", {"default": True}),
                 "pool_method": (["sequential", "weighted_average"], {"default": "sequential"}),
                 # Top-K parameters
                 "use_topk": ("BOOLEAN", {"default": True}),
                 "topk_percentage": ("FLOAT", {"default": 50.0, "min": 1.0, "max": 100.0, "step": 1.0}),
-                "tau_temperature": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 10.0, "step": 0.1}),
+                "tau_temperature": ("FLOAT", {"default": 5.0, "min": 0.1, "max": 10.0, "step": 0.1}),
                 "topk_mode": (["attention", "gate", "combined", "tau_softmax"], {"default": "attention"}),
             },
             "optional": {
@@ -892,9 +886,7 @@ class ListLoadedShuntModels:
         return ("\n".join(output_lines),)
 
 
-import torch
 import torch.nn.functional as F
-import numpy as np
 
 
 class ShuntConditioningAdvanced:
@@ -1076,7 +1068,6 @@ class VisualizeShuntEffect:
 
     def visualize(self, original_conditioning, adapted_conditioning, visualization_type):
         import matplotlib.pyplot as plt
-        import matplotlib.cm as cm
 
         # Get first conditioning pair
         orig_cond = original_conditioning[0][0]
@@ -1165,9 +1156,7 @@ class MergeShunts:
         return (merged,)
 
 
-import torch
-import logging
-from typing import Dict, List, Tuple, Optional
+from typing import Optional
 
 
 class SimpleShuntSetup:
@@ -1283,8 +1272,8 @@ class EasyShunt:
 
     def apply_shunt(self, conditioning, shunt_config, custom_strength=-1.0):
         """Apply shunt with minimal configuration"""
-        from .model_manager import get_model_manager
-        from .configs import HARMONIC_SHUNT_REPOS
+        from ..model.model_manager import get_model_manager
+        from ..model.configs import HARMONIC_SHUNT_REPOS
 
         manager = get_model_manager()
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -1390,11 +1379,6 @@ class EasyShunt:
 
         return (adapted_conditioning,)
 
-
-import numpy as np
-import matplotlib.pyplot as plt
-import torch
-from PIL import Image
 
 class QuickShuntPreview:
     """Preview the effect of shunting with a simple comparison"""
@@ -1542,11 +1526,6 @@ class ShuntStrengthTest:
         return (results,)
 
 
-import numpy as np
-import matplotlib.pyplot as plt
-import torch
-from PIL import Image
-
 # 2D meshgrid with visible per-pixel color
 #n, d = 77, 128
 #xv, yv = np.meshgrid(np.linspace(0, 1, d), np.linspace(0, 1, n))
@@ -1574,12 +1553,7 @@ from PIL import Image
 #print("Image saved as color_test_output.png")
 #
 
-import numpy as np
-import matplotlib.pyplot as plt
-import torch
 from PIL import Image
-import tempfile
-import os
 
 import torch
 import numpy as np

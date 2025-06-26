@@ -1,5 +1,6 @@
 #from .general_nodes import *
-from .nodes import (
+from .subject import csv_handler
+from .node.nodes import (
     # Importing all necessary nodes for the ABS Shunt Suite
     SimpleEncoderLoader,
     EncoderLoader,
@@ -21,7 +22,7 @@ from .nodes import (
     SuperiorConditioningPreview
 )
 
-from .general_nodes import (
+from .node.general_nodes import (
     ABS_PromptNode,
     ABS_ConcatPrompts,
 )
@@ -71,7 +72,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ShuntStrengthTest": "🧪 Shunt Strength Test",
     "SuperiorConditioningPreview": "🌟 Superior Conditioning Preview",
 
-    "Prompt": "📝 ABS Prompt Node",
+    "Prompt": "📝 Simple Prompt Node",
     "ConcatPrompts": "🔗 Concatenate Prompts",
 
 }

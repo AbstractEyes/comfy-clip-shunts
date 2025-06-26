@@ -1,0 +1,8 @@
+torch
+transformers
+sentencepiece
+rapidfuzz
+langdetect
+numpy
+scipy
+matplotlib
