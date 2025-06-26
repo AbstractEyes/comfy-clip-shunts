@@ -568,45 +568,10 @@ class ShuntSampler:
     pass
 
 
-import torch
-import numpy as np
-import logging
-
-logger = logging.getLogger(__name__)
-
-import torch
-import numpy as np
-import logging
-
-logger = logging.getLogger(__name__)
-
-import torch
-import numpy as np
-import logging
-
-logger = logging.getLogger(__name__)
-
-import torch
-import numpy as np
-import logging
-
-logger = logging.getLogger(__name__)
-
-import torch
-import numpy as np
-import logging
-
-logger = logging.getLogger(__name__)
-
-import torch
-import numpy as np
-import logging
-
-logger = logging.getLogger(__name__)
-
+from .conditioning_shifter import ShiftConfig, ConditioningShifter
 
 class ShuntConditioning:
-    """Apply adapter to conditioning with fixed math and proper gate handling"""
+    """Orchestrates the conditioning modification process"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -615,27 +580,23 @@ class ShuntConditioning:
                 "conditioning": ("CONDITIONING", {}),
                 "encoder_pipe": ("ENCODER_PIPE", {}),
                 "adapter_pipe": ("ADAPTER_PIPE", {}),
-                "strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.1}),
-                "delta_mean": ("FLOAT", {"default": 0.0, "min": -2.0, "max": 2.0, "step": 0.1}),
-                "delta_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 5.0, "step": 0.1}),
-                "sigma_scale": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.1}),
-                "gate_probability": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "gate_threshold": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 0.5, "step": 0.01}),
+                "strength": ("FLOAT", {"default": 0.5, "min": -10.0, "max": 10.0, "step": 0.1}),
+                "delta_mean": ("FLOAT", {"default": 0.3, "min": -2.0, "max": 2.0, "step": 0.1}),
+                "delta_scale": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 5.0, "step": 0.1}),
+                "sigma_scale": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 2.0, "step": 0.1}),
+                "gate_probability": ("FLOAT", {"default": 0.50, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "gate_threshold": ("FLOAT", {"default": 0.27, "min": 0.0, "max": 0.5, "step": 0.01}),
                 "noise_injection": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 0.5, "step": 0.01}),
                 "use_anchor": ("BOOLEAN", {"default": True}),
-                "normalized_pool": ("BOOLEAN", {
-                    "default": False,
-                    "tooltip": "Normalize and pool adapter outputs instead of accumulating them sequentially"
-                }),
+                "pool_method": (["sequential", "weighted_average"], {"default": "sequential"}),
+                # Top-K parameters
+                "use_topk": ("BOOLEAN", {"default": True}),
+                "topk_percentage": ("FLOAT", {"default": 50.0, "min": 1.0, "max": 100.0, "step": 1.0}),
+                "tau_temperature": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 10.0, "step": 0.1}),
+                "topk_mode": (["attention", "gate", "combined", "tau_softmax"], {"default": "attention"}),
             },
             "optional": {
-                "guidance_scale": ("FLOAT", {
-                    "default": 0.0,
-                    "min": 0.0,
-                    "max": 20.0,
-                    "step": 0.1,
-                    "tooltip": "Override adapter's guidance prediction. 0 = use adapter's prediction"
-                }),
+                "guidance_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 20.0, "step": 0.1}),
             }
         }
 
@@ -644,403 +605,198 @@ class ShuntConditioning:
     FUNCTION = "adapt_conditioning"
     CATEGORY = "adapter/shunt"
 
-    def adapt_conditioning(self, conditioning, encoder_pipe, adapter_pipe, strength,
-                           delta_mean, delta_scale, sigma_scale,
+    def adapt_conditioning(self, conditioning, encoder_pipe, adapter_pipe,
+                           strength, delta_mean, delta_scale, sigma_scale,
                            gate_probability, gate_threshold, noise_injection,
-                           use_anchor, normalized_pool, guidance_scale=0.0):
+                           use_anchor, pool_method, use_topk, topk_percentage,
+                           tau_temperature, topk_mode, guidance_scale=0.0):
 
-        logger.info(f"Adapting conditioning with {len(adapter_pipe)} adapters (normalized_pool={normalized_pool})")
+        logger.info(
+            f"Adapting conditioning with {len(adapter_pipe)} adapters (pool_method={pool_method}, topk={use_topk})")
 
         device = torch.device(
-            encoder_pipe.get("config", {}).get("device", "cuda" if torch.cuda.is_available() else "cpu"))
+            encoder_pipe.get("config", {}).get("device", "cuda" if torch.cuda.is_available() else "cpu")
+        )
 
-        # Get encoder embeddings
-        with torch.no_grad():
-            # Get configuration from encoder_pipe
-            config = encoder_pipe.get("config", {})
-            encoder_config = config.get("config", {})
 
-            # Get tokenizer and model
-            tokenizer = encoder_pipe.get("tokenizer")
-            model = encoder_pipe.get("model")
+        # Create unified config with top-k parameters
+        config = ShiftConfig(
+            strength=strength,
+            delta_mean=delta_mean,
+            delta_scale=delta_scale,
+            sigma_scale=sigma_scale,
+            gate_probability=gate_probability,
+            gate_threshold=gate_threshold,
+            noise_injection=noise_injection,
+            use_anchor=use_anchor,
+            pool_method=pool_method,
+            use_topk=use_topk,
+            topk_percentage=topk_percentage,
+            tau_temperature=tau_temperature,
+            topk_mode=topk_mode
+        )
 
-            # Get prompt from config
-            context_prompt = config.get("context_window", "")
+        # Get encoder embeddings (extracted to shifter)
+        encoder_embeddings = ConditioningShifter.extract_encoder_embeddings(encoder_pipe, device)
 
-            # Tokenize with proper handling
-            padding_type = encoder_config.get("padding", "max_length")
-            max_length = encoder_config.get("max_length", 512)
-
-            tokens = tokenizer(
-                context_prompt,
-                return_tensors="pt",
-                padding=padding_type if padding_type != "do_not_pad" else False,
-                truncation=True,
-                max_length=max_length
-            )
-
-            input_ids = tokens["input_ids"].to(device)
-            attention_mask = tokens["attention_mask"].to(device)
-
-            # Check model type and get embeddings accordingly
-            model_type = config.get("model_type", "")
-
-            if model_type == "t5":
-                encoder_embeddings = model.encoder(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                ).last_hidden_state
-            elif model_type in ["bert", "nomic_bert"]:
-                model_output = model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    return_dict=True
-                )
-                encoder_embeddings = model_output.last_hidden_state
-            else:
-                raise ValueError(f"Unsupported model type: {model_type}")
-
-        # Statistics collection
-        all_stats = []
-        modifications_tracker = {'clip_l': [], 'clip_g': []}
+        # Statistics tracking
         all_guidance_predictions = []
+        all_modifications = []
+        all_topk_stats = []
 
-        # Process conditioning
+        # Process each conditioning tensor
         adapted_conditioning = []
         for cond_idx, (cond_tensor, cond_meta) in enumerate(conditioning):
             cond_tensor = cond_tensor.clone().to(device)
 
-            logger.info(f"Processing conditioning {cond_idx}: shape {cond_tensor.shape}")
+            # Collect adapter outputs by type for this conditioning
+            outputs_by_type = {'clip_l': [], 'clip_g': []}
 
-            # For normalized pooling, collect all modifications
-            if normalized_pool:
-                modifications = {'clip_l': [], 'clip_g': []}
-
-            # Track which parts of the conditioning have been modified
-            modified_ranges = []
-
-            # Apply each adapter
-            for adapter_idx, adapter_info in enumerate(adapter_pipe):
-                adapter_model = adapter_info["adapter"].to(device)
-                adapter_config = adapter_info["config"]
-
-                # Determine adapter type and slice conditioning accordingly
-                clip_dim = adapter_config.get("hidden_size", 768)
-                total_dim = cond_tensor.size(-1)
-
-                if clip_dim == 768:  # CLIP-L
-                    clip_slice = cond_tensor[:, :, :768]
-                    slice_start = 0
-                    slice_end = 768
-                    adapter_type = "clip_l"
-                elif clip_dim == 1280:  # CLIP-G
-                    if total_dim >= 2048:
-                        clip_slice = cond_tensor[:, :, 768:2048]
-                        slice_start = 768
-                        slice_end = 2048
-                    else:
-                        clip_slice = cond_tensor[:, :, 768:]
-                        slice_start = 768
-                        slice_end = total_dim
-                    adapter_type = "clip_g"
-                else:
-                    logger.warning(f"Unknown CLIP dimension {clip_dim}, skipping adapter")
-                    continue
-
-                logger.info(f"Applying {adapter_type} adapter to dims [{slice_start}:{slice_end}]")
-
+            # Run all adapters
+            for adapter_info in adapter_pipe:
                 try:
-                    # Forward pass with the sliced conditioning
-                    gen_config = {
-                        "max_guidance": guidance_scale if guidance_scale > 0 else 10.0,
-                    }
-                    outputs = adapter_model(encoder_embeddings.float(), clip_slice.float(), config=gen_config)
+                    adapter_model = adapter_info["adapter"].to(device)
+                    adapter_config = adapter_info["config"]
 
-                    # Unpack outputs
-                    if isinstance(outputs, tuple) and len(outputs) == 8:
-                        anchor, delta_adapter, log_sigma_adapter, _, _, tau, g_pred_out, gate_adapter = outputs
+                    # Determine slice type and range
+                    clip_dim = adapter_config.get("hidden_size", 768)
+                    total_dim = cond_tensor.size(-1)
+
+                    if clip_dim == 768:  # CLIP-L
+                        slice_start, slice_end = 0, 768
+                        adapter_type = "clip_l"
+                    elif clip_dim == 1280:  # CLIP-G
+                        slice_start = 768
+                        slice_end = min(2048, total_dim)
+                        adapter_type = "clip_g"
                     else:
-                        raise ValueError(f"Unexpected adapter output format: {type(outputs)}")
+                        logger.warning(f"Unknown CLIP dimension {clip_dim}")
+                        continue
+
+                    if slice_start >= total_dim:
+                        continue
+
+                    # Get slice and run adapter
+                    clip_slice = cond_tensor[:, :, slice_start:slice_end]
+
+                    output = ConditioningShifter.run_adapter(
+                        adapter_model, encoder_embeddings, clip_slice,
+                        guidance_scale, adapter_type, (slice_start, slice_end)
+                    )
+
+                    outputs_by_type[adapter_type].append(output)
 
                     # Collect guidance predictions
-                    if g_pred_out is not None:
-                        all_guidance_predictions.append(float(g_pred_out.mean().item()))
+                    if output.g_pred is not None:
+                        all_guidance_predictions.append(float(output.g_pred.mean().item()))
 
-                    # Note: delta_adapter already has gate multiplication from adapter forward pass
-                    # Scale delta values
-                    delta = delta_adapter * delta_scale
-
-                    # Apply delta mean offset
-                    delta = delta + delta_mean
-
-                    # Process gate - it comes from the adapter as raw values
-                    gate_scaled = gate_adapter * gate_probability
-
-                    # Apply gate threshold masking
-                    gate_mask = (gate_scaled > gate_threshold).float()
-                    gate_masked = gate_scaled * gate_mask
-
-                    # Resize if needed
-                    if delta.shape[1] != clip_slice.shape[1]:
-                        logger.info(f"Resizing delta from {delta.shape} to match slice {clip_slice.shape}")
-                        delta = torch.nn.functional.interpolate(
-                            delta.transpose(1, 2),
-                            size=clip_slice.size(1),
-                            mode="nearest"
-                        ).transpose(1, 2)
-                        gate_masked = torch.nn.functional.interpolate(
-                            gate_masked.transpose(1, 2),
-                            size=clip_slice.size(1),
-                            mode="nearest"
-                        ).transpose(1, 2)
-                        gate_mask = torch.nn.functional.interpolate(
-                            gate_mask.transpose(1, 2),
-                            size=clip_slice.size(1),
-                            mode="nearest"
-                        ).transpose(1, 2)
-
-                    if anchor.shape[1] != clip_slice.shape[1]:
-                        anchor = torch.nn.functional.interpolate(
-                            anchor.transpose(1, 2),
-                            size=clip_slice.size(1),
-                            mode="nearest"
-                        ).transpose(1, 2)
-
-                    if normalized_pool:
-                        # Collect modifications for later pooling
-                        adapter_weight = adapter_info.get("merge_weight", 1.0)
-                        modifications[adapter_type].append({
-                            'delta': delta,
-                            'gate': gate_masked,
-                            'gate_mask': gate_mask,
-                            'anchor': anchor,
-                            'weight': adapter_weight,
-                            'log_sigma': log_sigma_adapter,
-                            'g_pred': g_pred_out,
-                            'tau': tau
+                    # Collect tau statistics if using top-k
+                    if use_topk and output.tau is not None:
+                        all_topk_stats.append({
+                            'adapter_type': adapter_type,
+                            'tau_mean': float(output.tau.mean().item()),
+                            'tau_std': float(output.tau.std().item()) if output.tau.numel() > 1 else 0.0,
                         })
-                        modifications_tracker[adapter_type].append({
-                            'gate_mean': float(gate_masked.mean().item()),
-                            'delta_mag': float(delta.abs().mean().item()),
-                            'weight': adapter_weight
-                        })
-                    else:
-                        # Sequential application using ConditioningShifter
-                        from .conditioning_shifter import ConditioningShifter, AdapterOutput, ShiftConfig
-
-                        # Package adapter output
-                        adapter_output = AdapterOutput(
-                            anchor=anchor,
-                            delta=delta,
-                            gate=gate_masked,
-                            log_sigma=log_sigma_adapter,
-                            tau=tau,
-                            g_pred=g_pred_out
-                        )
-
-                        # Create shift config
-                        shift_config = ShiftConfig(
-                            strength=strength,
-                            delta_mean=delta_mean,
-                            delta_scale=delta_scale,
-                            sigma_scale=sigma_scale,
-                            gate_probability=gate_probability,
-                            gate_threshold=gate_threshold,
-                            noise_injection=noise_injection,
-                            use_anchor=use_anchor
-                        )
-
-                        # Apply using shifter
-                        clip_modified = ConditioningShifter.apply_adapter_output(
-                            clip_slice,
-                            adapter_output,
-                            shift_config
-                        )
-
-                        # Apply modified slice back to conditioning
-                        cond_tensor[:, :, slice_start:slice_end] = clip_modified.type_as(cond_tensor)
-
-                        modified_ranges.append((slice_start, slice_end, adapter_type))
-
-                        # Collect statistics
-                        with torch.no_grad():
-                            active_positions = gate_mask.sum().item()
-                            total_positions = gate_mask.numel()
-                            # Calculate delta_final for stats (same as in shifter)
-                            delta_with_scale = delta * delta_scale + delta_mean
-                            delta_final_stats = delta_with_scale * strength
-
-                        stats = {
-                            "adapter_type": adapter_type,
-                            "g_pred": float(g_pred_out.mean().item() if hasattr(g_pred_out, 'mean') else g_pred_out),
-                            "tau": float(tau.mean().item() if hasattr(tau, 'mean') else tau),
-                            "gate_mean": float(gate_masked.mean().item()),
-                            "gate_threshold": gate_threshold,
-                            "active_positions": f"{active_positions}/{total_positions} ({active_positions / total_positions * 100:.1f}%)",
-                            "delta_mean": float(delta_final_stats.mean().item()),
-                            "delta_std": float(delta_final_stats.std().item())
-                        }
-                        all_stats.append(stats)
-
-                    logger.info(f"Successfully applied {adapter_type} adapter")
 
                 except Exception as e:
-                    logger.error(f"Error applying adapter {adapter_idx}: {e}")
+                    logger.error(f"Error running adapter: {e}")
                     import traceback
                     traceback.print_exc()
                     continue
 
-            # Apply normalized pooling if enabled
-            if normalized_pool and modifications:
-                # Process each adapter type separately
-                for adapter_type in ['clip_l', 'clip_g']:
-                    mods = modifications.get(adapter_type, [])
-                    if not mods:
-                        continue
+            # Apply modifications by type
+            for adapter_type, outputs in outputs_by_type.items():
+                if not outputs:
+                    continue
 
-                    # Determine slice range
-                    if adapter_type == 'clip_l':
-                        slice_start, slice_end = 0, 768
-                    else:  # clip_g
-                        slice_start, slice_end = 768, min(2048, cond_tensor.size(-1))
+                slice_start, slice_end = outputs[0].slice_range
+                clip_slice = cond_tensor[:, :, slice_start:slice_end]
 
-                    # Skip if slice doesn't exist
-                    if slice_start >= cond_tensor.size(-1):
-                        continue
+                # Apply modifications through shifter
+                clip_modified = ConditioningShifter.apply_modifications(
+                    clip_slice, outputs, config
+                )
 
-                    clip_slice = cond_tensor[:, :, slice_start:slice_end].float()
+                # Update conditioning
+                cond_tensor[:, :, slice_start:slice_end] = clip_modified.type_as(cond_tensor)
 
-                    logger.info(f"Pooling {len(mods)} {adapter_type} adapters")
-
-                    # Calculate total weight for normalization
-                    total_weight = sum(m['weight'] for m in mods)
-                    if total_weight == 0:
-                        total_weight = len(mods)
-
-                    # Initialize pooled result with original
-                    clip_modified = clip_slice.clone()
-
-                    if use_anchor:
-                        # Weighted average of anchors and gates
-                        pooled_anchor = torch.zeros_like(clip_slice)
-                        pooled_gate = torch.zeros_like(clip_slice[..., 0:1])  # Shape: [batch, seq, 1]
-
-                        for mod in mods:
-                            weight = mod['weight'] / total_weight
-                            pooled_anchor += mod['anchor'] * weight
-                            pooled_gate += mod['gate'] * weight
-
-                        # Apply pooled modification
-                        pooled_delta = torch.zeros_like(clip_slice)
-                        for mod in mods:
-                            weight = mod['weight'] / total_weight
-                            pooled_delta += mod['delta'] * weight
-
-                        pooled_delta = pooled_delta * strength
-
-                        # Blend using pooled gate (broadcast gate from [B,S,1] to [B,S,D])
-                        clip_modified = clip_slice * (1 - pooled_gate) + (pooled_anchor + pooled_delta) * pooled_gate
-                    else:
-                        # Simple additive pooling
-                        pooled_delta = torch.zeros_like(clip_slice)
-                        pooled_gate = torch.zeros_like(clip_slice[..., 0:1])  # Shape: [batch, seq, 1]
-
-                        for mod in mods:
-                            weight = mod['weight'] / total_weight
-                            pooled_delta += mod['delta'] * weight
-                            pooled_gate += mod['gate'] * weight
-
-                        pooled_delta = pooled_delta * strength
-
-                        # Apply with broadcasting
-                        clip_modified = clip_slice + (pooled_delta * pooled_gate)
-
-                    # Handle noise (log_sigma has full dimensions like delta)
-                    if sigma_scale > 0 and noise_injection > 0:
-                        pooled_log_sigma = torch.zeros_like(clip_slice)
-                        for mod in mods:
-                            weight = mod['weight'] / total_weight
-                            pooled_log_sigma += mod['log_sigma'] * weight
-
-                        pooled_sigma = torch.exp(pooled_log_sigma * sigma_scale)
-                        clip_modified += torch.randn_like(clip_modified) * pooled_sigma * noise_injection
-                    elif noise_injection > 0:
-                        clip_modified += torch.randn_like(clip_modified) * noise_injection
-
-                    # Update conditioning
-                    cond_tensor[:, :, slice_start:slice_end] = clip_modified.type_as(cond_tensor)
-                    modified_ranges.append((slice_start, slice_end, adapter_type))
-
-                    logger.info(f"Pooled {adapter_type} modification applied to range [{slice_start}:{slice_end}]")
-
-            # Log what was modified
-            if modified_ranges:
-                logger.info(f"Modified conditioning ranges: {modified_ranges}")
-            else:
-                logger.warning("No adapters were successfully applied to this conditioning")
+                # Track modifications
+                all_modifications.append({
+                    'adapter_type': adapter_type,
+                    'num_adapters': len(outputs),
+                    'slice_range': (slice_start, slice_end),
+                    'mean_change': float((clip_modified - clip_slice).abs().mean().item())
+                })
 
             adapted_conditioning.append([cond_tensor, cond_meta])
 
         if not adapted_conditioning:
             raise RuntimeError("No conditioning was successfully adapted")
 
-        # Format statistics string
-        if normalized_pool:
-            # Pooling statistics
-            stats_str = "Normalized Pooling Statistics:\n"
-            stats_str += f"Total Adapters: {len(adapter_pipe)}\n"
-
-            for adapter_type in ['clip_l', 'clip_g']:
-                mods = modifications_tracker[adapter_type]
-                if mods:
-                    stats_str += f"\n{adapter_type.upper()}:\n"
-                    stats_str += f"  Contributors: {len(mods)}\n"
-
-                    # Average stats
-                    avg_gate = sum(m['gate_mean'] for m in mods) / len(mods)
-                    stats_str += f"  Avg Gate Strength: {avg_gate:.3f}\n"
-
-                    pooled_delta_mag = sum(m['delta_mag'] * m['weight'] for m in mods) / len(mods)
-                    stats_str += f"  Pooled Delta Magnitude: {pooled_delta_mag:.3f}\n"
-
-                    effective_strength = pooled_delta_mag * avg_gate * strength
-                    stats_str += f"  Effective Strength: {effective_strength:.3f}\n"
-        else:
-            # Sequential statistics
-            stats_str = "Adapter Statistics (Sequential):\n"
-            for i, stat in enumerate(all_stats):
-                stats_str += f"\nAdapter {i} ({stat['adapter_type']}):\n"
-                stats_str += f"  g_pred: {stat['g_pred']:.3f}\n"
-                stats_str += f"  τ: {stat['tau']:.3f}\n"
-                stats_str += f"  gate_mean: {stat['gate_mean']:.3f}\n"
-                stats_str += f"  active_positions: {stat['active_positions']}\n"
-                stats_str += f"  delta_mean: {stat['delta_mean']:.3f}\n"
-                stats_str += f"  delta_std: {stat['delta_std']:.3f}\n"
-
-        # Add guidance prediction summary
-        if all_guidance_predictions:
-            avg_guidance = np.mean(all_guidance_predictions)
-            stats_str += f"\nGuidance Predictions:\n"
-            stats_str += f"  Average: {avg_guidance:.2f}\n"
-            if guidance_scale > 0:
-                stats_str += f"  Override: {guidance_scale:.2f}\n"
-
-        # Add overall modification statistics
-        if adapted_conditioning and conditioning:
-            # Compare original vs adapted
-            orig_cond = conditioning[0][0].to(device)
-            adapt_cond = adapted_conditioning[0][0].to(device)
-
-            total_change = (adapt_cond - orig_cond).abs().mean().item()
-            max_change = (adapt_cond - orig_cond).abs().max().item()
-
-            stats_str += f"\nOverall Modification:\n"
-            stats_str += f"  Mean Change: {total_change:.6f}\n"
-            stats_str += f"  Max Change: {max_change:.6f}\n"
-            stats_str += f"  Modified Tokens: {((adapt_cond - orig_cond).abs() > 1e-6).float().mean().item() * 100:.1f}%\n"
+        # Format statistics with top-k info
+        stats_str = self._format_statistics(
+            all_modifications, all_guidance_predictions,
+            conditioning, adapted_conditioning,
+            config, device, all_topk_stats
+        )
 
         return (adapted_conditioning, stats_str)
 
+    def _format_statistics(self, modifications, guidance_predictions,
+                           orig_conditioning, adapted_conditioning,
+                           config, device, topk_stats=None):
+        """Format statistics output"""
+        stats_str = f"Modification Statistics ({config.pool_method}):\n"
+        stats_str += f"Total Modifications: {len(modifications)}\n"
+
+        # Add top-k info if enabled
+        if config.use_topk:
+            stats_str += f"\nTop-K Selection:\n"
+            stats_str += f"  Mode: {config.topk_mode}\n"
+            stats_str += f"  Keep: {config.topk_percentage}% of tokens\n"
+            stats_str += f"  Tau Temperature: {config.tau_temperature}\n"
+
+            if topk_stats:
+                avg_tau = np.mean([s['tau_mean'] for s in topk_stats])
+                stats_str += f"  Average Tau: {avg_tau:.4f}\n"
+
+        # Group by adapter type
+        by_type = {}
+        for mod in modifications:
+            adapter_type = mod['adapter_type']
+            if adapter_type not in by_type:
+                by_type[adapter_type] = []
+            by_type[adapter_type].append(mod)
+
+        # Format by type
+        for adapter_type, mods in by_type.items():
+            stats_str += f"\n{adapter_type.upper()}:\n"
+            total_adapters = sum(m['num_adapters'] for m in mods)
+            avg_change = np.mean([m['mean_change'] for m in mods])
+            stats_str += f"  Adapters Applied: {total_adapters}\n"
+            stats_str += f"  Average Change: {avg_change:.6f}\n"
+
+        # Guidance predictions
+        if guidance_predictions:
+            avg_guidance = np.mean(guidance_predictions)
+            stats_str += f"\nGuidance Predictions:\n"
+            stats_str += f"  Average: {avg_guidance:.2f}\n"
+
+        # Overall change
+        if orig_conditioning and adapted_conditioning:
+            orig = orig_conditioning[0][0].to(device)
+            adapted = adapted_conditioning[0][0].to(device)
+
+            total_change = (adapted - orig).abs().mean().item()
+            max_change = (adapted - orig).abs().max().item()
+            pct_changed = ((adapted - orig).abs() > 1e-6).float().mean().item() * 100
+
+            stats_str += f"\nOverall Change:\n"
+            stats_str += f"  Mean: {total_change:.6f}\n"
+            stats_str += f"  Max: {max_change:.6f}\n"
+            stats_str += f"  Modified Tokens: {pct_changed:.1f}%\n"
+
+        return stats_str
 
 class StackShuntAdapters:
     """Stack multiple adapters together."""

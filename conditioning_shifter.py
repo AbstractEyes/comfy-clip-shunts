@@ -1,36 +1,15 @@
-import comfy
 import torch
-import torch.nn.functional as F
+import numpy as np
+import logging
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
-import logging
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class AdapterOutput:
-    """Container for adapter outputs"""
-    anchor: torch.Tensor
-    delta: torch.Tensor
-    gate: torch.Tensor
-    log_sigma: torch.Tensor
-    tau: torch.Tensor
-    g_pred: torch.Tensor
-    attention_weights: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
-    
-    @property
-    def device(self):
-        return self.anchor.device
-    
-    @property
-    def shape(self):
-        return self.anchor.shape
-
-
-@dataclass
 class ShiftConfig:
-    """Configuration for a shift operation"""
+    """Unified configuration for all modifications"""
     strength: float = 1.0
     delta_mean: float = 0.0
     delta_scale: float = 1.0
@@ -39,305 +18,298 @@ class ShiftConfig:
     gate_threshold: float = 0.1
     noise_injection: float = 0.0
     use_anchor: bool = True
+    pool_method: str = "sequential"  # "sequential" or "weighted_average"
+    # Top-K parameters
+    use_topk: bool = False
+    topk_percentage: float = 100.0  # Percentage of tokens to keep
+    tau_temperature: float = 1.0  # Temperature scaling for tau
+    topk_mode: str = "attention"  # "attention", "gate", "combined", "tau_softmax"
+
+
+@dataclass
+class AdapterOutput:
+    """Raw output from adapter forward pass"""
+    anchor: torch.Tensor
+    delta: torch.Tensor  # Note: already has gate multiplied in!
+    log_sigma: torch.Tensor
+    tau: torch.Tensor
+    g_pred: torch.Tensor
+    gate: torch.Tensor
+    adapter_type: str
+    slice_range: Tuple[int, int]
+    # Add attention weights for top-k
+    attn_c2m: Optional[torch.Tensor] = None
+    attn_m2c: Optional[torch.Tensor] = None
 
 
 class ConditioningShifter:
-    """Static utility for semantic conditioning transformations"""
-    
+    """Handles all modification logic"""
+
     @staticmethod
-    def apply_adapter_output(
-        clip_slice: torch.Tensor,
-        adapter_output: AdapterOutput,
-        config: ShiftConfig
-    ) -> torch.Tensor:
+    def extract_encoder_embeddings(encoder_pipe: Dict[str, Any], device: torch.device) -> torch.Tensor:
+        """Extract embeddings from encoder pipe - removes 30+ lines from main class"""
+        config = encoder_pipe.get("config", {})
+        encoder_config = config.get("config", {})
+
+        tokenizer = encoder_pipe.get("tokenizer")
+        model = encoder_pipe.get("model")
+        context_prompt = config.get("context_window", "")
+
+        # Tokenize
+        padding_type = encoder_config.get("padding", "max_length")
+        max_length = encoder_config.get("max_length", 512)
+
+        tokens = tokenizer(
+            context_prompt,
+            return_tensors="pt",
+            padding=padding_type if padding_type != "do_not_pad" else False,
+            truncation=True,
+            max_length=max_length
+        )
+
+        input_ids = tokens["input_ids"].to(device)
+        attention_mask = tokens["attention_mask"].to(device)
+
+        # Get embeddings by model type
+        model_type = config.get("model_type", "")
+
+        with torch.no_grad():
+            if model_type == "t5":
+                return model.encoder(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                ).last_hidden_state
+            elif model_type in ["bert", "nomic_bert"]:
+                return model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    return_dict=True
+                ).last_hidden_state
+            else:
+                raise ValueError(f"Unsupported model type: {model_type}")
+
+    @staticmethod
+    def run_adapter(adapter_model, encoder_embeddings: torch.Tensor,
+                    clip_slice: torch.Tensor, guidance_scale: float,
+                    adapter_type: str, slice_range: Tuple[int, int]) -> AdapterOutput:
+        """Run adapter and package output"""
+        gen_config = {"max_guidance": guidance_scale if guidance_scale > 0 else 10.0}
+
+        outputs = adapter_model(encoder_embeddings.float(), clip_slice.float(), config=gen_config)
+
+        if isinstance(outputs, tuple) and len(outputs) == 8:
+            anchor, delta, log_sigma, attn_c2m, attn_m2c, tau, g_pred, gate = outputs
+            return AdapterOutput(
+                anchor=anchor,
+                delta=delta,  # Already has gate multiplied!
+                log_sigma=log_sigma,
+                tau=tau,
+                g_pred=g_pred,
+                gate=gate,
+                adapter_type=adapter_type,
+                slice_range=slice_range,
+                attn_c2m=attn_c2m,
+                attn_m2c=attn_m2c
+            )
+        else:
+            raise ValueError(f"Unexpected adapter output format: {type(outputs)}")
+
+    @staticmethod
+    def apply_topk_selection(output: AdapterOutput, config: ShiftConfig) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Apply a single adapter output to a clip slice.
-        This replaces the hardcoded logic in ShuntConditioning.
+        Apply top-k selection using tau and attention weights.
+        Returns mask and selection scores for CLIP tokens.
         """
-        # Extract components
-        anchor = adapter_output.anchor
-        delta = adapter_output.delta
-        gate = adapter_output.gate
-        log_sigma = adapter_output.log_sigma
-        
-        # Scale and offset delta
-        delta = delta * config.delta_scale + config.delta_mean
-        
-        # Process gate with threshold
-        gate_scaled = gate * config.gate_probability
+        if not config.use_topk:
+            # Return full mask matching gate dimensions
+            return torch.ones_like(output.gate.squeeze(-1)), None
+
+        # Calculate selection scores based on mode
+        if config.topk_mode == "attention":
+            # Use modulation->condition attention (how much each CLIP token attends to encoder)
+            # Sum across encoder dimension to get importance score per CLIP token
+            scores = output.attn_m2c.mean(dim=1).sum(dim=-1)  # [batch, seq_clip]
+
+        elif config.topk_mode == "gate":
+            # Use gate values directly (already in CLIP space)
+            scores = output.gate.squeeze(-1)  # [batch, seq_clip]
+
+        elif config.topk_mode == "combined":
+            # Combine attention and gate scores
+            attn_score = output.attn_m2c.mean(dim=1).sum(dim=-1)  # [batch, seq_clip]
+            gate_score = output.gate.squeeze(-1)
+
+            # Normalize and combine
+            attn_score = (attn_score - attn_score.min()) / (attn_score.max() - attn_score.min() + 1e-8)
+            gate_score = (gate_score - gate_score.min()) / (gate_score.max() - gate_score.min() + 1e-8)
+
+            scores = (attn_score + gate_score) / 2
+
+        elif config.topk_mode == "tau_softmax":
+            # Use tau as temperature for softmax selection
+            attn_score = output.attn_m2c.mean(dim=1).sum(dim=-1)  # [batch, seq_clip]
+
+            # Apply tau temperature scaling
+            tau_value = output.tau.mean().item() * config.tau_temperature
+            scores = torch.nn.functional.softmax(attn_score / tau_value, dim=-1)
+        else:
+            scores = output.gate.squeeze(-1)
+
+        # Calculate k
+        k = int(scores.size(-1) * (config.topk_percentage / 100.0))
+        k = max(1, min(k, scores.size(-1)))
+
+        # Get top-k indices
+        topk_values, topk_indices = torch.topk(scores, k, dim=-1)
+
+        # Create sparse mask
+        mask = torch.zeros_like(scores)
+        mask.scatter_(-1, topk_indices, 1.0)
+
+        return mask, scores
+
+    @staticmethod
+    def apply_modifications(clip_slice: torch.Tensor, outputs: List[AdapterOutput],
+                            config: ShiftConfig) -> torch.Tensor:
+        """Apply modifications based on config.pool_method"""
+
+        if config.pool_method == "sequential":
+            # Apply each adapter sequentially
+            modified = clip_slice.clone()
+            for output in outputs:
+                modified = ConditioningShifter._apply_single(modified, output, config)
+            return modified
+
+        elif config.pool_method == "weighted_average":
+            # Pool all adapters then apply once
+            if len(outputs) == 1:
+                return ConditioningShifter._apply_single(clip_slice, outputs[0], config)
+
+            pooled = ConditioningShifter._pool_outputs(outputs)
+            return ConditioningShifter._apply_single(clip_slice, pooled, config)
+
+        else:
+            raise ValueError(f"Unknown pool_method: {config.pool_method}")
+
+    @staticmethod
+    def _apply_single(clip_slice: torch.Tensor, output: AdapterOutput,
+                      config: ShiftConfig) -> torch.Tensor:
+        """Apply a single adapter output with optional top-k selection"""
+
+        # Apply top-k selection if enabled
+        topk_mask, scores = ConditioningShifter.apply_topk_selection(output, config)
+
+        # Preprocess (but remember delta already has gate!)
+        delta = output.delta * config.delta_scale + config.delta_mean
+
+        gate_scaled = output.gate * config.gate_probability
         gate_mask = (gate_scaled > config.gate_threshold).float()
         gate_masked = gate_scaled * gate_mask
-        
+
+        # Apply top-k mask to gate and delta
+        if config.use_topk:
+            # Expand mask to match dimensions
+            topk_mask_expanded = topk_mask.unsqueeze(-1)
+            gate_masked = gate_masked * topk_mask_expanded
+            delta = delta * topk_mask_expanded
+
         # Resize if needed
         if delta.shape[1] != clip_slice.shape[1]:
-            delta = F.interpolate(
+            delta = torch.nn.functional.interpolate(
                 delta.transpose(1, 2),
                 size=clip_slice.size(1),
                 mode="nearest"
             ).transpose(1, 2)
-            
-            gate_masked = F.interpolate(
+
+            gate_masked = torch.nn.functional.interpolate(
                 gate_masked.transpose(1, 2),
                 size=clip_slice.size(1),
                 mode="nearest"
             ).transpose(1, 2)
-            
-            if anchor.shape[1] != clip_slice.shape[1]:
-                anchor = F.interpolate(
-                    anchor.transpose(1, 2),
+
+            if output.anchor.shape[1] != clip_slice.shape[1]:
+                output.anchor = torch.nn.functional.interpolate(
+                    output.anchor.transpose(1, 2),
                     size=clip_slice.size(1),
                     mode="nearest"
                 ).transpose(1, 2)
-        
+
         # Apply strength
         delta_final = delta * config.strength
-        
-        # Apply modification based on mode
+
+        # Apply based on anchor mode
         if config.use_anchor:
-            # Blend between original and modified anchor
-            clip_modified = clip_slice * (1 - gate_masked) + (anchor + delta_final) * gate_masked
+            # Blend original with anchor, then add delta
+            blended = clip_slice * (1 - gate_masked) + output.anchor * gate_masked
+            clip_modified = blended + delta_final
         else:
-            # Simple additive modification
-            clip_modified = clip_slice + (delta_final * gate_masked)
-        
-        # Apply noise if requested
+            # Simple additive
+            clip_modified = clip_slice + delta_final
+
+        # Apply noise
         if config.sigma_scale > 0 and config.noise_injection > 0:
-            sigma = torch.exp(log_sigma * config.sigma_scale)
+            sigma = torch.exp(output.log_sigma * config.sigma_scale)
             clip_modified += torch.randn_like(clip_modified) * sigma * config.noise_injection
         elif config.noise_injection > 0:
             clip_modified += torch.randn_like(clip_modified) * config.noise_injection
-        
+
         return clip_modified
-    
+
     @staticmethod
-    def pool_adapter_outputs(
-        adapter_outputs: List[Tuple[AdapterOutput, float]],
-        method: str = "weighted_average"
-    ) -> AdapterOutput:
-        """
-        Pool multiple adapter outputs into a single output.
-        
-        Args:
-            adapter_outputs: List of (AdapterOutput, weight) tuples
-            method: Pooling method - "weighted_average", "max", "rms"
-        
-        Returns:
-            Pooled AdapterOutput
-        """
-        if not adapter_outputs:
-            raise ValueError("No adapter outputs to pool")
-        
-        if len(adapter_outputs) == 1:
-            return adapter_outputs[0][0]
-        
-        # Calculate total weight
-        total_weight = sum(weight for _, weight in adapter_outputs)
-        if total_weight == 0:
-            total_weight = len(adapter_outputs)
-        
-        # Initialize pooled tensors with zeros
-        first_output = adapter_outputs[0][0]
-        pooled = {
-            'anchor': torch.zeros_like(first_output.anchor),
-            'delta': torch.zeros_like(first_output.delta),
-            'gate': torch.zeros_like(first_output.gate),
-            'log_sigma': torch.zeros_like(first_output.log_sigma),
-            'tau': torch.zeros_like(first_output.tau) if first_output.tau is not None else None,
-            'g_pred': torch.zeros_like(first_output.g_pred) if first_output.g_pred is not None else None,
-        }
-        
-        if method == "weighted_average":
-            for output, weight in adapter_outputs:
-                norm_weight = weight / total_weight
-                pooled['anchor'] += output.anchor * norm_weight
-                pooled['delta'] += output.delta * norm_weight
-                pooled['gate'] += output.gate * norm_weight
-                pooled['log_sigma'] += output.log_sigma * norm_weight
-                if output.tau is not None and pooled['tau'] is not None:
-                    pooled['tau'] += output.tau * norm_weight
-                if output.g_pred is not None and pooled['g_pred'] is not None:
-                    pooled['g_pred'] += output.g_pred * norm_weight
-                    
-        elif method == "max":
-            # Take maximum activation
-            for output, _ in adapter_outputs:
-                pooled['anchor'] = torch.maximum(pooled['anchor'], output.anchor)
-                pooled['delta'] = torch.maximum(pooled['delta'], output.delta)
-                pooled['gate'] = torch.maximum(pooled['gate'], output.gate)
-                pooled['log_sigma'] = torch.maximum(pooled['log_sigma'], output.log_sigma)
-                
-        elif method == "rms":
-            # Root mean square pooling
-            for output, weight in adapter_outputs:
-                norm_weight = weight / total_weight
-                pooled['anchor'] += (output.anchor ** 2) * norm_weight
-                pooled['delta'] += (output.delta ** 2) * norm_weight
-                pooled['gate'] += (output.gate ** 2) * norm_weight
-                pooled['log_sigma'] += (output.log_sigma ** 2) * norm_weight
-            
-            pooled['anchor'] = torch.sqrt(pooled['anchor'])
-            pooled['delta'] = torch.sqrt(pooled['delta'])
-            pooled['gate'] = torch.sqrt(pooled['gate'])
-            pooled['log_sigma'] = torch.sqrt(pooled['log_sigma'])
-        
+    def _pool_outputs(outputs: List[AdapterOutput]) -> AdapterOutput:
+        """Pool multiple adapter outputs into one"""
+        # Simple weighted average
+        total_weight = len(outputs)
+
+        pooled_anchor = sum(o.anchor for o in outputs) / total_weight
+        pooled_delta = sum(o.delta for o in outputs) / total_weight
+        pooled_log_sigma = sum(o.log_sigma for o in outputs) / total_weight
+
+        # Handle tau with different head counts
+        if all(o.tau is not None for o in outputs):
+            # Take mean across heads for each adapter, then average
+            tau_values = [o.tau.mean().item() for o in outputs]
+            pooled_tau_value = sum(tau_values) / total_weight
+            # Create scalar tensor on same device
+            pooled_tau = torch.tensor(pooled_tau_value, device=outputs[0].tau.device)
         else:
-            raise ValueError(f"Unknown pooling method: {method}")
-        
+            pooled_tau = None
+
+        pooled_g_pred = sum(o.g_pred for o in outputs) / total_weight if outputs[0].g_pred is not None else None
+        pooled_gate = sum(o.gate for o in outputs) / total_weight
+
+        # Pool attention weights if available - handle different head counts
+        pooled_attn_c2m = None
+        pooled_attn_m2c = None
+        if all(o.attn_c2m is not None for o in outputs):
+            # First, average across heads for each adapter to get [batch, seq_c, seq_m]
+            attn_c2m_list = []
+            attn_m2c_list = []
+
+            for o in outputs:
+                # Average across heads dimension
+                attn_c2m_avg = o.attn_c2m.mean(dim=1)  # [batch, seq_c, seq_m]
+                attn_m2c_avg = o.attn_m2c.mean(dim=1)  # [batch, seq_m, seq_c]
+                attn_c2m_list.append(attn_c2m_avg)
+                attn_m2c_list.append(attn_m2c_avg)
+
+            # Now average across adapters
+            pooled_attn_c2m = sum(attn_c2m_list) / total_weight
+            pooled_attn_m2c = sum(attn_m2c_list) / total_weight
+
+            # Add back a dummy heads dimension for compatibility
+            pooled_attn_c2m = pooled_attn_c2m.unsqueeze(1)  # [batch, 1, seq_c, seq_m]
+            pooled_attn_m2c = pooled_attn_m2c.unsqueeze(1)  # [batch, 1, seq_m, seq_c]
+
         return AdapterOutput(
-            anchor=pooled['anchor'],
-            delta=pooled['delta'],
-            gate=pooled['gate'],
-            log_sigma=pooled['log_sigma'],
-            tau=pooled['tau'],
-            g_pred=pooled['g_pred']
+            anchor=pooled_anchor,
+            delta=pooled_delta,
+            log_sigma=pooled_log_sigma,
+            tau=pooled_tau,
+            g_pred=pooled_g_pred,
+            gate=pooled_gate,
+            adapter_type=outputs[0].adapter_type,
+            slice_range=outputs[0].slice_range,
+            attn_c2m=pooled_attn_c2m,
+            attn_m2c=pooled_attn_m2c
         )
-    
-    @staticmethod
-    def shift_conditioning_tensor(
-        conditioning_tensor: torch.Tensor,
-        adapter_outputs_by_type: Dict[str, List[Tuple[AdapterOutput, float]]],
-        config: ShiftConfig,
-        pool_method: str = "weighted_average"
-    ) -> Tuple[torch.Tensor, Dict[str, Any]]:
-        """
-        Apply all adapter outputs to a conditioning tensor.
-        
-        Args:
-            conditioning_tensor: The full conditioning tensor [batch, seq, dims]
-            adapter_outputs_by_type: Dict mapping 'clip_l' or 'clip_g' to list of (output, weight)
-            config: Shift configuration
-            pool_method: How to pool multiple adapters of same type
-            
-        Returns:
-            Modified conditioning tensor and statistics
-        """
-        modified_tensor = conditioning_tensor.clone()
-        stats = {}
-        
-        for adapter_type, outputs in adapter_outputs_by_type.items():
-            if not outputs:
-                continue
-                
-            # Determine slice range
-            if adapter_type == 'clip_l':
-                slice_start, slice_end = 0, 768
-            elif adapter_type == 'clip_g':
-                total_dim = conditioning_tensor.size(-1)
-                slice_start = 768
-                slice_end = min(2048, total_dim)
-            else:
-                logger.warning(f"Unknown adapter type: {adapter_type}")
-                continue
-            
-            # Extract slice
-            clip_slice = modified_tensor[:, :, slice_start:slice_end]
-            
-            # Pool outputs if multiple
-            if len(outputs) > 1:
-                pooled_output = ConditioningShifter.pool_adapter_outputs(outputs, pool_method)
-                logger.info(f"Pooled {len(outputs)} {adapter_type} adapters using {pool_method}")
-            else:
-                pooled_output = outputs[0][0]
-            
-            # Apply the pooled output
-            clip_modified = ConditioningShifter.apply_adapter_output(
-                clip_slice,
-                pooled_output,
-                config
-            )
-            
-            # Update tensor
-            modified_tensor[:, :, slice_start:slice_end] = clip_modified.type_as(conditioning_tensor)
-            
-            # Collect stats
-            with torch.no_grad():
-                gate_mean = pooled_output.gate.mean().item()
-                delta_magnitude = pooled_output.delta.abs().mean().item()
-                
-            stats[adapter_type] = {
-                'gate_mean': gate_mean,
-                'delta_magnitude': delta_magnitude,
-                'slice_range': (slice_start, slice_end),
-                'num_adapters': len(outputs)
-            }
-        
-        return modified_tensor, stats
-    
-    @staticmethod
-    def create_adapter_output(
-        adapter_model: torch.nn.Module,
-        encoder_embeddings: torch.Tensor,
-        clip_embeddings: torch.Tensor,
-        guidance_scale: float = 10.0
-    ) -> AdapterOutput:
-        """
-        Run adapter forward pass and package outputs.
-        
-        Args:
-            adapter_model: The adapter model
-            encoder_embeddings: T5/BERT embeddings
-            clip_embeddings: CLIP embeddings slice
-            guidance_scale: Guidance scale for generation
-            
-        Returns:
-            Packaged AdapterOutput
-        """
-        gen_config = {"max_guidance": guidance_scale}
-        
-        with torch.no_grad():
-            outputs = adapter_model(
-                encoder_embeddings.float(),
-                clip_embeddings.float(),
-                config=gen_config
-            )
-        
-        if isinstance(outputs, tuple) and len(outputs) == 8:
-            anchor, delta, log_sigma, attn_c2m, attn_m2c, tau, g_pred, gate = outputs
-        else:
-            raise ValueError(f"Unexpected adapter output format: {type(outputs)}")
-        
-        return AdapterOutput(
-            anchor=anchor,
-            delta=delta,
-            gate=gate,
-            log_sigma=log_sigma,
-            tau=tau,
-            g_pred=g_pred,
-            attention_weights=(attn_c2m, attn_m2c)
-        )
-    
-    # High-level semantic operations (to be implemented)
-    
-    @staticmethod
-    def shift_towards_concepts(
-        conditioning: torch.Tensor,
-        adapter_outputs: Dict[str, List[Tuple[AdapterOutput, float]]],
-        strength: float = 1.0
-    ) -> torch.Tensor:
-        """Shift conditioning toward sparse conceptual representation"""
-        config = ShiftConfig(
-            strength=strength,
-            use_anchor=False,  # Pure delta application
-            gate_threshold=0.15  # Higher threshold for concept focus
-        )
-        modified, _ = ConditioningShifter.shift_conditioning_tensor(
-            conditioning, adapter_outputs, config
-        )
-        return modified
-    
-    @staticmethod
-    def shift_towards_style(
-        conditioning: torch.Tensor,
-        adapter_outputs: Dict[str, List[Tuple[AdapterOutput, float]]],
-        strength: float = 1.0
-    ) -> torch.Tensor:
-        """Preserve linguistic/stylistic elements"""
-        config = ShiftConfig(
-            strength=-strength,  # Negative strength to reduce concepts
-            use_anchor=True,  # Use anchor for stability
-            gate_threshold=0.05  # Lower threshold to affect more tokens
-        )
-        modified, _ = ConditioningShifter.shift_conditioning_tensor(
-            conditioning, adapter_outputs, config
-        )
-        return modified
