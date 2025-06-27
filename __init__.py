@@ -1,5 +1,9 @@
 #from .general_nodes import *
-from .subject import csv_handler
+#from .tag import csv_manager
+from .node.lycoris import (
+    LycorisLoaderNode
+)
+
 from .node.nodes import (
     # Importing all necessary nodes for the ABS Shunt Suite
     SimpleEncoderLoader,
@@ -28,6 +32,8 @@ from .node.general_nodes import (
 )
 
 NODE_CLASS_MAPPINGS = {
+    "LycorisLoaderNode": LycorisLoaderNode,
+
     "SimpleEncoderLoader": SimpleEncoderLoader,
     "EncoderLoader": EncoderLoader,
     "T5LoaderTest": T5LoaderTest,
@@ -52,6 +58,9 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "LycorisMergeNode": "🌸 Lycoris Merge Node",
+    "LycorisLoaderNode": "🌼 Lycoris Loader Node",
+
     "SimpleEncoderLoader": "🔍 Simple Encoder Loader",
     "EncoderLoader": "📦 Encoder Loader",
     "T5LoaderTest": "🚀 T5 Encoder Loader",
@@ -83,7 +92,7 @@ print("""
 ╔══════════════════════════════════════════╗
 ║        🚀 ABS SHUNT SUITE 🚀            ║
 ║    Dev Advanced Bridging System Adapters ║
-║         ⚡ Version 0.3.0 ⚡                ║
+║         ⚡ Version 0.4.0 ⚡                ║
 ╚══════════════════════════════════════════╝
 """)
 
