@@ -83,23 +83,31 @@ class LoConAdapter(WeightAdapterBase):
                     )
 
                 # Compute weight difference
+                # Compute weight difference
                 if up.dim() == 4 and down.dim() == 4:
-                    # Conv weights - preserve shape
+                    # Conv weights - kernel size from down tensor
                     out_ch, rank = up.shape[0], up.shape[1]
                     in_ch = down.shape[1]
-                    # Flatten only inner dimensions for matmul
-                    up_flat = up.reshape(out_ch * up.shape[2] * up.shape[3], rank)
-                    down_flat = down.reshape(rank, in_ch * down.shape[2] * down.shape[3])
+                    kernel_h, kernel_w = down.shape[2], down.shape[3]
+
+                    up_flat = up.reshape(out_ch, rank)
+                    down_flat = down.reshape(rank, in_ch * kernel_h * kernel_w)
                     result = torch.mm(up_flat, down_flat)
-                    # Reshape back to conv shape
-                    result = result.reshape(out_ch, in_ch, up.shape[2], up.shape[3])
+
+                    # Reshape to conv shape based on actual dimensions
+                    if result.shape[1] == in_ch * 9:  # 3x3 conv
+                        result = result.reshape(out_ch, in_ch, 3, 3)
+                    elif result.shape[1] == in_ch:  # 1x1 conv
+                        result = result.reshape(out_ch, in_ch, 1, 1)
+                    else:
+                        # Default reshape
+                        result = result.reshape(out_ch, in_ch, kernel_h, kernel_w)
                 else:
                     # Linear weights
                     result = torch.mm(up.flatten(start_dim=1), down.flatten(start_dim=1))
 
                 result = result * alpha
 
-                # Don't reshape - let ComfyUI handle shape matching
                 return result
 
             # Use CUDA if available

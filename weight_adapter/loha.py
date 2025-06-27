@@ -70,7 +70,26 @@ class LoHaAdapter(WeightAdapterBase):
                     m2 = torch.mm(w2a, w2b)
 
                 # Hadamard product (element-wise multiplication)
-                return (m1 * m2) * alpha
+                result = (m1 * m2) * alpha
+
+                # For 2D results, check if it's a transformer linear layer (should stay 2D)
+                if result.dim() == 2:
+                    # Check if this is a transformer attention/projection/embedding layer
+                    if any(x in lora_key for x in
+                           ['transformer_blocks', 'attn', 'proj_in', 'proj_out', 'to_q', 'to_k', 'to_v', 'to_out',
+                            'emb_layers']):
+                        # Keep as 2D for linear layers
+                        pass
+                    else:
+                        # Conv layer reshaping
+                        out_ch = result.shape[0]
+                        if result.shape[1] % 9 == 0:  # Likely 3x3 conv
+                            in_ch = result.shape[1] // 9
+                            result = result.reshape(out_ch, in_ch, 3, 3)
+                        elif result.shape[1] == out_ch:  # Likely 1x1 conv
+                            result = result.reshape(out_ch, out_ch, 1, 1)
+
+                return result
 
             # Use CUDA computation
             tensors = [w1a, w1b, w2a, w2b]
