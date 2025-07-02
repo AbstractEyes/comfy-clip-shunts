@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 import json
+import os
+
 import torch
 from enum import Enum
 import logging
@@ -45,7 +47,7 @@ import comfy.text_encoders.sa_t5
 import comfy.text_encoders.aura_t5
 import comfy.text_encoders.pixart_t5
 import comfy.text_encoders.hydit
-import comfy.text_encoders.flux
+#import comfy.text_encoders.flux
 import comfy.text_encoders.long_clipl
 import comfy.text_encoders.genmo
 import comfy.text_encoders.lt
@@ -70,6 +72,7 @@ import comfy.ldm.flux.redux
 
 # replaced new ones, old ones commented out when new ones are added.
 from ..text_encoders.hidream import HiDreamTEModel, HiDreamTokenizer, hidream_clip
+from ..text_encoders.flux import FluxClipModel, FluxTokenizer, flux_clip
 import logging
 
 logger = logging.getLogger(__name__)
@@ -77,6 +80,7 @@ logger = logging.getLogger(__name__)
 def load_lora_for_models(model, clip, lora, strength_model, strength_clip):
     key_map = {}
     if model is not None:
+
         key_map = comfy.lora.model_lora_keys_unet(model.model, key_map)
     if clip is not None:
         key_map = comfy.lora.model_lora_keys_clip(clip.cond_stage_model, key_map)
@@ -852,6 +856,7 @@ def t5xxl_detect(clip_data):
 
     return {}
 
+
 def llama_detect(clip_data):
     weight_name = "model.layers.0.self_attn.k_proj.weight"
 
@@ -965,8 +970,9 @@ def load_text_encoder_state_dicts(state_dicts=[], embedding_directory=None, clip
             clip_target.clip = comfy.text_encoders.hydit.HyditModel
             clip_target.tokenizer = comfy.text_encoders.hydit.HyditTokenizer
         elif clip_type == CLIPType.FLUX:
-            clip_target.clip = comfy.text_encoders.flux.flux_clip(**t5xxl_detect(clip_data))
-            clip_target.tokenizer = comfy.text_encoders.flux.FluxTokenizer
+            logger.info("Loading Flux CLIP CLIPtype.FLUX: model_options={}".format(model_options))
+            clip_target.clip = flux_clip(**t5xxl_detect(clip_data))
+            clip_target.tokenizer = FluxTokenizer
         elif clip_type == CLIPType.HUNYUAN_VIDEO:
             clip_target.clip = comfy.text_encoders.hunyuan_video.hunyuan_video_clip(**llama_detect(clip_data))
             clip_target.tokenizer = comfy.text_encoders.hunyuan_video.HunyuanVideoTokenizer

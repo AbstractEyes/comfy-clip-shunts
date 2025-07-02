@@ -8,7 +8,23 @@ import comfy.model_management
 import torch
 import logging
 
+
 logger = logging.getLogger(__name__)
+
+class T5XXLModel(sd1_clip.SDClipModel):
+    def __init__(self, device="cpu", layer="last", layer_idx=None, dtype=None, attention_mask=False, model_options={}):
+        if model_options.get("unchained_t5", False):
+            textmodel_json_config = os.path.join(os.path.dirname(os.path.realpath(__file__)), "t5_config_unchained_xxl.json")
+        else:
+            textmodel_json_config = os.path.join(os.path.dirname(os.path.realpath(__file__)), "t5_config_xxl.json")
+        t5xxl_scaled_fp8 = model_options.get("t5xxl_scaled_fp8", None)
+        if t5xxl_scaled_fp8 is not None:
+            model_options = model_options.copy()
+            model_options["scaled_fp8"] = t5xxl_scaled_fp8
+
+        model_options = {**model_options, "model_name": "t5xxl"}
+        super().__init__(device=device, layer=layer, layer_idx=layer_idx, textmodel_json_config=textmodel_json_config, dtype=dtype, special_tokens={"end": 1, "pad": 0}, model_class=comfy.text_encoders.t5.T5, enable_attention_masks=attention_mask, return_attention_masks=attention_mask, model_options=model_options)
+
 
 
 class HiDreamTokenizer:
@@ -33,19 +49,6 @@ class HiDreamTokenizer:
     def state_dict(self):
         return {}
 
-class T5XXLModel(sd1_clip.SDClipModel):
-    def __init__(self, device="cpu", layer="last", layer_idx=None, dtype=None, attention_mask=False, model_options={}):
-        if model_options.get("unchained", False):
-            textmodel_json_config = os.path.join(os.path.dirname(os.path.realpath(__file__)), "t5_config_unchained_xxl.json")
-        else:
-            textmodel_json_config = os.path.join(os.path.dirname(os.path.realpath(__file__)), "t5_config_xxl.json")
-        t5xxl_scaled_fp8 = model_options.get("t5xxl_scaled_fp8", None)
-        if t5xxl_scaled_fp8 is not None:
-            model_options = model_options.copy()
-            model_options["scaled_fp8"] = t5xxl_scaled_fp8
-
-        model_options = {**model_options, "model_name": "t5xxl"}
-        super().__init__(device=device, layer=layer, layer_idx=layer_idx, textmodel_json_config=textmodel_json_config, dtype=dtype, special_tokens={"end": 1, "pad": 0}, model_class=comfy.text_encoders.t5.T5, enable_attention_masks=attention_mask, return_attention_masks=attention_mask, model_options=model_options)
 
 
 class HiDreamTEModel(torch.nn.Module):
@@ -170,7 +173,7 @@ def hidream_clip(clip_l=True, clip_g=True, t5=True, llama=True, dtype_t5=None, d
         def __init__(self, device="cpu", dtype=None, model_options={}):
             if t5 and unchained_t5:
                 model_options = model_options.copy()
-                model_options["unchained"] = True
+                model_options["unchained_t5"] = True
             if t5xxl_scaled_fp8 is not None and "t5xxl_scaled_fp8" not in model_options:
                 model_options = model_options.copy()
                 model_options["t5xxl_scaled_fp8"] = t5xxl_scaled_fp8
