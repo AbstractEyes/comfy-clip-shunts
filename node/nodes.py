@@ -1,5 +1,6 @@
 import logging
 
+from comfy.sd import CLIP
 from ..model.configs import ShuntUtil
 
 logger = logging.getLogger(__name__)
@@ -7,6 +8,7 @@ logger = logging.getLogger(__name__)
 import hashlib
 from ..model.model_manager import get_model_manager
 from ..model.configs import ENCODER_CONFIGS, ShuntData, EncoderData
+
 
 
 class EncoderLoader:

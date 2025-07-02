@@ -1,15 +1,19 @@
 # folding_interpolation.py
 import torch
-from .schedules import ConditioningScheduler  # Ensure schedules.py is in same directory or adjust import
+from .schedules import ConditioningScheduler   # Ensure schedules.py is in same directory or adjust import
+from .modes import FoldingTypes, FoldingPaddingTypes, ConditioningSchedulerTypes
 
 
-class FoldingInterpolator:
+class FoldingSampler:
     """
     Symbolic interpolator with support for scheduler-driven alpha weighting
     and optional folding strategies that manipulate the blending pattern.
     """
 
-    def __init__(self, scheduler_mode: str = "none", folding_mode: str = "interpolate"):
+    def __init__(self,
+                 scheduler_mode: str = ConditioningSchedulerTypes.TAU,
+                 folding_mode: str = FoldingTypes.SURGE_FOLD,
+                 padding_mode: str = FoldingPaddingTypes.INTERPOLATE):
         self.scheduler = ConditioningScheduler(scheduler_mode)
         self.folding_mode = folding_mode.lower()
 

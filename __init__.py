@@ -1,9 +1,21 @@
-#from .general_nodes import *
-#from .tag import csv_manager
-from .node.lycoris import (
-    LycorisLoaderNode
-)
+"""
+    ABS Shunt Suite - Advanced Bridging System Adapters
+    Author: AbstractPhil
 
+    Description: A suite of advanced shunt adapters for ComfyUI, designed to enhance and bridge the capabilities of CLIP
+    with various other forms of embeddings; primarily BERT, T5, LLAMA, and other text-based models.
+
+    A shunt is a form of cross-analytical adapter trained to bridge similar symbolic representations between entirely
+    different models that produce different types of embeddings with different logical structures.
+
+    These cross-analytical adapters form similarity bridges between different models, allowing for the transfer of knowledge
+    that would otherwise be lost in translation.
+
+    This suite includes nodes for loading, conditioning, and visualizing shunt adapters, as well as utilities for managing
+    shunt models and their configurations.
+
+    License: Apache License 2.0
+"""
 from .node.nodes import (
     # Importing all necessary nodes for the ABS Shunt Suite
     SimpleEncoderLoader,
@@ -23,7 +35,17 @@ from .node.nodes import (
     EasyShunt,
     QuickShuntPreview,
     ShuntStrengthTest,
-    SuperiorConditioningPreview
+    SuperiorConditioningPreview,
+    # Clip-based swap and handling nodes
+)
+
+from .node.clip_nodes import (
+    ClipTokenizerSwap,
+    AbsClipSplitter,
+    ACLIPLoader,
+    ADualCLIPLoader,
+    ATripleCLIPLoader,
+    AQuadrupleCLIPLoader,
 )
 
 from .node.general_nodes import (
@@ -32,57 +54,93 @@ from .node.general_nodes import (
 )
 
 NODE_CLASS_MAPPINGS = {
-    "LycorisLoaderNode": LycorisLoaderNode,
 
-    "SimpleEncoderLoader": SimpleEncoderLoader,
-    "EncoderLoader": EncoderLoader,
-    "T5LoaderTest": T5LoaderTest,
-    "LoadAdapterShunt": LoadAdapterShunt,
-    "LoadShuntSimple": LoadShuntSimple,
-    "ShuntConditioning": ShuntConditioning,
-    "ShuntConditioningAdvanced": ShuntConditioningAdvanced,
+    # Shunt adapter loading and management nodes
+    "SimpleEncoderLoader": SimpleEncoderLoader, # simplified loader for shunt adapters
+    "EncoderLoader": EncoderLoader, # advanced loader for shunt adapters with many more options
+    "LoadShuntSimple": LoadShuntSimple, # Loads a simple adapter shunt model to translate embeddings
+    "LoadAdapterShunt": LoadAdapterShunt, # Loads a complex adapter model with advanced options
+
+    # Multi-shunt management nodes
     "StackShuntAdapters": StackShuntAdapters,
-    "ListLoadedShuntModels": ListLoadedShuntModels,
-    "UnloadShuntModels": UnloadShuntModels,
     "MergeShunts": MergeShunts,
     "ShuntScheduler": ShuntScheduler,
-    "VisualizeShuntEffect": VisualizeShuntEffect,
+    "UnloadShuntModels": UnloadShuntModels,
 
+    # Pass through nodes for shunt conditioning
+    "ShuntConditioning": ShuntConditioning,
+    "ShuntConditioningAdvanced": ShuntConditioningAdvanced,
+
+    # Convenience nodes set up with default configurations for quick shunt usage
+    # # Primarily intended for quick setup and testing of shunt adapters
     "SimpleShuntSetup": SimpleShuntSetup,
     "EasyShunt": EasyShunt,
+
+    # Visualization and testing nodes
     "QuickShuntPreview": QuickShuntPreview,
     "ShuntStrengthTest": ShuntStrengthTest,
     "SuperiorConditioningPreview": SuperiorConditioningPreview,
+    "ListLoadedShuntModels": ListLoadedShuntModels,
+    "VisualizeShuntEffect": VisualizeShuntEffect,
+
+    # General utility nodes
     "Prompt": ABS_PromptNode,
     "ConcatPrompts": ABS_ConcatPrompts,
+
+    # Clip-based nodes
+    "ACLIPLoader": ACLIPLoader,               # Loads a dual CLIP model (clip-l, clip-g)
+    "ADualCLIPLoader": ADualCLIPLoader,       # Loads a dual CLIP model (clip-l, clip-g)
+    "ATripleCLIPLoader": ATripleCLIPLoader,   # Loads a triple CLIP model (clip-l, clip-g, t5)
+    "AQuadrupleCLIPLoader": AQuadrupleCLIPLoader, # Loads a quadruple CLIP model (clip-l, clip-g, t5, llama)
+    "ClipTokenizerSwap": ClipTokenizerSwap,     # added v0.4.0
+    "AbsClipSplitter": AbsClipSplitter,         # added v0.4.0
+
+    # Deprecated nodes
+    "T5LoaderTest": T5LoaderTest,  # deprecated, use EncoderLoader instead
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "LycorisMergeNode": "🌸 Lycoris Merge Node",
-    "LycorisLoaderNode": "🌼 Lycoris Loader Node",
-
+    # Shunt adapter loading and management nodes
     "SimpleEncoderLoader": "🔍 Simple Encoder Loader",
     "EncoderLoader": "📦 Encoder Loader",
-    "T5LoaderTest": "🚀 T5 Encoder Loader",
-    "LoadAdapterShunt": "⚡ Load Shunt Adapter",
     "LoadShuntSimple": "🔄 Load Shunt Adapter Simple",
-    "ShuntConditioning": "🔌 Shunt Conditioning",
-    "ShuntConditioningAdvanced": "🎛️ Shunt Conditioning Advanced",
+    "LoadAdapterShunt": "⚡ Load Shunt Adapter",
+
+    # Multi-shunt management nodes
     "StackShuntAdapters": "📚 Stack Shunt Adapters",
-    "ListLoadedShuntModels": "📋 List Loaded Shunts",
-    "UnloadShuntModels": "🗑️ Unload Shunt Models",
     "MergeShunts": "🔀 Merge Shunt Adapters",
     "ShuntScheduler": "📊 Shunt Scheduler",
+    "UnloadShuntModels": "🗑️ Unload Shunt Models",
+
+    # Conditioning and passthrough nodes
+    "ShuntConditioning": "🔌 Shunt Conditioning",
+    "ShuntConditioningAdvanced": "🎛️ Shunt Conditioning Advanced",
+
+    # Convenience nodes for quick shunt setup
+    "SimpleShuntSetup": "🔧 Simple Shunt Setup",
+    "EasyShunt": "🚀 Easy Shunt",
+
+    # Preview nodes
+    "QuickShuntPreview": "👁️ Quick Shunt Preview",
+    "ShuntStrengthTest":  "🧪 Shunt Strength Test",
+    "SuperiorConditioningPreview": "🌟 Superior Conditioning Preview",
+    "ListLoadedShuntModels":  "📋 List Loaded Shunt Models",
     "VisualizeShuntEffect": "📈 Visualize Shunt Effect",
 
-    "SimpleShuntSetup": "✨ Simple Shunt Setup",
-    "EasyShunt": "🎯 Easy Shunt",
-    "QuickShuntPreview": "👁️ Quick Shunt Preview",
-    "ShuntStrengthTest": "🧪 Shunt Strength Test",
-    "SuperiorConditioningPreview": "🌟 Superior Conditioning Preview",
-
+    # General utility nodes
     "Prompt": "📝 Simple Prompt Node",
     "ConcatPrompts": "🔗 Concatenate Prompts",
+
+    # Clip-based nodes
+    "AQuadrupleCLIPLoader": "📦 Quadruple CLIP Loader",  # Loads a quadruple CLIP model (clip-l, clip-g, t5, llama)
+    "ACLIPLoader": "📦 A-CLIP Loader",  # Loads a dual CLIP model (clip-l, clip-g)
+    "ADualCLIPLoader": "📦 Dual CLIP Loader",  # Loads a dual CLIP model (clip-l, clip-g)
+    "ATripleCLIPLoader": "📦 Triple CLIP Loader",  # Loads a triple CLIP model (clip-l, clip-g, t5)
+    "ClipTokenizerSwap": "🔄 Clip Tokenizer Swap",
+    "AbsClipSplitter": "🔗 Abs Clip Splitter",
+
+    # deprecated nodes
+    "T5LoaderTest": "🚀 T5 Encoder Loader",
 
 }
 
@@ -92,12 +150,12 @@ print("""
 ╔══════════════════════════════════════════╗
 ║        🚀 ABS SHUNT SUITE 🚀            ║
 ║    Dev Advanced Bridging System Adapters ║
-║         ⚡ Version 0.4.0 ⚡                ║
+║         ⚡ Version 0.5.0 ⚡                ║
 ╚══════════════════════════════════════════╝
 """)
 
 print("Loading ABS Shunt Suite...")
 print("✅ Shunt adapters initialized")
-print("⚡ Ready to bridge T5 → CLIP embeddings")
+print("⚡ Ready to bridge a multitude of embeddings")
 
 __all__ = [NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS]

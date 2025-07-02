@@ -8,7 +8,9 @@ from dataclasses import dataclass
 from enum import Enum
 
 from safetensors.torch import load_file
-from transformers import AutoModel, AutoTokenizer, AutoConfig, AutoModelForSeq2SeqLM, BertModel, BertTokenizer
+from torch.nn import Module
+from transformers import AutoModel, AutoTokenizer, AutoConfig, AutoModelForSeq2SeqLM, BertModel, BertTokenizer, \
+    PreTrainedTokenizerFast
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,7 @@ class ModelType(Enum):
     BERT_MODEL = "bert"
     NOMIC_BERT_MODEL = "nomic_bert"
     GENERIC = "generic"
+    TOKENIZER = "tokenizer"
 
 
 @dataclass
@@ -78,6 +81,47 @@ class ModelManager:
     def is_loaded(self, model_id: str) -> bool:
         """Check if a model is loaded"""
         return model_id in self.models
+
+    def load_tokenizer(
+            self,
+            id: str,
+            tokenizer_name_or_path: str,
+            target_output_device: Optional[torch.device] = None, # tokenizers live on cpu but they have destination devices for the output.
+            force_reload: bool = False,
+            trust_remote_code: Optional[bool] = None  # Overrides the global TRUST_REMOTE_CODE setting.
+    ) -> tuple[Module, dict[str, Any]] | tuple[Any, dict[str, Any]] | None:
+        """Load a tokenizer from HuggingFace or local path."""
+        if not force_reload and self.is_loaded(id):
+            logger.info(f"Using cached tokenizer: {id}")
+            model_info = self.get_model(id)
+            return model_info.model, model_info.metadata
+
+        try:
+            target_output_device = target_output_device or torch.device("cpu")
+            trust_remote_code = trust_remote_code if trust_remote_code is not None else TRUST_REMOTE_CODE
+
+            # Load tokenizer
+            tokenizer = AutoTokenizer.from_pretrained(
+                tokenizer_name_or_path,
+                trust_remote_code=trust_remote_code  # Use the global flag for remote code execution
+            )
+
+            # Cache the tokenizer
+            self.models[id] = ModelInfo(
+                model=tokenizer,
+                model_type=ModelType.TOKENIZER,
+                config={"tokenizer_name": tokenizer_name_or_path},
+                device=target_output_device,
+                dtype=torch.float32,  # Tokenizers don't have a dtype input, but we can set an output dtype if needed
+                metadata={"source": "huggingface", "trust_remote_code": trust_remote_code}
+            )
+
+            logger.info(f"Successfully loaded tokenizer: {id}")
+            return tokenizer, self.models[id].metadata
+
+        except Exception as e:
+            logger.error(f"Failed to load tokenizer {id}: {e}")
+            return None
 
     def load_shunt_adapter(
             self,

@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class ShiftConfig:
     """Unified configuration for all modifications"""
