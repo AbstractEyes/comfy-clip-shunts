@@ -1,40 +1,4 @@
 # ------------------------------------------------------------------ #
-#  Canonical repository map (every alias -> Hugging-Face repo slug)  #
-# ------------------------------------------------------------------ #
-MODEL_REPOS: dict[str, str] = {
-    # CLIP / Long-CLIP
-    "clip_l":          "openai/clip-vit-large-patch14",
-    "clip_g":          "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k",
-    "clip_h":          "laion/CLIP-ViT-H-14-laion2B-s32B-b79K",
-    "long_clip_l":     "BeichenZhang/LongCLIP-L",
-    "long_clip_g":     "BeichenZhang/LongCLIP-G",
-
-    # T5 family
-    "t5_xxl":          "google/t5-v1_1-xxl",
-    "t5_xxl_old":      "google/t5-xxl",          # v1  (Cosmos legacy)
-    "t5_xl":           "google/t5-v1_1-xl",
-    "t5_base":         "google/t5-base",
-
-    # Multilingual / Universal T5
-    "mt5_xl":          "google/mt5-xl",          # kept for completeness
-    "umt5_xxl":        "google/umt5-xxl",
-
-    # BERT / RoBERTa
-    "bert_chinese":    "hfl/chinese-roberta-wwm-ext-large",
-
-    # LLM text encoders
-    "llama3_8b":       "meta-llama/Meta-Llama-3.1-8B-Instruct",
-    "gemma_2b":        "google/gemma-2-2b",
-    "qwen25_3b":       "Qwen/Qwen2.5-3B",
-
-    # Multimodal LLM (text + vision tower inside)
-    "llava":           "llava-hf/llava-llama-3-8b-v1_1",
-
-    # Custom extended-vocab T5
-    "t5_xxl_unchained": "AbstractPhil/t5xxl-unchained",
-}
-
-# ------------------------------------------------------------------ #
 #  Per-model encoder specification (text + multimodal where needed)  #
 # ------------------------------------------------------------------ #
 KNOWN_MODELS: dict[str, dict] = {

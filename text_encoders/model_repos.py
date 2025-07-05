@@ -1,4 +1,6 @@
-# we use these to extract configurations,  settings, shapes, and other metadata from the original models.
+# ------------------------------------------------------------------ #
+#  Canonical repository map (every alias -> Hugging-Face repo slug)  #
+# ------------------------------------------------------------------ #
 MODEL_REPOS = {
     # ------------------------------
     # 📎 CLIP Variants (Text/Visual)

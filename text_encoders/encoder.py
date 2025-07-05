@@ -30,7 +30,7 @@ import uuid
 
 from comfy.model_management import intermediate_device
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Callable, Union, Dict
 
 from comfy import supported_models
 
@@ -40,67 +40,460 @@ from ..abs_sd.sd import CLIP # we will be using a modified CLIP pipeline for the
 @dataclass
 class NeuralIO(nn.Module):
     # houses the target expectations for a transformers-based neural model to be used in a pipeline
-    identifier: str = ""               # required target identifier for a tokenizer, e.g. "clip-vit-large-patch14"
-    types: str = ""                    # required target type for a tokenizer, e.g. "clip", "text", etc
-    config: dict = ()                  # optional configuration for the tokenizer, e.g. {"clip": {"vision_tower": "clip-vit-large-patch14"}}
-    input_expectations: {} = None      # optional list of expected tokenizers, e.g. ["clip-vit-large-patch14", "t5-xxl"]
-    output_expectations: {} = None     # optional list of expected outputs, e.g. ["clip", "text", shape=(1, 768), "clip-vit-large-patch14", "t5-xxl"]
+    identifier: str = ""                               # required target identifier for a tokenizer, e.g. "clip-vit-large-patch14"
+    types: str = ""                                    # required target type for a tokenizer, e.g. "clip", "text", etc
+    config: dict = None                                # optional configuration for the tokenizer, e.g. {"clip": {"vision_tower": "clip-vit-large-patch14"}}
+    callback_hooks: dict[Callable, Callable] = None    # hooks attached for callbacks based on met conditions
+    input_expectations: dict = None                    # optional list of expected tokenizers, e.g. ["clip-vit-large-patch14", "t5-xxl"]
+    output_expectations: dict = None                   # optional list of expected outputs, e.g. ["clip", "text", shape=(1, 768), "clip-vit-large-patch14", "t5-xxl"]
 
 
-@dataclass
-class InterpolationWrapper:
-    # houses the interpolation information for the encoder
-    can_project_upward: bool = False       # whether the encoder can be interpolated to a larger size
-    can_project_downward: bool = False     # whether the encoder can be interpolated to a smaller size
-    target_size: int = -1                  # -1 tries to guess, any other is the target size of the output tensor pool
-
-@dataclass
 class EncoderWrapper(nn.Module):
-    identifier: str = ""                               # unique identifier for the Encoder model, e.g. "clip-vit-large-patch14"
-    expectations: dict[str, NeuralIO] = ()             # Our IO container - housing the expectations for the encoder model, e.g. {"Encoder": EncoderIO(...)}
-    encoders: dict[str, NeuralIO] = ()                 # AT LEAST ONE is required to function
-    tokenizers: dict[str, NeuralIO] = ()               # tokenizer or tokenizers, if any, used by the Encoder model
-    state_dict: Optional[dict] = None                  # symbolic link to the Encoder model, must be confirmed before use
-    config: Optional[dict] = None                      # configuration of the Encoder model, must be confirmed before
+    """Neural network module wrapper for managing encoders and tokenizers."""
 
-    patcher: Optional[object] = None                   # patcher, if any, used by the Encoder model; needed for loras
-    device: str | torch.device = "cpu"                 # the device on which the Encoder model is loaded, e.g. "cuda:0" or "cpu"
-    metadata: dict = ()                                # metadata about the Encoder model
+    def __init__(
+            self,
+            identifier: str = "",
+            expectations: Optional[Dict[str, NeuralIO]] = None,
+            encoders: Optional[Dict[str, NeuralIO]] = None,
+            tokenizers: Optional[Dict[str, NeuralIO]] = None,
+            state_dict: Optional[dict] = None,
+            config: Optional[dict] = None,
+            patcher: Optional[object] = None,
+            device: Union[str, torch.device] = "cpu",
+            metadata: Optional[dict] = None
+    ):
+        super().__init__()
+
+        self.identifier = identifier
+        self.expectations = expectations or {}
+        self.encoders = nn.ModuleDict(encoders or {})  # Use ModuleDict for proper registration
+        self.tokenizers = tokenizers or {}  # Tokenizers might not be nn.Modules
+        self.state_dict_ref = state_dict  # Renamed to avoid conflict with nn.Module.state_dict()
+        self.config = config or {}
+        self.patcher = patcher
+        self.device = torch.device(device) if isinstance(device, str) else device
+        self.metadata = metadata or {}
+
+        # Validate that at least one encoder is provided
+        if not self.encoders:
+            raise ValueError(f"EncoderWrapper '{identifier}' requires at least one encoder")
+
+        # Move to specified device
+        self.to(self.device)
+
+    def forward(self, inputs: Dict[str, Any], encoder_name: Optional[str] = None) -> Dict[str, torch.Tensor]:
+        """
+        Forward pass through specified encoder(s).
+
+        Args:
+            inputs: Dictionary of inputs keyed by encoder name
+            encoder_name: Optional specific encoder to use. If None, uses all encoders.
+
+        Returns:
+            Dictionary of outputs keyed by encoder name
+        """
+        outputs = {}
+
+        if encoder_name:
+            if encoder_name not in self.encoders:
+                raise ValueError(f"Encoder '{encoder_name}' not found in wrapper")
+            encoder = self.encoders[encoder_name]
+            encoder_input = inputs.get(encoder_name, inputs)
+            outputs[encoder_name] = encoder(encoder_input)
+        else:
+            # Process all encoders
+            for name, encoder in self.encoders.items():
+                if name in inputs:
+                    outputs[name] = encoder(inputs[name])
+
+        return outputs
+
+    def encode(self, text: Union[str, List[str]], encoder_names: Optional[List[str]] = None) -> Dict[str, torch.Tensor]:
+        """
+        Encode text using specified encoders with their associated tokenizers.
+
+        Args:
+            text: Input text or list of texts
+            encoder_names: Optional list of encoder names to use. If None, uses all.
+
+        Returns:
+            Dictionary of encoded outputs keyed by encoder name
+        """
+        encoder_names = encoder_names or list(self.encoders.keys())
+        outputs = {}
+
+        for name in encoder_names:
+            if name not in self.encoders:
+                continue
+
+            # Get tokenizer for this encoder
+            tokenizer = self.tokenizers.get(name)
+            encoder = self.encoders[name]
+
+            # Tokenize if tokenizer available
+            if tokenizer:
+                if hasattr(tokenizer, 'tokenize'):
+                    tokens = tokenizer.tokenize(text)
+                elif callable(tokenizer):
+                    tokens = tokenizer(text)
+                else:
+                    raise ValueError(f"Tokenizer for '{name}' is not callable")
+            else:
+                # Assume encoder handles raw text
+                tokens = text
+
+            # Encode
+            if hasattr(encoder, 'encode'):
+                outputs[name] = encoder.encode(tokens)
+            else:
+                outputs[name] = encoder(tokens)
+
+        return outputs
+
+    def add_encoder(self, name: str, encoder: NeuralIO, tokenizer: Optional[NeuralIO] = None):
+        """Add a new encoder to the wrapper."""
+        self.encoders[name] = encoder
+        if tokenizer:
+            self.tokenizers[name] = tokenizer
+        encoder.to(self.device)
+
+    def remove_encoder(self, name: str):
+        """Remove an encoder from the wrapper."""
+        if name in self.encoders:
+            del self.encoders[name]
+        if name in self.tokenizers:
+            del self.tokenizers[name]
+
+    def get_encoder(self, name: str) -> Optional[NeuralIO]:
+        """Get a specific encoder by name."""
+        return self.encoders.get(name)
+
+    def get_tokenizer(self, name: str) -> Optional[NeuralIO]:
+        """Get a specific tokenizer by name."""
+        return self.tokenizers.get(name)
+
+    def apply_patcher(self, encoder_name: Optional[str] = None):
+        """Apply patcher (e.g., for LoRA) to specified encoder(s)."""
+        if not self.patcher:
+            return
+
+        if encoder_name:
+            encoders_to_patch = [self.encoders.get(encoder_name)]
+        else:
+            encoders_to_patch = self.encoders.values()
+
+        for encoder in encoders_to_patch:
+            if encoder and hasattr(self.patcher, 'patch'):
+                self.patcher.patch(encoder)
+
+    def to(self, device: Union[str, torch.device]) -> 'EncoderWrapper':
+        """Move all encoders to specified device."""
+        self.device = torch.device(device) if isinstance(device, str) else device
+
+        # Move all encoders
+        for encoder in self.encoders.values():
+            if hasattr(encoder, 'to'):
+                encoder.to(self.device)
+
+        # Move tokenizers if they support it
+        for tokenizer in self.tokenizers.values():
+            if hasattr(tokenizer, 'to'):
+                tokenizer.to(self.device)
+
+        return super().to(self.device)
+
+    def offload_to_cpu(self, encoder_name: Optional[str] = None):
+        """Offload specified encoder(s) to CPU to save GPU memory."""
+        if encoder_name:
+            encoder = self.encoders.get(encoder_name)
+            if encoder and hasattr(encoder, 'to'):
+                encoder.to('cpu')
+        else:
+            for encoder in self.encoders.values():
+                if hasattr(encoder, 'to'):
+                    encoder.to('cpu')
+
+    def load_encoder_state(self, encoder_name: str, state_dict: dict, strict: bool = True):
+        """Load state dict for a specific encoder."""
+        if encoder_name not in self.encoders:
+            raise ValueError(f"Encoder '{encoder_name}' not found")
+
+        encoder = self.encoders[encoder_name]
+        if hasattr(encoder, 'load_state_dict'):
+            encoder.load_state_dict(state_dict, strict=strict)
+
+    def get_encoder_config(self, encoder_name: str) -> Optional[dict]:
+        """Get configuration for a specific encoder."""
+        return self.config.get(encoder_name, {})
+
+    def __repr__(self) -> str:
+        return (f"EncoderWrapper(identifier='{self.identifier}', "
+                f"encoders={list(self.encoders.keys())}, "
+                f"device={self.device})")
+
+import torch
+import torch.nn as nn
+from abc import ABC
+from typing import Any, Callable, Optional, Union, List, Dict
 
 
-class EncoderConditioner(NeuralIO):
-    # houses representations to the currently pipelined Encoder models
-    intermediate_device = intermediate_device()
-    device = intermediate_device
+class AbstractEncoderModel(nn.Module, ABC):
+    """
+    Abstract encoder interface with modular hooks, symbolic runtime overrides,
+    and explicit hook lifecycle structure for tokenizer/encoder pipelines.
+    """
 
-    def __init__(self,
-                 target_size: int = 768,
-                 ):
-        self.id = uuid.uuid4()
-        self.order = order
-        # all the contained encoders to encode data with
-        self.container: list = []
-        # the expected size of the output tensor pool from all encoders
-        self.target_size = target_size
+    # Hook execution stages (declarative and canonical)
+    HOOK_STAGES = [
+        "pre_init",                # before any initialization, for setup
+        "init",                    # during initialization, for model setup
+        "post_init",               # after initialization, for adjustments
 
+        "pre_load_dict",           # before loading state dict, for pre-load adjustments
+        "load_dict",               # during state dict loading, for model loading
+        "post_load_dict",          # after loading state dict, for post-load adjustments
 
-    def append(self, encoder: EncoderWrapper):
-        # append an encoder to the container
-        if not isinstance(encoder, EncoderWrapper):
-            raise TypeError("Encoder must be an instance of EncoderWrapper")
-        self.container.append(encoder)
-        return
+        "pre_load_layer",          # before loading a specific layer, for pre-load adjustments
+        "load_layer",              # during layer loading, for model layer loading
+        "post_load_layer",         # after loading a specific layer, for offloading at runtime or adjustments
 
-    def order(self, encoderTarget: EncoderContainerTarget):
-        # set the order so it can be used to encode data in the correct order.
-        self.target = encoderTarget
-        return
+        # raw input processing stages
+        "pre_processing",          # before any processing, for initial setup
+        "processing",              # main processing stage, e.g. tokenization
+        "post_processing",         # after main processing, for cleanup or adjustments
+        # tokenization and encoding stages
+        "pre_tokenize",            # before tokenizing input
+        "tokenize",                # main tokenization stage
+        "post_tokenize",           # after tokenization, for adjustments or checks
+        # encoding stages
+        "pre_encode",              # after tokenization, before encoding
+        "encode",                  # main encoding stage, where the model processes tokens
+        "post_encode",             # after encoder forward pass, for post processing adjustments
+        # output transformation stages
+        "pre_output_transform",    # before final transformations, e.g. pooling
+        "output_transform",         # before final return (projection, slicing, etc)
+        "post_output_transform"    # after output transformation, for final adjustments
+    ]
 
+    """Extended with aliased hook system for ComfyUI compatibility"""
+    # Standard hook aliases for common behaviors
+    HOOK_ALIASES = {
+        # Memory management hooks
+        "memory_tracker": "track_layer_memory",
+        "device_mover": "move_layer_to_device",
+        "memory_calculator": "calculate_memory_usage",
+        "offloader": "offload_layer_to_cpu",
 
-    def encode(self, data, config):
-        # instruct the container to encode the data in the correct order using it's encoders.
-        pass # TODO: implement the multi-tiered encoding system
+        # State dict tracking
+        "key_tracker": "track_state_dict_keys",
+        "key_transformer": "transform_state_dict_keys",
 
-    def grab_slices(self):
-        pass # grabs the sliced output from the encoders in the container
+        # ComfyUI compatibility
+        "comfy_dtype": "apply_comfy_dtype_policy",
+        "comfy_patcher": "apply_comfy_patches",
+        "comfy_loader": "comfy_partial_loader",
+        "comfy_unloader": "comfy_partial_unloader",
 
+        # Monitoring
+        "load_monitor": "monitor_layer_load",
+        "memory_monitor": "monitor_memory_usage"
+    }
+
+    def __init__(self, identifier: str = "", config: Optional[dict] = None,
+                 device: Union[str, torch.device] = "cpu"):
+        super().__init__()
+        self.identifier = identifier
+        self.config = config or {}
+        self.device = torch.device(device)
+
+        # Initialize hook system with aliases
+        self._hooks: Dict[str, List[tuple[Callable, Callable, str]]] = {}  # Added alias
+        self._hook_registry: Dict[str, Callable] = {}  # Alias -> function mapping
+
+        for stage in self.HOOK_STAGES:
+            self._hooks[stage] = []
+
+        # ComfyUI compatibility attributes
+        self.loaded_layers = {}  # layer_name -> device
+        self.layer_sizes = {}  # layer_name -> size
+        self._offload_device = torch.device('cpu')
+        self._current_memory_limit = float('inf')
+
+        # Register standard hooks
+        self._register_standard_hooks()
+
+    def _register_standard_hooks(self):
+        """Register all standard ComfyUI compatibility hooks"""
+
+        # Memory tracking hook
+        @self.register_hook_fn("memory_tracker")
+        def track_layer_memory(data):
+            if isinstance(data, tuple) and len(data) == 2:
+                layer_name, layer = data
+                size = sum(p.nelement() * p.element_size() for p in layer.parameters())
+                self.layer_sizes[layer_name] = size
+            return data
+
+        # Device movement hook
+        @self.register_hook_fn("device_mover")
+        def move_layer_to_device(data):
+            if isinstance(data, tuple) and len(data) == 2:
+                layer_name, layer = data
+                target_device = getattr(self, '_target_device', self.device)
+
+                # Check memory budget
+                current_loaded = self._calculate_loaded_memory(target_device)
+                layer_size = self.layer_sizes.get(layer_name, 0)
+
+                if current_loaded + layer_size <= self._current_memory_limit:
+                    layer.to(target_device)
+                    self.loaded_layers[layer_name] = target_device
+                else:
+                    layer.to(self._offload_device)
+                    self.loaded_layers[layer_name] = self._offload_device
+
+            return data
+
+        # State dict key tracking
+        @self.register_hook_fn("key_tracker")
+        def track_state_dict_keys(data):
+            if isinstance(data, tuple) and len(data) == 2:
+                layer_name, layer = data
+                if hasattr(layer, 'state_dict'):
+                    keys = list(layer.state_dict().keys())
+                    if not hasattr(self, '_key_mappings'):
+                        self._key_mappings = {}
+                    self._key_mappings[layer_name] = keys
+            return data
+
+        # ComfyUI dtype policy
+        @self.register_hook_fn("comfy_dtype")
+        def apply_comfy_dtype(data):
+            if isinstance(data, tuple) and len(data) == 2:
+                layer_name, layer = data
+                import comfy.model_management as mm
+                dtype = mm.text_encoder_dtype(self.device)
+                layer.to(dtype=dtype)
+            return data
+
+        # Partial loader for ComfyUI
+        @self.register_hook_fn("comfy_loader")
+        def partial_load_layer(data):
+            """Load individual layer respecting memory limits"""
+            if isinstance(data, tuple) and len(data) == 2:
+                layer_name, layer = data
+                if self.loaded_layers.get(layer_name) != self._target_device:
+                    # Trigger device movement through hook chain
+                    self._run_hooks("pre_load_layer", data)
+                    self._run_hooks("load_layer", data)
+                    self._run_hooks("post_load_layer", data)
+            return data
+
+    def register_hook_fn(self, alias: str):
+        """Decorator to register a hook function with an alias"""
+
+        def decorator(fn):
+            self._hook_registry[alias] = fn
+            return fn
+
+        return decorator
+
+    def add_hook(self, stage: str, hook_input: Union[str, Callable], priority: int = 0):
+        """Add hook by alias or function"""
+        if stage not in self._hooks:
+            raise ValueError(f"Unknown hook stage: {stage}")
+
+        # Resolve alias to function
+        if isinstance(hook_input, str):
+            if hook_input not in self._hook_registry:
+                raise ValueError(f"Unknown hook alias: {hook_input}")
+            fn = self._hook_registry[hook_input]
+            alias = hook_input
+        else:
+            fn = hook_input
+            alias = fn.__name__
+
+        self._hooks[stage].append((priority, fn, alias))
+        self._hooks[stage].sort(key=lambda x: x[0], reverse=True)
+
+    def remove_hook(self, stage: str, alias: str):
+        """Remove hook by alias"""
+        if stage not in self._hooks:
+            raise ValueError(f"Unknown hook stage: {stage}")
+        self._hooks[stage] = [(p, f, a) for p, f, a in self._hooks[stage] if a != alias]
+
+    def enable_comfy_compatibility(self):
+        """Enable all ComfyUI compatibility hooks"""
+        # Memory management
+        self.add_hook("pre_load_layer", "memory_tracker", priority=100)
+        self.add_hook("pre_load_layer", "key_tracker", priority=95)
+        self.add_hook("load_layer", "comfy_dtype", priority=90)
+        self.add_hook("load_layer", "device_mover", priority=85)
+
+        # Enable patches if available
+        if hasattr(self, 'patcher') and self.patcher:
+            self.add_hook("post_load_layer", "comfy_patcher", priority=50)
+
+    def disable_comfy_compatibility(self):
+        """Disable ComfyUI hooks for standalone operation"""
+        for stage in ["pre_load_layer", "load_layer", "post_load_layer"]:
+            self.remove_hook(stage, "memory_tracker")
+            self.remove_hook(stage, "device_mover")
+            self.remove_hook(stage, "comfy_dtype")
+            self.remove_hook(stage, "key_tracker")
+
+    # ComfyUI interface methods using the hook system
+    def partially_load(self, device, extra_memory, force_patch_weights=False):
+        """ComfyUI-compatible partial loading"""
+        self._target_device = device
+        self._current_memory_limit = extra_memory
+
+        # Ensure ComfyUI hooks are enabled
+        self.enable_comfy_compatibility()
+
+        # Run loading through hooks
+        loaded = 0
+        for layer_name, layer in self._get_named_layers():
+            if self.loaded_layers.get(layer_name) == device:
+                continue
+
+            # Let hooks handle everything
+            self._run_hooks("comfy_loader", (layer_name, layer))
+
+            if self.loaded_layers.get(layer_name) == device:
+                loaded += self.layer_sizes.get(layer_name, 0)
+
+        return loaded
+
+    def model_size(self):
+        """Total model size for ComfyUI"""
+        if not self.layer_sizes:
+            # Calculate on first call
+            for layer_name, layer in self._get_named_layers():
+                self._run_hooks("memory_tracker", (layer_name, layer))
+        return sum(self.layer_sizes.values())
+
+    def loaded_size(self):
+        """Currently loaded size for ComfyUI"""
+        return self._calculate_loaded_memory(self.device)
+
+    def _calculate_loaded_memory(self, device):
+        """Helper to calculate loaded memory on device"""
+        return sum(size for name, size in self.layer_sizes.items()
+                   if self.loaded_layers.get(name) == device)
+
+    def configure_hooks(self, hook_config: Dict[str, List[str]]):
+        """Configure which hooks are active for each stage"""
+        for stage, aliases in hook_config.items():
+            # Clear existing hooks for stage
+            self.clear_hooks(stage)
+            # Add requested hooks
+            for alias in aliases:
+                self.add_hook(stage, alias)
+
+    def get_active_hooks(self, stage: Optional[str] = None) -> Dict[str, List[str]]:
+        """Get currently active hooks by stage"""
+        if stage:
+            return [alias for _, _, alias in self._hooks.get(stage, [])]
+        return {s: [alias for _, _, alias in hooks] for s, hooks in self._hooks.items()}
