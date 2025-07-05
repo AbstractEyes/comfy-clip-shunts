@@ -10,11 +10,9 @@
 
 from __future__ import annotations
 import json
-import os
 
 import torch
 from enum import Enum
-import logging
 
 from comfy import model_management
 from comfy.utils import ProgressBar
@@ -38,7 +36,7 @@ from comfy import gligen
 from comfy import diffusers_convert
 from comfy import model_detection
 
-from comfy import sd1_clip
+from ..text_encoders.old import sd1_clip
 from comfy import sdxl_clip
 # original text encoder positions in files
 import comfy.text_encoders.sd2_clip
@@ -71,8 +69,8 @@ import comfy.taesd.taesd
 import comfy.ldm.flux.redux
 
 # replaced new ones, old ones commented out when new ones are added.
-from ..text_encoders.hidream import HiDreamTEModel, HiDreamTokenizer, hidream_clip
-from ..text_encoders.flux import FluxClipModel, FluxTokenizer, flux_clip
+from ..text_encoders.old.hidream import HiDreamTEModel, HiDreamTokenizer, hidream_clip
+from ..text_encoders.old.flux import FluxClipModel, FluxTokenizer, flux_clip
 import logging
 
 logger = logging.getLogger(__name__)
