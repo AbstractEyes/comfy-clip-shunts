@@ -11,6 +11,8 @@ from transformers import T5TokenizerFast
 import torch
 import os
 
+from .t5 import T5
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -23,20 +25,28 @@ class T5XXLModel(sd1_clip.SDClipModel):
             logger.info("Using unchained T5XXL text encoder")
             textmodel_json_config = os.path.join(os.path.dirname(os.path.realpath(__file__)), "t5_config_unchained_xxl.json")
         else:
-            logger.info("Using chained T5XXL text encoder")
-            textmodel_json_config = os.path.join(os.path.dirname(os.path.realpath(__file__)), "t5_config_xxl.json")
+            if model_options.get("distilled_t5", False):
+                logger.info("Using distilled T5 Base text encoder")
+                textmodel_json_config = os.path.join(os.path.dirname(os.path.realpath(__file__)), "distillt5_config.json")
+            else:
+                logger.info("Using chained T5XXL baseline text encoder")
+                textmodel_json_config = os.path.join(os.path.dirname(os.path.realpath(__file__)), "t5_config_xxl.json")
         t5xxl_scaled_fp8 = model_options.get("t5xxl_scaled_fp8", None)
         if t5xxl_scaled_fp8 is not None:
             model_options = model_options.copy()
             model_options["scaled_fp8"] = t5xxl_scaled_fp8
+        if model_options.get("distilled_t5", False):
+            name = "t5_base"
+        else:
+            name = "t5xxl"
+        model_options = {**model_options, "model_name": name}
 
-        model_options = {**model_options, "model_name": "t5xxl"}
         super().__init__(device=device,
                          layer=layer,
                          layer_idx=layer_idx,
                          textmodel_json_config=textmodel_json_config,
                          dtype=dtype, special_tokens={"end": 1, "pad": 0},
-                         model_class=comfy.text_encoders.t5.T5,
+                         model_class=T5,
                          enable_attention_masks=attention_mask,
                          zero_out_masked=True,
                          return_attention_masks=False,
@@ -93,11 +103,19 @@ class FluxClipModel(torch.nn.Module):
         if "text_model.encoder.layers.1.mlp.fc1.weight" in sd:
             return self.clip_l.load_sd(sd)
         else:
+            logger.info("Replacing keys in state dict for FluxClipModel")
+            for key in list(sd.keys()):
+                # if key starts with encoder.encoder replace with just encoder
+                if key.startswith("encoder.encoder."):
+                    logger.info("Replacing key {} with {}".format(key, key.replace("encoder.encoder.", "encoder.")))
+                    new_key = key.replace("encoder.encoder.", "encoder.")
+                    sd[new_key] = sd[key]
+                    del sd[key]
             return self.t5xxl.load_sd(sd)
 
-def flux_clip(dtype_t5=None, t5xxl_scaled_fp8=None, unchained_t5=False):
+def flux_clip(dtype_t5=None, t5xxl_scaled_fp8=None, unchained_t5=False, distilled_t5=False):
     class FluxClipModel_(FluxClipModel):
-        def __init__(self, device="cpu", dtype=None, model_options={}, unchained_t5=unchained_t5):
+        def __init__(self, device="cpu", dtype=None, model_options={}, unchained_t5=unchained_t5, distilled_t5=distilled_t5):
             if t5xxl_scaled_fp8 is not None and "t5xxl_scaled_fp8" not in model_options:
                 model_options = model_options.copy()
                 model_options["t5xxl_scaled_fp8"] = t5xxl_scaled_fp8
@@ -107,5 +125,11 @@ def flux_clip(dtype_t5=None, t5xxl_scaled_fp8=None, unchained_t5=False):
             else:
                 model_options = model_options.copy()
                 model_options["unchained_t5"] = False
+            if distilled_t5:
+                model_options = model_options.copy()
+                model_options["distilled_t5"] = True
+            else:
+                model_options = model_options.copy()
+                model_options["distilled_t5"] = False
             super().__init__(dtype_t5=dtype_t5, device=device, dtype=dtype, model_options=model_options)
     return FluxClipModel_

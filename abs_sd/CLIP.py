@@ -271,6 +271,7 @@ class TEModel(Enum):
     T5_XXL = 4
     T5_XL = 5
     T5_BASE = 6
+    T5_DISTILL = 11
     LLAMA3_8 = 7
     T5_XXL_OLD = 8
     GEMMA_2_2B = 9
@@ -301,9 +302,32 @@ def detect_te_model(sd):
         return TEModel.LLAMA3_8
     return None
 
+def t5_base_detect(state_dict, prefix=""):
+    # determine if it's a valid T5-base model for the out dims
+    dims = 4096
+    out = {}
+    logger.info("Detecting T5 model with the weights {}".format(state_dict.keys()))
+    t5_key = "{}encoder.encoder.block.7.layer.1.DenseReluDense.wi_1.weight".format(prefix)
+    if t5_key in state_dict:
+        # check for final_projection.0.weight
+        if "final_projection.3.weight" in state_dict:
+            # check if the shape is (4096, 768)
+            out["dtype_t5"] = state_dict[t5_key].dtype
+            out["unchained_t5"] = False
+            out["distilled_t5"] = True
+            logger.info("Detected T5-base model with final projection layer.")
+        else:
+            out["dtype_t5"] = state_dict[t5_key].dtype
+            out["unchained_t5"] = False
+            out["distilled_t5"] = False
+            logger.info("Detected T5-base model without final projection layer.")
+
+    return out
+
 def t5_xxl_detect(state_dict, prefix=""):
     out = {}
     t5_key = "{}encoder.final_layer_norm.weight".format(prefix)
+    final_projection = "final_projection.0.weight"
     unchained_key = "shared.weight"
     if t5_key in state_dict:
         out["dtype_t5"] = state_dict[t5_key].dtype
@@ -314,7 +338,12 @@ def t5_xxl_detect(state_dict, prefix=""):
             else:
                 # we are chained
                 out["unchained_t5"] = False
-
+    if final_projection in state_dict: # implies the distilled T5-base representing the t5xxl's dimensions.
+        logger.info("Detected Distilled T5-XXL model with final projection layer.")
+        out["distilled_t5"] = True
+    else:
+        logger.info("Detected T5-XXL model without final projection layer.")
+        out["distilled_t5"] = False
     scaled_fp8_key = "{}scaled_fp8".format(prefix)
     if scaled_fp8_key in state_dict:
         out["t5xxl_scaled_fp8"] = state_dict[scaled_fp8_key].dtype
@@ -325,10 +354,16 @@ def t5xxl_detect(clip_data):
     weight_name = "encoder.block.23.layer.1.DenseReluDense.wi_1.weight"
     weight_name_old = "encoder.block.23.layer.1.DenseReluDense.wi.weight"
 
+    # check for t5-base
+    t5_base_check = "encoder.shared.weight"
 
     for sd in clip_data:
         if weight_name in sd or weight_name_old in sd:
+            logger.info("Detected T5-XXL model.")
             return t5_xxl_detect(sd)
+        if t5_base_check in sd:
+            logger.info("Detected T5-base model.")
+            return t5_base_detect(sd)
 
     return {}
 

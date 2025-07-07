@@ -1,7 +1,13 @@
 import torch
 import math
+import logging
+
+from torch import nn
+
 from comfy.ldm.modules.attention import optimized_attention_for_device
 import comfy.ops
+
+logger = logging.getLogger(__name__)
 
 class T5LayerNorm(torch.nn.Module):
     def __init__(self, hidden_size, eps=1e-6, dtype=None, device=None, operations=None):
@@ -16,8 +22,10 @@ class T5LayerNorm(torch.nn.Module):
 
 activations = {
     "gelu_pytorch_tanh": lambda a: torch.nn.functional.gelu(a, approximate="tanh"),
+    "gelu_new": lambda a: 0.5 * a * (1 + torch.tanh(torch.sqrt(torch.tensor(2.0 / torch.pi)) * (a + 0.044715 * a**3))),
     "relu": torch.nn.functional.relu,
 }
+
 
 class T5DenseActDense(torch.nn.Module):
     def __init__(self, model_dim, ff_dim, ff_activation, dtype, device, operations):
@@ -225,12 +233,21 @@ class T5Stack(torch.nn.Module):
 class T5(torch.nn.Module):
     def __init__(self, config_dict, dtype, device, operations):
         super().__init__()
+        logger.info(f"Initializing T5 with config: {config_dict}")
         self.num_layers = config_dict["num_layers"]
         model_dim = config_dict["d_model"]
         inner_dim = config_dict["d_kv"] * config_dict["num_heads"]
         self.project_in_dim = config_dict.get("project_in_dim", None)
-        self.project_out_dim = config_dict.get("out_dim", None)
-
+        self.project_out_dim = config_dict.get("project_out_dim", None)
+        self.final_projection = None
+        if self.project_in_dim is not None and self.project_out_dim is not None:
+            logger.info(f"Using final projection from {self.project_in_dim} to {self.project_out_dim}")
+            self.final_projection = nn.Sequential(
+                nn.Linear(self.project_in_dim, self.project_out_dim, bias=False),
+                nn.ReLU(),
+                nn.Dropout(0.0),
+                nn.Linear(self.project_out_dim, self.project_out_dim, bias=False)
+            )
         self.encoder = T5Stack(self.num_layers, model_dim, inner_dim, config_dict["d_ff"], config_dict["dense_act_fn"], config_dict["is_gated_act"], config_dict["num_heads"], config_dict["model_type"] != "umt5", dtype, device, operations)
         self.dtype = dtype
         self.shared = operations.Embedding(config_dict["vocab_size"], model_dim, device=device, dtype=dtype)
@@ -246,11 +263,25 @@ class T5(torch.nn.Module):
             x = embeds
         else:
             x = self.shared(input_ids, out_dtype=kwargs.get("dtype", torch.float32))
+
         if self.dtype not in [torch.float32, torch.float16, torch.bfloat16]:
-            x = torch.nan_to_num(x) #Fix for fp8 T5 base
-        if self.project_in_dim is not None:
-            x = comfy.ops.cast_to_input(self.project_in_dim, x)
+            x = torch.nan_to_num(x)  # Fix for fp8 T5 base
+
+        # Run the encoder
         encodings = self.encoder(x, attention_mask=attention_mask, **kwargs)
-        if self.project_out_dim is not None:
-            encodings = comfy.ops.cast_to_input(self.project_out_dim, encodings)
-        return encodings
+
+        # Final projection (e.g., 768 → 4096)
+        if self.final_projection is not None:
+            # Unpack if encoder returns a tuple
+            if isinstance(encodings, tuple):
+                encodings = encodings[0]  # Shape: [B, T, D]
+            logger.info(f"Pre projection shape: {encodings.shape}")
+            encodings = self.final_projection(encodings)  # Shape: [B, T, D]
+            logger.info(f"Post projection shape: {encodings.shape}")
+
+            # Enforce group dim: [1, B, T, D]
+            if encodings.dim() == 3:
+                encodings = encodings.unsqueeze(0)
+
+        return encodings  # Shape: [1, B, T, D]
+

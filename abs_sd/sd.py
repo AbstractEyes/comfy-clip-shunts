@@ -77,6 +77,7 @@ import comfy.ldm.flux.redux
 # replaced new ones, old ones commented out when new ones are added.
 from ..text_encoders.old.hidream import HiDreamTEModel, HiDreamTokenizer, hidream_clip
 from ..text_encoders.old.flux import FluxClipModel, FluxTokenizer, flux_clip
+
 import logging
 
 logger = logging.getLogger(__name__)
