@@ -106,6 +106,11 @@ class FluxClipModel(torch.nn.Module):
             logger.info("Replacing keys in state dict for FluxClipModel")
             for key in list(sd.keys()):
                 # if key starts with encoder.encoder replace with just encoder
+                if key.startswith("encoder.shared.weight"):
+                    logger.info("Replacing key {} with {}".format(key, key.replace("encoder.shared.weight", "shared.weight")))
+                    new_key = key.replace("encoder.shared.weight", "shared.weight")
+                    sd[new_key] = sd[key]
+                    del sd[key]
                 if key.startswith("encoder.encoder."):
                     logger.info("Replacing key {} with {}".format(key, key.replace("encoder.encoder.", "encoder.")))
                     new_key = key.replace("encoder.encoder.", "encoder.")
