@@ -13,6 +13,42 @@ from transformers import AutoModel, AutoTokenizer, AutoConfig, AutoModelForSeq2S
     PreTrainedTokenizerFast
 
 logger = logging.getLogger(__name__)
+# --------------------------------------------------------------------------- #
+# Helper for namespaced cache keys
+def _make_key(model_type: str, model_id: str) -> str:
+    """
+    Produce a unique key for the internal cache.
+
+    Example
+    -------
+    >>> _make_key("bert", "bert-base")
+    'bert:bert-base'
+    """
+    return f"{model_type}:{model_id}"
+
+
+# Thread-safe registry wrapper
+class _SafeDict(dict):
+    """A dict protected by a re-entrant lock for thread-safe writes."""
+    def __init__(self):
+        super().__init__()
+        import threading
+        self._lock = threading.RLock()
+
+    def safe_set(self, key, value):
+        with self._lock:
+            super().__setitem__(key, value)
+
+    def safe_get(self, key, default=None):
+        with self._lock:
+            return super().get(key, default)
+
+    def safe_del(self, key):
+        with self._lock:
+            if key in self:
+                super().__delitem__(key)
+                return True
+            return False
 
 
 # -------------------------------------------------------------------------------------------------------------------- #
@@ -54,13 +90,22 @@ class ModelInfo:
 
 class ModelManager:
     """
-    Centralized model manager for loading, caching, and managing various model types.
+    Centralized model loader / cache with thread-safety and namespaced keys.
     """
 
     def __init__(self, cache_dir: Optional[str] = None):
-        self.models: Dict[str, ModelInfo] = {}
+        # Thread-safe model cache
+        self.models: _SafeDict = _SafeDict()
+
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.cache_dir = self._setup_cache_dir(cache_dir)
+
+    # --------------------------------------------------------------------- #
+    # Internal helpers
+    def _store(self, key: str, info: "ModelInfo") -> None:
+        """Thread-safe insertion into the model cache."""
+        self.models.safe_set(key, info)
+
 
     def _setup_cache_dir(self, cache_dir: Optional[str]) -> Path:
         """Setup and validate cache directory"""
@@ -74,54 +119,71 @@ class ModelManager:
         logger.info(f"Using cache directory: {cache_path}")
         return cache_path
 
-    def get_model(self, model_id: str) -> Optional[ModelInfo]:
-        """Get a loaded model by ID"""
-        return self.models.get(model_id)
+    def get_model(self, key: str) -> Optional["ModelInfo"]:
+        """Retrieve a model by its namespaced key."""
+        return self.models.safe_get(key)
 
-    def is_loaded(self, model_id: str) -> bool:
-        """Check if a model is loaded"""
-        return model_id in self.models
+    def is_loaded(self, key: str) -> bool:
+        """Return True if the namespaced key is present in the cache."""
+        return self.models.safe_get(key) is not None
+
+
+    def move_model(
+        self,
+        namespaced_key: str,
+        *,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> Optional[nn.Module]:
+        """
+        Convert device/dtype of a cached model and return the updated object.
+        """
+        model = self._maybe_convert_dtype(namespaced_key, dtype, device)
+        if model is None:
+            logger.warning("move_model: %s not found", namespaced_key)
+        return model
+
 
     def load_tokenizer(
-            self,
-            id: str,
-            tokenizer_name_or_path: str,
-            target_output_device: Optional[torch.device] = None, # tokenizers live on cpu but they have destination devices for the output.
-            force_reload: bool = False,
-            trust_remote_code: Optional[bool] = None  # Overrides the global TRUST_REMOTE_CODE setting.
-    ) -> tuple[Module, dict[str, Any]] | tuple[Any, dict[str, Any]] | None:
-        """Load a tokenizer from HuggingFace or local path."""
-        if not force_reload and self.is_loaded(id):
-            logger.info(f"Using cached tokenizer: {id}")
-            model_info = self.get_model(id)
+        self,
+        id: str,
+        tokenizer_name_or_path: str,
+        target_output_device: Optional[torch.device] = None,
+        force_reload: bool = False,
+        trust_remote_code: Optional[bool] = None,
+    ) -> Optional[tuple[PreTrainedTokenizerFast, dict[str, Any]]]:
+        """Load or fetch from cache a Hugging-Face tokenizer."""
+        key = _make_key("tokenizer", id)
+        if not force_reload and self.is_loaded(key):
+            model_info = self.get_model(key)
             return model_info.model, model_info.metadata
 
         try:
-            target_output_device = target_output_device or torch.device("cpu")
-            trust_remote_code = trust_remote_code if trust_remote_code is not None else TRUST_REMOTE_CODE
-
-            # Load tokenizer
-            tokenizer = AutoTokenizer.from_pretrained(
-                tokenizer_name_or_path,
-                trust_remote_code=trust_remote_code  # Use the global flag for remote code execution
+            trust_remote_code = (
+                trust_remote_code if trust_remote_code is not None else TRUST_REMOTE_CODE
+            )
+            tok = AutoTokenizer.from_pretrained(
+                tokenizer_name_or_path, trust_remote_code=trust_remote_code
             )
 
-            # Cache the tokenizer
-            self.models[id] = ModelInfo(
-                model=tokenizer,
-                model_type=ModelType.TOKENIZER,
-                config={"tokenizer_name": tokenizer_name_or_path},
-                device=target_output_device,
-                dtype=torch.float32,  # Tokenizers don't have a dtype input, but we can set an output dtype if needed
-                metadata={"source": "huggingface", "trust_remote_code": trust_remote_code}
+            self._store(
+                key,
+                ModelInfo(
+                    model=tok,
+                    model_type=ModelType.TOKENIZER,
+                    config={"tokenizer_name": tokenizer_name_or_path},
+                    device=target_output_device or torch.device("cpu"),
+                    dtype=torch.float32,
+                    metadata={"source": "huggingface", "trust_remote_code": trust_remote_code},
+                ),
             )
+            logger.info("Loaded tokenizer %s", key)
+            return tok, self.get_model(key).metadata
 
-            logger.info(f"Successfully loaded tokenizer: {id}")
-            return tokenizer, self.models[id].metadata
-
-        except Exception as e:
-            logger.error(f"Failed to load tokenizer {id}: {e}")
+        except Exception:
+            logger.exception("Failed to load tokenizer %s", id)
             return None
+
 
     def load_shunt_adapter(
             self,
@@ -278,7 +340,8 @@ class ModelManager:
             ).to(device)
 
             # Cache the model
-            self.models[model_id] = ModelInfo(
+
+            self._store(_make_key("bert", model_id), ModelInfo(
                 model=model,
                 model_type=ModelType.BERT_MODEL,
                 config={"model_name": model_name_or_path},
@@ -286,7 +349,7 @@ class ModelManager:
                 dtype=dtype,
                 metadata={"tokenizer": tokenizer},
                 trust_remote_code=trust_remote_code if trust_remote_code is not None else TRUST_REMOTE_CODE
-            )
+            ))
 
             logger.info(f"Successfully loaded BERT model: {model_id}")
             return model, tokenizer
@@ -331,14 +394,14 @@ class ModelManager:
             ).to(device)
 
             # Cache the model
-            self.models[model_id] = ModelInfo(
+            self._store(_make_key("t5", model_id), ModelInfo(
                 model=model,
                 model_type=ModelType.T5_MODEL,
                 config={"model_name": model_name_or_path},
                 device=device,
                 dtype=dtype,
                 metadata={"tokenizer": tokenizer}
-            )
+            ))
 
             logger.info(f"Successfully loaded T5 model: {model_id}")
             return model, tokenizer
@@ -465,6 +528,30 @@ class ModelManager:
             model_info.model = model
 
         return model
+
+    # ------------------------------------------------------------------ #
+    #  EncoderWrapper convenience
+    def as_encoder(self, namespaced_key: str) -> Optional["EncoderWrapper"]:
+        """
+        Wrap a cached model (+ optional tokenizer) into an EncoderWrapper.
+        """
+        from .encoder_wrapper import EncoderWrapper  # adjust relative path
+
+        mi = self.get_model(namespaced_key)
+        if mi is None:
+            logger.warning("as_encoder: %s not found in cache", namespaced_key)
+            return None
+
+        tok = mi.metadata.get("tokenizer") if mi.metadata else None
+        ew = EncoderWrapper(
+            identifier=namespaced_key,
+            encoders={namespaced_key: mi.model},
+            tokenizers={namespaced_key: tok} if tok else {},
+            device=mi.device,
+            config=mi.config,
+        )
+        return ew
+
 
     def __del__(self):
         """Cleanup on deletion"""

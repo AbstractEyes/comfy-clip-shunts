@@ -2,7 +2,7 @@
 import torch.nn as nn
 
 class ShuntAdapterRepresentation:
-
+    pass
 
 class AdapterPipe:
     ...
@@ -37,7 +37,7 @@ class AdapterPipe:
         self.quiet_fail = quiet_fail
         self.crash_on_fail = crash_on_fail
 
-    def prepare
+    #def prepare
 
 
 class EncoderPipe(AdapterPipe):

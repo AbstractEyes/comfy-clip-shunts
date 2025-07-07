@@ -5,7 +5,7 @@ import comfy
 from comfy.sd import CLIP
 from ..utils.clip_converter import translate_comfy_clip_to_multiclip, reconstruct_comfy_clip_from_multiclip
 from ..model.model_manager import get_model_manager
-from ..abs_sd.sd import load_clip, CLIPType
+from ..abs_sd.CLIP import load_clip, CLIPType
 
 import folder_paths
 
@@ -120,46 +120,41 @@ class AQuadrupleCLIPLoader:
         clip = load_clip(ckpt_paths=[clip_path1, clip_path2, clip_path3, clip_path4], embedding_directory=folder_paths.get_folder_paths("embeddings"))
         return (clip,)
 
-class ClipTokenizerSwap:
-    # we patch the clip model to allow for more complex operations
+
+
+# This is a placeholder for the EncodeConditioning class.
+class EncoderEncodeConditioning:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "clip_model": ("CLIP", {}),
-                "target_model": (['t5xxl'], {"default": "t5xxl"}),
-                "tokenizer_repo": ("STRING", {"default": "AbstractPhil/t5xxl-unchained"}),
+                "clip": ("CLIP",),
+                "clip_pipeline": ("CLIP_PIPELINE", {"default": None}),
             }
         }
-    RETURN_TYPES = ("CLIP", "CLIP_PIPELINE")
-    RETURN_NAMES = ("clip", "abs_clip_pipeline")
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING_PIPELINE")
+    RETURN_NAMES = ("conditioning", "conditioning_pipeline")
+    FUNCTION = "encode_conditioning"
 
-    FUNCTION = "swap_tokenizer"
-    CATEGORY = "clip-suite/tokenizer"
-
-    def swap_tokenizer(self, clip_model: CLIP, tokenizer_repo: str = "AbstractPhil/t5xxl-unchained"):
+    CATEGORY = "clip-suite/conditioning"
+    def encode_conditioning(self, clip, clip_pipeline=None):
         """
-        Attempts to find the t5 within the CLIP model and swap the tokenizer with the one provided at the repo.
+        Encodes the conditioning from the provided CLIP model and pipeline.
         """
-        # convert the comfy CLIP to a MultiClip dictionary, not the most efficient way but works for now
-        # if no clip correctly provided, raise an error
-        if not isinstance(clip_model, CLIP):
-            raise ValueError(f"{self.__class__.__name__}: Provided clip_model is not a valid CLIP instance.")
-        clip_model = clip_model.clone()  # clone the clip model to avoid modifying the original
-        multiclip_dict = translate_comfy_clip_to_multiclip(clip_model)
-        if not tokenizer_repo:
-            # default to the original tokenizer if no repo is provided
-            tokenizer_repo = "AbstractPhil/t5xxl-unchained"
-        # check if the t5 is present
-        if "t5" not in multiclip_dict:
-            logger.warning("No T5 model found in the provided CLIP model. Returning original CLIP.")
-            return (clip_model, None)
-        else:
-            # swap the tokenizer with the one provided at the repo
-            tokenizer = model_manager.load_tokenizer('t5xxl-unchained-hard-loaded', tokenizer_name_or_path=tokenizer_repo)
-            multiclip_dict["t5"]["tokenizer"] = tokenizer
+        if not isinstance(clip, CLIP):
+            raise ValueError(f"{self.__class__.__name__}: Provided clip is not a valid CLIP instance.")
 
-        return (clip_model,)
+        # Convert the comfy CLIP to a MultiClip dictionary
+        multiclip_dict = translate_comfy_clip_to_multiclip(clip)
+
+        # Reconstruct the comfy CLIP from the MultiClip dictionary
+        reconstructed_clip = reconstruct_comfy_clip_from_multiclip(multiclip_dict)
+
+        # If a clip_pipeline is provided, use it; otherwise, return None
+        conditioning_pipeline = clip_pipeline if clip_pipeline else None
+
+        return (reconstructed_clip.conditioning, conditioning_pipeline)
+
 
 
 class AbsClipSplitter:

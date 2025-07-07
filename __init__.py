@@ -40,7 +40,7 @@ from .node.nodes import (
 )
 
 from .node.clip_nodes import (
-    ClipTokenizerSwap,
+    #ClipTokenizerSwap, no longer needed
     AbsClipSplitter,
     ACLIPLoader,
     ADualCLIPLoader,
@@ -92,7 +92,7 @@ NODE_CLASS_MAPPINGS = {
     "ADualCLIPLoader": ADualCLIPLoader,       # Loads a dual CLIP model (clip-l, clip-g)
     "ATripleCLIPLoader": ATripleCLIPLoader,   # Loads a triple CLIP model (clip-l, clip-g, t5)
     "AQuadrupleCLIPLoader": AQuadrupleCLIPLoader, # Loads a quadruple CLIP model (clip-l, clip-g, t5, llama)
-    "ClipTokenizerSwap": ClipTokenizerSwap,     # added v0.4.0
+    #"ClipTokenizerSwap": ClipTokenizerSwap,     # added v0.4.0
     "AbsClipSplitter": AbsClipSplitter,         # added v0.4.0
 
     # Deprecated nodes
@@ -150,7 +150,7 @@ print("""
 ╔══════════════════════════════════════════╗
 ║        🚀 ABS SHUNT SUITE 🚀            ║
 ║    Dev Advanced Bridging System Adapters ║
-║         ⚡ Version 0.5.0 ⚡                ║
+║         ⚡ Version 0.5.2 ⚡                ║
 ╚══════════════════════════════════════════╝
 """)
 
