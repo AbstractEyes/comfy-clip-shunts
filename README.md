@@ -19,15 +19,25 @@ Shunts Supported encoders:
 * bert-base-cased
 * google/flan-t5-base
 * google/flan-t5-small
+* AbstractPhil/T5-Small-Human-Attentive
+* AbstractPhil/T5-Small-Human-Attentive-Try2-Pass2
+* AbstractPhil/T5-Small-Human-Attentive-Try2-Pass3
 
 Core ComfyUI Clip Loaders support:
 * hidream
+* * all comfyui current clips + t5xxl base + llama
 * * t5-unchained-fp8
 * * t5-unchained-fp16
 * flux
+* * all comfyui current clips + t5 models
 * * t5-unchained-fp8
 * * t5-unchained-fp16
 * * LifuWang/DistillT5
+* sd3 and sd3.5
+* * all comfyui current clips + t5 models
+* * t5-unchained-fp8
+* * t5-unchained-fp16
+* * 
 
 # Nodes
 * Lots, and lots, and a sampler, and lots more.
