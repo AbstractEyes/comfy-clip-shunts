@@ -286,7 +286,6 @@ class AbstractEncoderModel(nn.Module, ABC):
         # State dict tracking
         "key_tracker": "track_state_dict_keys",
         "key_transformer": "transform_state_dict_keys",
-
         # ComfyUI compatibility
         "comfy_dtype": "apply_comfy_dtype_policy",
         "comfy_patcher": "apply_comfy_patches",
@@ -634,10 +633,10 @@ class AbstractEncoderModel(nn.Module, ABC):
         return 0
 
     def clone(self):
-        """Create a clone of this model"""
+        """Create a shallow clone of this model"""
         # Basic cloning - concrete implementations might need more
         import copy
-        return copy.deepcopy(self)
+        return copy.copy(self)
 
     def is_clone(self, other):
         """Check if other model is a clone of this one"""

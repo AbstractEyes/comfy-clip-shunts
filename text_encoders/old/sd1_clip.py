@@ -12,6 +12,7 @@ import logging
 import numbers
 import re
 
+
 def gen_empty_tokens(special_tokens, length):
     start_token = special_tokens.get("start", None)
     end_token = special_tokens.get("end", None)

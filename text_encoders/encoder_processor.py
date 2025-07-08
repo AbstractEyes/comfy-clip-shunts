@@ -17,7 +17,7 @@ import torch
 
 from typing import Optional, Any
 from ..sampler.schedules  import ConditioningSchedulerTypes
-from ..sampler.folding_sampler import FoldingSampler, FoldingTypes, FoldingPaddingTypes
+from ..sampler.clip_sampler import FoldingSampler, FoldingTypes, FoldingPaddingTypes
 
 class ScheduledEncoderConfig:
     """
@@ -25,8 +25,8 @@ class ScheduledEncoderConfig:
     Contains settings for the encoder's operation, including model type, context window size,
     and other parameters that control how the encoder processes inputs.
     """
-    CONTEXT_WINDOW = True
-    USE_CONTEXT_WINDOW = True
+    CONTEXT_WINDOW = ""
+    OVERRIDE_CONTEXT_WINDOW = False
     SCHEDULER_MODE = ConditioningSchedulerTypes.TAU  # Default scheduler mode which is rigid
     FOLDING_MODE = FoldingTypes.FOLD  # Default folding mode
     PADDING_FILL_MODE = FoldingPaddingTypes.NONE  # Determines how padding is filled in sequences

@@ -1,3 +1,4 @@
+from typing import Tuple
 
 import torch
 import torch.nn as nn
@@ -344,3 +345,64 @@ def load_converted_safetensors(adapter: nn.Module, path: str, map_location="cpu"
     print(f"   🔁 Renamed Keys: {renamed}")
     print(f"   ✅ Direct Matches: {matched}")
     print(f"   ⚠️  Skipped Keys: {skipped}")
+
+
+def reshape_for_shunt(
+    encoder_embeddings: torch.Tensor,
+    clip_slice: torch.Tensor,
+    adapter_model
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Ensures encoder_embeddings and clip_slice match the required dimensions
+    for adapter_model: [B, adapter_seq, adapter_dim].
+
+    Applies sequence interpolation and feature projection as needed.
+    """
+    B, encoder_seq, encoder_dim = encoder_embeddings.shape
+    B2, clip_seq, clip_dim = clip_slice.shape
+
+    assert B == B2, "Batch sizes must match"
+
+    # -- Step 1: Interpolate SEQUENCE LENGTH (dim=1) if needed --
+    target_seq = max(adapter_model.condition_dim, adapter_model.modulation_dim)
+
+    if clip_seq != target_seq:
+        clip_slice = clip_slice.permute(0, 2, 1)  # [B, C, T]
+        clip_slice = torch.nn.functional.interpolate(
+            clip_slice.float(),
+            size=target_seq,
+            mode="nearest"
+        )
+        clip_slice = clip_slice.permute(0, 2, 1)  # [B, T, C]
+
+    if encoder_seq != target_seq:
+        encoder_embeddings = encoder_embeddings.permute(0, 2, 1)
+        encoder_embeddings = torch.nn.functional.interpolate(
+            encoder_embeddings.float(),
+            size=target_seq,
+            mode="nearest"
+        )
+        encoder_embeddings = encoder_embeddings.permute(0, 2, 1)
+
+    # -- Step 2: Project FEATURE DIMENSION (dim=2) if needed --
+    if clip_slice.size(-1) != adapter_model.condition_dim:
+        projection_clip = torch.nn.Linear(
+            clip_slice.size(-1),
+            adapter_model.condition_dim,
+            bias=True,
+            device=clip_slice.device
+        )
+        clip_slice = projection_clip(clip_slice)
+        del projection_clip
+
+    if encoder_embeddings.size(-1) != adapter_model.modulation_dim:
+        projection_encoder = torch.nn.Linear(
+            encoder_embeddings.size(-1),
+            adapter_model.modulation_dim,
+            bias=True,
+            device=encoder_embeddings.device
+        )
+        encoder_embeddings = projection_encoder(encoder_embeddings)
+        del projection_encoder
+
+    return encoder_embeddings, clip_slice

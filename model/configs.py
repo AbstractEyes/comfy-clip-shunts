@@ -451,14 +451,41 @@ ENCODER_CONFIGS = {
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
         "subfolder": "",
     },
-    "t5-unchained": {
-        "repo_name": "AbstractPhil/t5-unchained",
-        "name": "t5-unchained",
+    "distill-t5-base-4096": {
+        "repo_name": "LifuWang/DistillT5",
+        "name": "distill-t5-base-4096",
+        "type": "t5_encoder_with_projection",
+        "tokenizer": "t5_override", # only required if the tokenizer is missing from the model repo
+        "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+        "subfolder": "",
+    },
+    "distill-t5-small-4096": {
+        "repo_name": "LifuWang/DistillT5-Small",
+        "name": "distill-t5-small-4096",
+        "type": "t5_encoder_with_projection",
+        "tokenizer": "t5_override", # only required if the tokenizer is missing from the model repo
+        "use_huggingface": True,
+        # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+        "subfolder": "",
+    },
+    "distill-t5-large-4096": {
+        "repo_name": "LifuWang/DistillT5-Large",
+        "name": "distill-t5-large-4096",
+        "type": "t5_encoder_with_projection",
+        "tokenizer": "t5_override", # only required if the tokenizer is missing from the model repo
+        "use_huggingface": True,
+        # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+        "subfolder": "",
+    },
+
+    "t5xxl-unchained": {
+        "repo_name": "AbstractPhil/t5xxl-unchained",
+        "name": "t5xxl-unchained-f16",
         "type": "t5",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
         "subfolder": "",
-        "tokenizer": "t5-unchained",
-        "file_name": "model.safetensors",
+        #"tokenizer": "t5-unchained",
+        "file_name": "t5xxl-unchained-f16.safetensors",
         "config": {
             "config_file_name": "config.json",
             "architectures": [
@@ -502,7 +529,7 @@ ENCODER_CONFIGS = {
         "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
     },
     "t5_small_human_attentive_try2_pass3": {
-        "repo_name": "AbstractPhil/t5_small_human_attentive_try2_pass3",
+        "repo_name": "AbstractPhil/T5-Small-Human-Attentive-Try2-Pass3",
         "name": "t5_small_human_attentive_try2_pass3",
         "type": "t5",
         "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
@@ -603,12 +630,14 @@ class EncoderData:
                  file: str,
                  repo: str,
                  config: dict,
-                 type: str = "t5",):
+                 type: Optional[str] = "t5",
+                 tokenizer: Optional[str] = ""):
         self.name = name
         self.file = file
         self.repo = repo
         self.config = config
         self.type = type
+        self.tokenizer = tokenizer
 
 for encoder_dict in ENCODER_CONFIGS.values():
     if "repo_name" in encoder_dict:
@@ -618,7 +647,8 @@ for encoder_dict in ENCODER_CONFIGS.values():
         ENCODER_DATAS.append(EncoderData(
             name=encoder_dict["name"],
             file=file_name,
-            repo=repo_name,
+            repo=repo_name, # repo_name is the HuggingFace repo name
+            tokenizer=encoder_dict.get("tokenizer", ""), # empty means use the default repo tokenizer, none found fails
             config=encoder_dict.get("config", {}),
             type=encoder_dict.get("type", "unknown")
         ))

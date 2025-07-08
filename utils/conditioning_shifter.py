@@ -4,11 +4,15 @@ import logging
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
 
+from ..model.dual_stream_adapter_model import ConditionModulationShuntAdapter, reshape_for_shunt
+
 logger = logging.getLogger(__name__)
 
 @dataclass
 class ShiftConfig:
     """Unified configuration for all modifications"""
+    prompt: str = ""
+    seed: int = -1  # -1 means no seed, use random
     strength: float = 1.0
     delta_mean: float = 0.0
     delta_scale: float = 1.0
@@ -45,14 +49,15 @@ class ConditioningShifter:
     """Handles all modification logic"""
 
     @staticmethod
-    def extract_encoder_embeddings(encoder_pipe: Dict[str, Any], device: torch.device) -> torch.Tensor:
+    def extract_encoder_embeddings(encoder_pipe: Dict[str, Any], device: torch.device, shift_config: ShiftConfig) -> torch.Tensor:
         """Extract embeddings from encoder pipe - removes 30+ lines from main class"""
         config = encoder_pipe.get("config", {})
         encoder_config = config.get("config", {})
 
         tokenizer = encoder_pipe.get("tokenizer")
         model = encoder_pipe.get("model")
-        context_prompt = config.get("context_window", "")
+        context_prompt = shift_config.prompt
+        logger.info(f"Extracting embeddings for context: {context_prompt}")
 
         # Tokenize
         padding_type = encoder_config.get("padding", "max_length")
@@ -73,7 +78,7 @@ class ConditioningShifter:
         model_type = config.get("model_type", "")
 
         with torch.no_grad():
-            if model_type == "t5":
+            if "t5" in model_type:
                 return model.encoder(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
@@ -88,11 +93,16 @@ class ConditioningShifter:
                 raise ValueError(f"Unsupported model type: {model_type}")
 
     @staticmethod
-    def run_adapter(adapter_model, encoder_embeddings: torch.Tensor,
-                    clip_slice: torch.Tensor, guidance_scale: float,
-                    adapter_type: str, slice_range: Tuple[int, int]) -> AdapterOutput:
+    def run_adapter(adapter_model: ConditionModulationShuntAdapter,
+                    encoder_embeddings: torch.Tensor,
+                    clip_slice: torch.Tensor,
+                    guidance_scale: float,
+                    adapter_type: str,
+                    slice_range: Tuple[int, int]) -> AdapterOutput:
         """Run adapter and package output"""
-        gen_config = {"max_guidance": guidance_scale if guidance_scale > 0 else 10.0}
+        gen_config = {"max_guidance": guidance_scale if guidance_scale > 0 else 1.0}
+
+        #clip_slice, encoder_embeddings = reshape_for_shunt(encoder_embeddings, clip_slice, adapter_model)
 
         outputs = adapter_model(encoder_embeddings.float(), clip_slice.float(), config=gen_config)
 
@@ -128,6 +138,15 @@ class ConditioningShifter:
             # Use modulation->condition attention (how much each CLIP token attends to encoder)
             # Sum across encoder dimension to get importance score per CLIP token
             scores = output.attn_m2c.mean(dim=1).sum(dim=-1)  # [batch, seq_clip]
+        elif config.topk_mode == "attention_collaborative":
+            # Use modulation->condition attention (how much each CLIP token attends to encoder)
+            # Sum across encoder dimension to get importance score per CLIP token
+            # compare and normalize using the c2m attention as a soft mask
+            scores = output.attn_m2c.mean(dim=1).sum(dim=-1)
+            c2m_scores = output.attn_c2m.mean(dim=1).sum(dim=-1)  # [batch, seq_clip]
+            # soft mask weaken and strengthen scores based on c2m_scores
+            scores = (scores - c2m_scores.min()) / (c2m_scores.max() - c2m_scores.min() + 1e-8)
+
 
         elif config.topk_mode == "gate":
             # Use gate values directly (already in CLIP space)
@@ -171,6 +190,7 @@ class ConditioningShifter:
     def apply_modifications(clip_slice: torch.Tensor, outputs: List[AdapterOutput],
                             config: ShiftConfig) -> torch.Tensor:
         """Apply modifications based on config.pool_method"""
+        torch.manual_seed(config.seed if config.seed >= 0 else torch.randint(0, 2**32, (1,)).item())
 
         if config.pool_method == "sequential":
             # Apply each adapter sequentially
@@ -211,27 +231,6 @@ class ConditioningShifter:
             topk_mask_expanded = topk_mask.unsqueeze(-1)
             gate_masked = gate_masked * topk_mask_expanded
             delta = delta * topk_mask_expanded
-
-        # Resize if needed
-        if delta.shape[1] != clip_slice.shape[1]:
-            delta = torch.nn.functional.interpolate(
-                delta.transpose(1, 2),
-                size=clip_slice.size(1),
-                mode="nearest"
-            ).transpose(1, 2)
-
-            gate_masked = torch.nn.functional.interpolate(
-                gate_masked.transpose(1, 2),
-                size=clip_slice.size(1),
-                mode="nearest"
-            ).transpose(1, 2)
-
-            if output.anchor.shape[1] != clip_slice.shape[1]:
-                output.anchor = torch.nn.functional.interpolate(
-                    output.anchor.transpose(1, 2),
-                    size=clip_slice.size(1),
-                    mode="nearest"
-                ).transpose(1, 2)
 
         # Apply strength
         delta_final = delta * config.strength

@@ -24,12 +24,12 @@ from .modes import (
 class ShuntStackConfig:
     # capitalize
     CONTEXT_WINDOW = True
-    USE_CONTEXT_WINDOW = True
+    OVERRIDE_CONTEXT_WINDOW = True
     FOLD_STEPS = 4  # Number of folds to apply to the context window, cannot exceed number of windows
     PADDING_MODE = "max_length"  # Padding mode for sequences
     PADDING_FILL_MODE = FoldingPaddingTypes.NONE # Here we determine if we fill the dead space with interpolated values or leave them masked.
     CONTEXT_WINDOW_SIZE = 512
-    SLIDING_WINDOW_SIZE = 256
+    SLIDING_WINDOW_SIZE = 77
     SLIDING_WINDOW_STRIDE = 128
     MAX_LENGTH = 1024
     FOLDING = "sliding_window"

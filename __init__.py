@@ -16,11 +16,21 @@
 
     License: Apache License 2.0
 """
-from .node.nodes import (
+import comfy
+import logging
+logger = logging.getLogger(__name__)
+
+from .node.encoder_nodes import (
     # Importing all necessary nodes for the ABS Shunt Suite
     SimpleEncoderLoader,
     EncoderLoader,
     T5LoaderTest,
+    EncoderSamplerConfig
+    # Clip-based swap and handling nodes
+)
+
+
+from .node.shunt_nodes import (
     ShuntConditioning,
     ShuntConditioningAdvanced,
     StackShuntAdapters,
@@ -36,7 +46,6 @@ from .node.nodes import (
     QuickShuntPreview,
     ShuntStrengthTest,
     SuperiorConditioningPreview,
-    # Clip-based swap and handling nodes
 )
 
 from .node.clip_nodes import (
@@ -51,9 +60,19 @@ from .node.clip_nodes import (
 from .node.general_nodes import (
     ABS_PromptNode,
     ABS_ConcatPrompts,
+    ABS_DebugNode
+)
+
+from .node.huggingface_nodes import (
+    # Importing HuggingFace nodes for additional functionality
+    SetHuggingfaceToken,
+    SetHuggingfaceCacheDirectory
 )
 
 NODE_CLASS_MAPPINGS = {
+
+    # Sampler nodes
+    "EncoderSamplerConfig": EncoderSamplerConfig,  # Configuration node for sampling encoders
 
     # Shunt adapter loading and management nodes
     "SimpleEncoderLoader": SimpleEncoderLoader, # simplified loader for shunt adapters
@@ -86,6 +105,7 @@ NODE_CLASS_MAPPINGS = {
     # General utility nodes
     "Prompt": ABS_PromptNode,
     "ConcatPrompts": ABS_ConcatPrompts,
+    "ADebugNode": ABS_DebugNode,  # A debug node for testing and debugging purposes
 
     # Clip-based nodes
     "ACLIPLoader": ACLIPLoader,               # Loads a dual CLIP model (clip-l, clip-g)
@@ -95,11 +115,18 @@ NODE_CLASS_MAPPINGS = {
     #"ClipTokenizerSwap": ClipTokenizerSwap,     # added v0.4.0
     "AbsClipSplitter": AbsClipSplitter,         # added v0.4.0
 
+    # HuggingFace nodes for additional functionality
+    "SetHuggingfaceToken": SetHuggingfaceToken,  # Sets the Hugging Face token for private model access
+    "SetHuggingfaceCacheDirectory": SetHuggingfaceCacheDirectory,  # Sets the Hugging Face cache directory for model storage
+
     # Deprecated nodes
     "T5LoaderTest": T5LoaderTest,  # deprecated, use EncoderLoader instead
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    # Sampler nodes
+    "EncoderSamplerConfig": "🎛️ Encoder Sampler Config",  # Configuration node for sampling encoders
+
     # Shunt adapter loading and management nodes
     "SimpleEncoderLoader": "🔍 Simple Encoder Loader",
     "EncoderLoader": "📦 Encoder Loader",
@@ -130,6 +157,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     # General utility nodes
     "Prompt": "📝 Simple Prompt Node",
     "ConcatPrompts": "🔗 Concatenate Prompts",
+    "ADebugNode": "🐞 Debug Node",  # A debug node for testing and debugging purposes
 
     # Clip-based nodes
     "AQuadrupleCLIPLoader": "📦 Quadruple CLIP Loader",  # Loads a quadruple CLIP model (clip-l, clip-g, t5, llama)
@@ -139,6 +167,10 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ClipTokenizerSwap": "🔄 Clip Tokenizer Swap",
     "AbsClipSplitter": "🔗 Abs Clip Splitter",
 
+    # HuggingFace nodes for additional functionality
+    "SetHuggingfaceToken": "🔑 Set Hugging Face Token",  # Sets the Hugging Face token for private model access
+    "SetHuggingfaceCacheDirectory": "📂 Set Hugging Face Cache Directory",  # Sets the Hugging Face cache directory for model storage
+
     # deprecated nodes
     "T5LoaderTest": "🚀 T5 Encoder Loader",
 
@@ -146,16 +178,77 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 
 
 # ASCII art banner
-print("""
+logger.info("""
 ╔══════════════════════════════════════════╗
 ║        🚀 ABS SHUNT SUITE 🚀            ║
 ║    Dev Advanced Bridging System Adapters ║
-║         ⚡ Version 0.5.2 ⚡                ║
+║         ⚡ Version 0.6.1 ⚡                ║
 ╚══════════════════════════════════════════╝
 """)
 
-print("Loading ABS Shunt Suite...")
-print("✅ Shunt adapters initialized")
-print("⚡ Ready to bridge a multitude of embeddings")
+
+try:
+    import torch
+except ImportError:
+    logger.error("❌ PyTorch is not installed. Please install it to use ABS Shunt Suite.")
+    raise
+try:
+    import psutil
+except ImportError:
+    logger.error("❌ psutil is not installed. Please install it to use ABS Shunt Suite.")
+    raise
+try:
+    import platform
+except ImportError:
+    logger.error("❌ platform is not installed. Please install it to use ABS Shunt Suite.")
+    raise
+
+def print_system_summary():
+    bar = "=" * 60
+    logger.info(f"\n{bar}")
+    logger.info(" ABS SYSTEM DIAGNOSTICS".center(60))
+    logger.info(f"{bar}")
+
+    # CPU
+    cpu_count = psutil.cpu_count(logical=True)
+    cpu_name = platform.processor() or "Unknown CPU"
+    logger.info(f" CPU         : {cpu_name} ({cpu_count} cores)")
+
+    # RAM
+    ram_gib = psutil.virtual_memory().total / 1024 ** 3
+    logger.info(f" System RAM  : {ram_gib:.2f} GiB")
+
+
+    # GPU
+    if torch.cuda.is_available():
+        count = torch.cuda.device_count()
+        logger.info(f" CUDA Devices: {count} detected\n")
+        ct = 0
+        for i in range(count):
+            ct += 1
+            logger.info(f" debug count: {count}")
+            props = torch.cuda.get_device_properties(i)
+            total_vram = props.total_memory / 1024 ** 3
+            free_vram, _ = torch.cuda.mem_get_info(i)
+
+            logger.info(f" [GPU {i}] {props.name}")
+            logger.info(f"     Total VRAM : {total_vram:.2f} GiB")
+            logger.info(f"     Free  VRAM : {free_vram / 1024 ** 3:.2f} GiB")
+
+    elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        logger.info(" MPS Device  : Apple Metal Performance Shaders")
+        logger.info("              (VRAM metrics not available)")
+
+    else:
+        logger.info(" Accelerator : CPU-only (no CUDA or MPS available)")
+
+    logger.info(f"{bar}\n")
+
+
+print_system_summary()
+
+logger.info("Loading ABS Shunt Suite...")
+logger.info("✅ Shunt adapters initialized")
+logger.info("⚡ Ready to bridge a multitude of embeddings")
 
 __all__ = [NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS]

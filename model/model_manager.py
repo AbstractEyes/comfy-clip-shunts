@@ -10,7 +10,9 @@ from enum import Enum
 from safetensors.torch import load_file
 from torch.nn import Module
 from transformers import AutoModel, AutoTokenizer, AutoConfig, AutoModelForSeq2SeqLM, BertModel, BertTokenizer, \
-    PreTrainedTokenizerFast
+    PreTrainedTokenizerFast, T5TokenizerFast, T5EncoderModel
+
+from .custom.t5_encoder_with_projection import T5EncoderWithProjection
 
 logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------- #
@@ -75,7 +77,6 @@ class ModelType(Enum):
     GENERIC = "generic"
     TOKENIZER = "tokenizer"
 
-
 @dataclass
 class ModelInfo:
     """Container for model information"""
@@ -99,6 +100,39 @@ class ModelManager:
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.cache_dir = self._setup_cache_dir(cache_dir)
+
+    # be VERY careful with huggingface keys, remote code execution, and model downloads.
+    # If you are using private models or need to authenticate, set the HuggingFace API key.
+    def set_huggingface_key(self, key: str):
+        """
+        Set the HuggingFace API key for model downloads.
+        This is useful if you have a private model or need to authenticate.
+        """
+        os.environ["HF_TOKEN"] = key
+        logger.info("HuggingFace API key set successfully.")
+
+    def get_huggingface_key(self) -> Optional[str]:
+        """
+        Get the HuggingFace API key if set.
+        This is useful for debugging or checking if authentication is needed.
+        """
+        return os.environ.get("HF_TOKEN")
+
+    def set_huggingface_cache_directory(self, directory: str):
+        """
+        Set the cache directory for HuggingFace model downloads.
+        This is useful if you want to change the cache location.
+        This will not move your models, it only sets the new default directory.
+        """
+        os.environ["HF_HOME"] = directory
+        logger.info(f"HuggingFace default directory set to: {directory}")
+
+    def get_huggingface_cache_directory(self) -> Optional[str]:
+        """
+        Get the cache directory for HuggingFace model downloads.
+        This is useful for debugging or checking where models are stored.
+        """
+        return os.environ.get("HF_HOME", str(self.cache_dir))
 
     # --------------------------------------------------------------------- #
     # Internal helpers
@@ -268,7 +302,8 @@ class ModelManager:
                            device: Optional[torch.device] = None,
                            dtype: Optional[torch.dtype] = None,
                            force_reload: bool = False,
-                           trust_remote_code: Optional[bool] = None  # Overrides the global TRUST_REMOTE_CODE setting.
+                           trust_remote_code: Optional[bool] = None,  # Overrides the global TRUST_REMOTE_CODE setting.
+                           config: Optional[Dict[str, Any]] = None  # Additional configuration for the model
     ) -> Optional[nn.Module]:
         """
         Load an encoder model (e.g., BERT, T5) and return it.
@@ -289,8 +324,8 @@ class ModelManager:
         elif model_type == "nomic_bert":
             # Nomic BERT is a specific variant of BERT, so we can use the same loading function
             return self.load_bert_model(model_id, model_name_or_path, device, dtype, force_reload, trust_remote_code)
-        elif model_type == "t5":
-            return self.load_t5_model(model_id, model_name_or_path, device, dtype, force_reload, trust_remote_code)
+        elif "t5" in model_type:
+            return self.load_t5_model(model_id, model_name_or_path, device, dtype, force_reload, trust_remote_code, config)
         else:
             logger.error(f"Unsupported model type: {model_type}")
             return None
@@ -365,7 +400,8 @@ class ModelManager:
             device: Optional[torch.device] = None,
             dtype: Optional[torch.dtype] = None,
             force_reload: bool = False,
-            override_remote_code: Optional[bool] = None # Overrides the global TRUST_REMOTE_CODE setting.
+            override_remote_code: Optional[bool] = None, # Overrides the global TRUST_REMOTE_CODE setting.
+            config: Optional[Dict[str, Any]] = None  # Additional configuration for the model
     ) -> Optional[Tuple[nn.Module, Any]]:
         """
         Load a T5 model and tokenizer.
@@ -383,15 +419,46 @@ class ModelManager:
             dtype = dtype or torch.float32
             trust_remote_code = override_remote_code if override_remote_code is not None else TRUST_REMOTE_CODE
             # Load tokenizer and model
-            tokenizer = AutoTokenizer.from_pretrained(
-                model_name_or_path,
-                trust_remote_code=trust_remote_code  # Use the global flag for remote code execution
-            )
-            model = AutoModelForSeq2SeqLM.from_pretrained(
-                model_name_or_path,
-                torch_dtype=dtype,
-                trust_remote_code=trust_remote_code  # Use the global flag for remote code execution
-            ).to(device)
+            if config.get("type", "t5") == "t5":
+                tokenizer = AutoTokenizer.from_pretrained(
+                    "google/flan-t5-base",
+                    trust_remote_code=trust_remote_code  # Use the global flag for remote code execution
+                )
+            elif config.get("type", "t5") == "t5_unchained":
+                tokenizer = T5TokenizerFast.from_pretrained(
+                    "AbstractPhil/t5xxl-unchained",
+                    trust_remote_code=trust_remote_code  # Use the global flag for remote code execution
+                )
+            else:
+                tokenizer = T5TokenizerFast.from_pretrained(
+                    "google/flan-t5-base",
+                    trust_remote_code=trust_remote_code  # Use the global flag for remote code execution
+                )
+
+            if config.get("type", "t5") == "t5":
+                logger.info(f"Loading T5ForConditionalGeneration model from {model_name_or_path}")
+                model = AutoModelForSeq2SeqLM.from_pretrained(
+                    model_name_or_path,
+                    torch_dtype=dtype,
+                    trust_remote_code=trust_remote_code  # Use the global flag for remote code execution
+                ).to(device)
+            elif config.get("type", "t5") == "t5_encoder_with_projection":
+                # Load T5EncoderModel with projection layer
+                logger.info(f"Loading T5EncoderWithProjection model from {model_name_or_path}")
+                model = T5EncoderWithProjection.from_pretrained(
+                    model_name_or_path,
+                    torch_dtype=dtype,
+                    trust_remote_code=trust_remote_code  # Use the global flag for remote code execution
+                ).to(device)
+
+            else:
+                # Load standard T5 model
+                logger.info(f"Loading T5EncoderModel from {model_name_or_path}")
+                model = AutoModel.from_pretrained(
+                    model_name_or_path,
+                    torch_dtype=dtype,
+                    trust_remote_code=trust_remote_code  # Use the global flag for remote code execution
+                ).to(device)
 
             # Cache the model
             self._store(_make_key("t5", model_id), ModelInfo(
