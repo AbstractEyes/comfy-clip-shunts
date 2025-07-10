@@ -17,7 +17,7 @@ import torch
 
 from typing import Optional, Any
 from ..sampler.schedules  import ConditioningSchedulerTypes
-from ..sampler.clip_sampler import FoldingSampler, FoldingTypes, FoldingPaddingTypes
+from ..sampler.alucard import FoldingTypes, FoldingPaddingTypes
 
 class ScheduledEncoderConfig:
     """

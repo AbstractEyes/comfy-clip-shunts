@@ -358,6 +358,7 @@ def reshape_for_shunt(
 
     Applies sequence interpolation and feature projection as needed.
     """
+    return encoder_embeddings, clip_slice
     B, encoder_seq, encoder_dim = encoder_embeddings.shape
     B2, clip_seq, clip_dim = clip_slice.shape
 
@@ -367,22 +368,22 @@ def reshape_for_shunt(
     target_seq = max(adapter_model.condition_dim, adapter_model.modulation_dim)
 
     if clip_seq != target_seq:
-        clip_slice = clip_slice.permute(0, 2, 1)  # [B, C, T]
+        clip_slice = clip_slice.permute(0, 0, 2)  # [B, C, T]
         clip_slice = torch.nn.functional.interpolate(
             clip_slice.float(),
             size=target_seq,
             mode="nearest"
         )
-        clip_slice = clip_slice.permute(0, 2, 1)  # [B, T, C]
+        clip_slice = clip_slice.permute(0, 0, 2)  # [B, T, C]
 
     if encoder_seq != target_seq:
-        encoder_embeddings = encoder_embeddings.permute(0, 2, 1)
+        encoder_embeddings = encoder_embeddings.permute(0, 0, 2)
         encoder_embeddings = torch.nn.functional.interpolate(
             encoder_embeddings.float(),
             size=target_seq,
             mode="nearest"
         )
-        encoder_embeddings = encoder_embeddings.permute(0, 2, 1)
+        encoder_embeddings = encoder_embeddings.permute(0, 0, 2)
 
     # -- Step 2: Project FEATURE DIMENSION (dim=2) if needed --
     if clip_slice.size(-1) != adapter_model.condition_dim:

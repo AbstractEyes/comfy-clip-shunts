@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 import hashlib
 from ..model.model_manager import get_model_manager
 from ..model.configs import ENCODER_CONFIGS, ShuntData, EncoderData
+from ..utils.conditioning_shifter import ConditioningShifter
 
 
 
@@ -26,8 +27,8 @@ class EncoderSamplerSimple:
             }
         }
 
-    RETURN_TYPES = ("CONDITIONINGS", )
-    RETURN_NAMES = ("conditionings", )
+    RETURN_TYPES = ("CONDITIONING", )
+    RETURN_NAMES = ("conditioning", )
     FUNCTION = "sample"
 
     CATEGORY = "encoder/sampler"
@@ -46,6 +47,102 @@ class EncoderSamplerSimple:
 
         return ( )
 
+class EncoderFoldingSchedulerConfig:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "folding_scheduler": ([
+                    "none", "tau", "top_k", "top_20k", "top_50k",
+                    "cosine", "cascade", "cos", "sine",
+                    "shockwave", "pulse", "wave"
+                ], {"default": "none"}),
+                "tau": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0}),
+                "top_k": ("FLOAT", {"default": 50, "min": 0.0, "max": 10000}),
+                "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0}),
+            }
+        }
+
+    RETURN_TYPES = ("ENCODER_FOLDING_SCHEDULER_CONFIG",)
+    RETURN_NAMES = ("encoder_folding_scheduler_config",)
+    FUNCTION = "configure"
+    CATEGORY = "encoder/scheduler"
+
+    def configure(self, folding_scheduler, tau, top_k, top_p):
+        """Prepare the configuration dict with the provided parameters."""
+        return ({
+            "folding_scheduler": folding_scheduler,
+            "tau": tau,
+            "top_k": top_k,
+            "top_p": top_p
+        },)
+
+class EncoderEmbeddingConfig:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "pos_embedding": (["none", "cos", "sine", "cosine"], {"default": "cos"}),
+                "normalization_anchor": (["none", "l2", "l1", "heun", "surge", "sigma", "delta", "gate", "bong"], {"default": "surge"}),
+            }
+        }
+
+    RETURN_TYPES = ("ENCODER_EMBEDDING_CONFIG",)
+    RETURN_NAMES = ("encoder_embedding_config",)
+    FUNCTION = "configure"
+    CATEGORY = "encoder/embedding"
+
+    def configure(self, pos_embedding, normalization_anchor):
+        """Prepare the configuration dict with the provided parameters."""
+        return ({
+            "pos_embedding": pos_embedding,
+            "normalization_anchor": normalization_anchor
+        },)
+
+
+class EncoderProjectionConfig:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "force_projection_in": ("BOOLEAN", {"default": False, "tooltip": "Force projection of context window to model's max length."}),
+                "projection_dims_in": ("INT", {"default": 768, "min": 1, "max": 8192}),
+                "interpolation_method_in": (["lerp", "slerp", "cosine", "sine", "linear", "mixed"], {"default": "slerp", "tooltip": "Method to use for interpolating projections."}),
+                "force_projection_out": ("BOOLEAN", {"default": False, "tooltip": "Force projection of model output to context window size."}),
+                "projection_dims_out": ("INT", {"default": 768, "min": 1, "max": 8192}),
+                "interpolation_method_out": (["lerp", "slerp", "cosine", "sine", "linear", "mixed"], {"default": "slerp", "tooltip": "Method to use for interpolating model output projections."}),
+            }
+        }
+
+    RETURN_TYPES = ("ENCODER_PROJECTION_CONFIG",)
+    RETURN_NAMES = ("encoder_projection_config",)
+    FUNCTION = "configure"
+    CATEGORY = "encoder/projection"
+
+    def configure(self, force_projection_in, projection_dims_in, interpolation_method_in,
+                  force_projection_out, projection_dims_out, interpolation_method_out):
+        """Prepare the configuration dict with the provided parameters."""
+        return ({
+            "force_projection_in": force_projection_in,
+            "projection_dims_in": projection_dims_in,
+            "interpolation_method_in": interpolation_method_in,
+            "force_projection_out": force_projection_out,
+            "projection_dims_out": projection_dims_out,
+            "interpolation_method_out": interpolation_method_out
+        },)
+
+
+from ..sampler.formulas.modes import (
+    ConditioningSchedulerTypes,
+    CONDITIONING_SCHEDULERS,
+    FoldingPoolingTypes,
+    FOLDING_POOLING_TYPES,
+    FoldingPaddingTypes,
+    FOLDING_PADDING_TYPES,
+    FoldingTypes,
+    FOLDING_MODES
+)
+
 class EncoderSamplerConfig:
     @classmethod
     def INPUT_TYPES(cls):
@@ -63,13 +160,23 @@ class EncoderSamplerConfig:
                 "folding": ([
                                 "zeus", "helios", "surge", "surge-fold", "fold", "interpolate",
                                 "collapse", "zipper", "concat-flatten", "cascade", "ripple",
+                                "slerp", "slip",  # <<< new
                                 "hard_truncate", "soft_truncate", "truncate", "none"
-                            ], {"default": "surge-fold"}),
+                            ], {"default": "slerp"}),
+
                 "folding_scheduler": ([
                                           "none", "tau", "top_k", "top_20k", "top_50k",
                                           "cosine", "cascade", "cos", "sine",
                                           "shockwave", "pulse", "wave"
                                       ], {"default": "none"}),
+
+                "padding_mode": (FOLDING_PADDING_TYPES,
+                                 {"default": FOLDING_PADDING_TYPES[0]}),
+                "pooling_mode": (FOLDING_POOLING_TYPES,
+                                 {"default": FOLDING_POOLING_TYPES[0]}),
+                "use_alpha_mask": ("BOOLEAN", {"default": True}),
+                "cosine_similarity_gate": ("BOOLEAN", {"default": False}),
+
                 "pos_embedding": (["none", "cos", "sine", "cosine"], {"default": "cos"}),
                 "normalization_anchor": (["none", "l2", "l1", "heun", "surge", "sigma", "delta", "gate", "bong"], {"default": "surge"}),
 
@@ -105,6 +212,10 @@ class EncoderSamplerConfig:
                     guidance_scale,
                     folding,
                     folding_scheduler,
+                    padding_mode,
+                    pooling_mode,
+                    use_alpha_mask,
+                    cosine_similarity_gate,
                     pos_embedding,
                     normalization_anchor,
                     top_k,
@@ -131,6 +242,10 @@ class EncoderSamplerConfig:
             "guidance_scale": guidance_scale,
             "folding": folding,
             "folding_scheduler": folding_scheduler,
+            "padding_mode": padding_mode,
+            "pooling_mode": pooling_mode,
+            "use_alpha_mask": use_alpha_mask,
+            "cosine_similarity_gate": cosine_similarity_gate,
             "pos_embedding": pos_embedding,
             "normalization_anchor": normalization_anchor,
             "top_k": top_k,
@@ -150,6 +265,128 @@ class EncoderSamplerConfig:
             "interpolation_method_out": interpolation_method_out
         },)
 
+from ..sampler.alucard import FieldWalker, FieldWalkerConfig
+from ..sampler.conditionings import ConditioningData, ConditioningContainer
+
+from ..sampler.conditionings import ConditioningData
+
+
+import torch
+import torch.nn.functional as F
+from ..sampler.alucard import FieldWalkerConfig
+from ..sampler.integra import IntegraConfig, IntegraOrchestrator
+from ..sampler.sliding_window import ShuntStackConfig
+from ..utils.conditioning_shifter import ConditioningShifter, ShiftConfig
+from ..sampler.formulas.schedules import FormulaScheduler
+
+
+def match_project(tensor: torch.Tensor, reference: torch.Tensor, mode: str = "linear") -> torch.Tensor:
+    if tensor.ndim == 4:
+        tensor = tensor.squeeze(1)
+    if reference.ndim == 4:
+        reference = reference.squeeze(1)
+    if tensor.shape[-1] == reference.shape[-1]:
+        return tensor
+    return F.interpolate(tensor.transpose(1, 2), size=reference.shape[-1], mode=mode, align_corners=False).transpose(1, 2)
+
+
+class EncoderSampler:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "encoder_pipe": ("ENCODER_PIPE", {}),
+                "clip": ("CLIP", {}),
+                "config": ("ENCODER_SAMPLER_CONFIG", {}),
+            }
+        }
+
+    RETURN_TYPES = ("CONDITIONING", "DICT")
+    RETURN_NAMES = ("conditioning", "debug_report")
+    FUNCTION = "sample"
+    CATEGORY = "encoder/sampler"
+
+
+    def sample(self, encoder_pipe, clip, config):
+        if not encoder_pipe or not clip:
+            raise ValueError("Both encoder_pipe and clip must be provided.")
+
+        device = torch.device(encoder_pipe["config"]["device"])
+        cfg = config.get("config", {})
+        prompt_text = cfg.get("context_window", "a photo of a robot.")
+
+        # Symbolic encoder field
+        shift_config = ShiftConfig(prompt=prompt_text)
+        a = ConditioningShifter.extract_encoder_embeddings(encoder_pipe, device, shift_config)
+        b = a + torch.randn_like(a) * 0.02
+        d = b - a
+
+        # CLIP baseline
+        clip_tokens = clip.tokenize(prompt_text, tokenizer_options={
+            "padding": "max_length", "max_length": 77, "truncation": True
+        })
+        clip_conditionings = clip.encode_from_tokens_scheduled(clip_tokens)
+        clip_tensor = clip_conditionings[0][0]  # [B, 77, 2048]
+
+        clip_l = clip_tensor[:, :, :768]
+        clip_g = clip_tensor[:, :, 768:]
+
+        # Assemble configs
+        walker_cfg = FieldWalkerConfig(
+            folding_mode=cfg.get("folding", "surge-fold"),
+            scheduler_mode=cfg.get("folding_scheduler", "tau"),
+            t_steps=cfg.get("steps", 6),
+            padding_mode=cfg.get("padding_mode", "interpolate"),
+            pooling_mode=cfg.get("pooling_mode", "average"),
+            scheduler_config={"tau": cfg.get("tau", 1.0)},
+            context_overrides={"cfg_scale": cfg.get("cfg_scale", 1.0)}
+        )
+
+        stack_cfg = ShuntStackConfig()  # Replace with config-bound if parameterized
+        integra_cfg = IntegraConfig(
+            walker_config=walker_cfg,
+            stack_config=stack_cfg,
+            trace_folds=False,
+            enforce_projection=True,
+            enable_clip_alignment=True
+        )
+
+        integra = IntegraOrchestrator(integra_cfg)
+        folded, meta = integra.walk_encoder_field(a, b, d)
+
+        # Comparison logic
+        scheduler = FormulaScheduler(walker_cfg.scheduler_mode, walker_cfg.scheduler_config)
+
+        folded_l_proj = match_project(folded, clip_l)
+        folded_g_proj = match_project(folded, clip_g)
+
+        def compare_cosine(folded_proj, clip_ref):
+            sim_scores = []
+            for i in range(walker_cfg.t_steps):
+                t = torch.full_like(folded_proj[..., 0], i / (walker_cfg.t_steps - 1))
+                alpha = scheduler.compute_alpha(t, folded_proj, clip_ref)
+                f_norm = F.normalize(folded_proj, dim=-1)
+                c_norm = F.normalize(clip_ref, dim=-1)
+                sim = (f_norm * c_norm).sum(dim=-1)
+                weighted = (sim * alpha).mean().item()
+                sim_scores.append(weighted)
+            return {
+                "mean_sim": sum(sim_scores) / len(sim_scores),
+                "max_sim": max(sim_scores),
+                "min_sim": min(sim_scores),
+                "all": sim_scores
+            }
+
+        report = {
+            "clip_l": compare_cosine(folded_l_proj, clip_l),
+            "clip_g": compare_cosine(folded_g_proj, clip_g),
+            "integra": meta
+        }
+
+        folded_full = torch.cat([folded_l_proj, folded_g_proj], dim=-1)  # [B, T, 2048]
+        conditioning = [(folded_full, {"prompt": prompt_text, "source": "alucard_sampler"})]
+
+        return conditioning, report
 
 class EncoderConfigNode:
     """
@@ -245,6 +482,7 @@ class EncoderLoader:
         model_id = f"{model_type}_{model_name}_{hashlib.sha1(model_source.encode()).hexdigest()[:10]}"
 
         dtype = torch.get_default_dtype() if dtype == "default" else {
+            "float64": torch.float64,
             "float32": torch.float32,
             "float16": torch.float16,
             "bfloat16": torch.bfloat16
@@ -490,4 +728,3 @@ class T5LoaderTest:
                     "device": str(device),
                     "model_id": model_id  # Include for tracking
                 },)
-

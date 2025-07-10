@@ -34,7 +34,7 @@ import comfy.utils
 from comfy import clip_vision
 from comfy import gligen
 from comfy import diffusers_convert
-from comfy import model_detection
+from . import model_detection
 
 # To be deprecated in the future, we are converting to a full encoder module structure.
 from ..text_encoders.old import sd1_clip
@@ -74,9 +74,6 @@ import comfy.taesd.taesd
 
 import comfy.ldm.flux.redux
 
-# replaced new ones, old ones commented out when new ones are added.
-from ..text_encoders.old.hidream import HiDreamTEModel, HiDreamTokenizer, hidream_clip
-from ..text_encoders.old.flux import FluxClipModel, FluxTokenizer, flux_clip
 
 import logging
 
@@ -606,6 +603,7 @@ def load_checkpoint(config_path=None, ckpt_path=None, output_vae=True, output_cl
         with open(config_path, 'r') as stream:
             config = yaml.safe_load(stream)
     model_config_params = config['model']['params']
+    logger.info("Loading model config: {}".format(model_config_params))
     clip_config = model_config_params['cond_stage_config']
 
     if "parameterization" in model_config_params:

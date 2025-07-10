@@ -102,7 +102,7 @@ class ConditioningShifter:
         """Run adapter and package output"""
         gen_config = {"max_guidance": guidance_scale if guidance_scale > 0 else 1.0}
 
-        #clip_slice, encoder_embeddings = reshape_for_shunt(encoder_embeddings, clip_slice, adapter_model)
+        #encoder_embeddings, clip_slice = reshape_for_shunt(encoder_embeddings, clip_slice, adapter_model)
 
         outputs = adapter_model(encoder_embeddings.float(), clip_slice.float(), config=gen_config)
 

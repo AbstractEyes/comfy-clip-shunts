@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import torch
 import logging
 import comfy
@@ -15,11 +17,47 @@ logger = logging.getLogger(__name__)
 model_manager = get_model_manager() # singleton instance of the model manager
 
 
+class EmptyClipLatent:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "clip": ("CLIP",),
+                "batch_size": ("INT", {"default": 1, "min": 1, "max": 128, "step": 1, "tooltip": "Batch size for the empty conditioning."}),
+                "override": (["yes", "no"], {"default": "no", "tooltip": "Override the default empty conditioning with a custom one."}),
+                "amount": ("INT", {"default": 1, "min": 1, "max": 128, "step": 1}),
+                "length": ("INT", {"default": 77, "min": 1, "max": 2048, "step": 1}),
+                "dims": ("INT", {"default": 768, "min": 1, "max": 2048, "step": 1}),
+            }
+        }
+
+    RETURN_TYPES = ("CONDITIONING", )
+    RETURN_NAMES = ("empty_conditionings",)
+    FUNCTION = "get_empty_conditioning"
+
+    CATEGORY = "clip-suite/conditioning"
+
+    def get_empty_conditioning(self, clip, override, batch_size, length, dims):
+        """
+        Generates an empty conditioning tensor for the specified CLIP model.
+        This is useful for initializing conditioning tensors when no input is provided.
+        """
+
+        # Check the clip models for their size and create the empty conditioning accordingly
+
+        # Create an empty conditioning tensor with the specified dimensions
+        empty_conditioning = torch.zeros(batch_size, length, dims, dtype=torch.float64)
+
+        # Return the empty conditioning as a tuple
+        return (empty_conditioning,)
+
+
+
 class ACLIPLoader:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { "clip_name": (folder_paths.get_filename_list("text_encoders"), ),
-                              "type": (["stable_diffusion", "stable_cascade", "sd3", "stable_audio", "mochi", "ltxv", "pixart", "cosmos", "lumina2", "wan", "hidream", "chroma", "ace", "omnigen2"], ),
+                              "type": (["stable_diffusion", "novelai_v2", "stable_cascade", "sd3", "stable_audio", "mochi", "ltxv", "pixart", "cosmos", "lumina2", "wan", "hidream", "chroma", "ace", "omnigen2"], ),
                               },
                 "optional": {
                               "device": (["default", "cpu"], {"advanced": True}),

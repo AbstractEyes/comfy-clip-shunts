@@ -1,9 +1,3 @@
-import torch
-from .modes import (
-    FoldingPaddingTypes,
-    FoldingTypes,
-    FoldingPoolingTypes
-)
 """
     Sliding Window Utilities
     Author: AbstractPhil
@@ -19,6 +13,12 @@ from .modes import (
     This is designed to work NATIVELY with ComfyUI's tensor and sequence handling,
     which means this can be reused with many different types of ComfyUI-based timestep systems and sequences.
 """
+import torch
+from .formulas.modes import (
+    FoldingPaddingTypes,
+    FoldingTypes,
+    FoldingPoolingTypes
+)
 
 
 class ShuntStackConfig:
@@ -47,10 +47,6 @@ class SlidingWindowBuilder:
         """
         Builds sliding windows from the input tensor based on the configuration.
 
-        Args:
-            tensor (torch.Tensor): The input tensor to create sliding windows from.
-            config (ShuntStackConfig): Configuration object containing sliding window parameters.
-
         Returns:
             list: A list of sliding window tensors.
         """
@@ -59,20 +55,26 @@ class SlidingWindowBuilder:
         window_size = config.SLIDING_WINDOW_SIZE
         max_length = config.MAX_LENGTH
 
-        # Calculate the number of windows needed
-        # clamp the context_window_size, sliding_window_size, and sliding_window_stride to the maximum length
+        # Clamp sizes
         context_window_size = min(config.CONTEXT_WINDOW_SIZE, max_length)
         sliding_window_size = min(window_size, max_length)
         sliding_window_stride = min(stride, max_length)
+
+        # Get total context slice from tensor
+        main_window = tensor[:, :context_window_size]  # For global analysis or fallback
+
+        # Calculate number of sliding windows
         num_windows = (context_window_size - sliding_window_size) // sliding_window_stride + 1
 
-        main_window = tensor[:, :context_window_size] # we use one for normalization
-        # Create sliding windows
         for i in range(num_windows):
             start = i * sliding_window_stride
             end = start + sliding_window_size
 
+            # Prevent out-of-bounds
+            if end > tensor.size(1):
+                break
 
-
+            window = tensor[:, start:end]
+            windows.append(window)
 
         return windows

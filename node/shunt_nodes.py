@@ -369,7 +369,6 @@ class ShuntConditioning:
 
                     if slice_start >= total_dim:
                         continue
-
                     # Get slice and run adapter
                     clip_slice = cond_tensor[:, :, slice_start:slice_end]
 

@@ -25,8 +25,9 @@ from .node.encoder_nodes import (
     SimpleEncoderLoader,
     EncoderLoader,
     T5LoaderTest,
-    EncoderSamplerConfig
+    EncoderSamplerConfig,
     # Clip-based swap and handling nodes
+    EncoderSampler
 )
 
 
@@ -69,10 +70,23 @@ from .node.huggingface_nodes import (
     SetHuggingfaceCacheDirectory
 )
 
+from .node.model_sampling_nodes import (
+    AModelSamplingDiscrete
+)
+
+from .node.diffusion_nodes import (
+    ALoadCheckpointSimple,  # Node for loading a simple diffusion-based checkpoint model
+)
+
 NODE_CLASS_MAPPINGS = {
+
+    # Checkpoint Nodes
+    "ALoadCheckpointSimple": ALoadCheckpointSimple,  # Node for loading a simple diffusion-based checkpoint model
 
     # Sampler nodes
     "EncoderSamplerConfig": EncoderSamplerConfig,  # Configuration node for sampling encoders
+    "EncoderSampler": EncoderSampler,  # Sampler node for encoders
+    "AModelSamplingDiscrete": AModelSamplingDiscrete,  # Discrete sampling node for model outputs
 
     # Shunt adapter loading and management nodes
     "SimpleEncoderLoader": SimpleEncoderLoader, # simplified loader for shunt adapters
@@ -85,6 +99,7 @@ NODE_CLASS_MAPPINGS = {
     "MergeShunts": MergeShunts,
     "ShuntScheduler": ShuntScheduler,
     "UnloadShuntModels": UnloadShuntModels,
+
 
     # Pass through nodes for shunt conditioning
     "ShuntConditioning": ShuntConditioning,
@@ -124,8 +139,13 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    # Checkpoint Nodes
+    "ALoadCheckpointSimple": "📦 Load Simple Checkpoint",  # Node for loading a simple diffusion-based checkpoint model
+
     # Sampler nodes
     "EncoderSamplerConfig": "🎛️ Encoder Sampler Config",  # Configuration node for sampling encoders
+    "EncoderSampler": "🎲 Encoder Sampler",  # Sampler node for encoders
+    "AModelSamplingDiscrete": "🎲 Discrete Model Sampling",  # Discrete sampling node for model outputs
 
     # Shunt adapter loading and management nodes
     "SimpleEncoderLoader": "🔍 Simple Encoder Loader",
@@ -182,7 +202,7 @@ logger.info("""
 ╔══════════════════════════════════════════╗
 ║        🚀 ABS SHUNT SUITE 🚀            ║
 ║    Dev Advanced Bridging System Adapters ║
-║         ⚡ Version 0.6.1 ⚡                ║
+║         ⚡ Version 0.7.0 ⚡                ║
 ╚══════════════════════════════════════════╝
 """)
 

@@ -238,6 +238,7 @@ class CLIP:
 
 
 class CLIPType(Enum):
+    NOVELAI_V2 = 100
     STABLE_DIFFUSION = 1
     STABLE_CASCADE = 2
     SD3 = 3
@@ -470,6 +471,9 @@ def load_text_encoder_state_dicts(state_dicts=[], embedding_directory=None, clip
                 logger.info("Loading HiDream CLIP CLIPtype.HIDREAM 2: model_options={}".format(model_options))
                 clip_target.clip = hidream.hidream_clip(clip_l=True, clip_g=False, t5=False, llama=False, dtype_t5=None, dtype_llama=None, t5xxl_scaled_fp8=None, llama_scaled_fp8=None)
                 clip_target.tokenizer = hidream.HiDreamTokenizer
+            elif clip_type == CLIPType.NOVELAI_V2:
+                clip_target.clip = sd1_clip.SD1ClipModel
+                clip_target.tokenizer = sd1_clip.SD1Tokenizer
             else:
                 clip_target.clip = sd1_clip.SD1ClipModel
                 clip_target.tokenizer = sd1_clip.SD1Tokenizer
