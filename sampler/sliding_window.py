@@ -18,10 +18,8 @@ from dataclasses import dataclass
 import torch
 from .formulas.modes import (
     FoldingPaddingTypes,
-    FoldingTypes,
     FoldingPoolingTypes
 )
-
 
 @dataclass
 class ShuntStackConfig:

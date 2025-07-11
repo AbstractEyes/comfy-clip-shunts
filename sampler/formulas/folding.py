@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import torch
 from typing import Optional
 
@@ -186,23 +188,56 @@ FOLDING_KERNELS: dict[str, FoldingKernel] = {
     "ripple": RippleFolding(),
     "surge": SurgeFolding(),
     "collapse": CollapseFolding(),
-    "concat-flatten": ConcatFlattenFolding(),
+    "concat_flatten": ConcatFlattenFolding(),
     "zeus": ZeusFolding(),
     "helios": HeliosFolding(),
     "cascade": CascadeFolding(),
     "interpolate": InterpolateFolding(),
-    "surge-fold": SurgeFoldFolding(),
+    "surge_fold": SurgeFoldFolding(),
     "slerp": SlerpFolding(),
     "slip": SlipFolding(),  # entropy‑weighted
 }
+
+@dataclass
+class FoldingKernels:
+    """
+    A collection of available folding kernels.
+    """
+
+    shiva: str = "shiva"
+    ifrit: str = "ifrit"
+    gilgamesh: str = "gilgamesh"
+    hive: str = "hive"
+    a_walk: str = "a_walk"
+    rigid: str = "rigid"
+    fold: str = "fold"
+    zipper: str = "zipper"
+    ripple: str = "ripple"
+    surge: str = "surge"
+    collapse: str = "collapse"
+    concat: str = "concat"
+    zeus: str = "zeus"
+    helios: str = "helios"
+    cascade: str = "cascade"
+    interpolate: str = "interpolate"
+    surge_fold: str = "surge_fold"
+    slerp: str = "slerp"
+    slip: str = "slip"
+
+    @staticmethod
+    def to_list() -> list[str]:
+        """
+        Returns a sorted list of all folding kernel names.
+        """
+        return sorted([
+            "shiva", "ifrit", "gilgamesh", "hive", "a_walk",
+            "rigid", "fold", "zipper", "ripple", "surge",
+            "collapse", "concat_flatten", "zeus", "helios",
+            "cascade", "interpolate", "surge_fold", "slerp",
+            "slip"
+        ])
 
 
 def get_folding_kernel(mode: str) -> FoldingKernel:
     return FOLDING_KERNELS.get(mode.lower(), RigidFolding())
 
-
-def get_kernel_names() -> list[str]:
-    """
-    Returns a sorted list of available folding kernel names.
-    """
-    return sorted(FOLDING_KERNELS.keys())

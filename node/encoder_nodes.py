@@ -12,8 +12,8 @@ from ..model.model_manager import get_model_manager
 from ..model.configs import ENCODER_CONFIGS, ShuntData, EncoderData
 from ..utils.conditioning_shifter import ConditioningShifter
 
-from ..sampler.formulas.folding import FOLDING_KERNELS, get_kernel_names
-from ..sampler.formulas.schedules import SCHEDULER_MODES
+from ..sampler.formulas.folding import FoldingKernels
+from ..sampler.formulas.schedules import SchedulerModes
 
 
 class EncoderSamplerSimple:
@@ -135,14 +135,8 @@ class EncoderProjectionConfig:
 
 
 from ..sampler.formulas.modes import (
-    ConditioningSchedulerTypes,
-    CONDITIONING_SCHEDULERS,
     FoldingPoolingTypes,
-    FOLDING_POOLING_TYPES,
     FoldingPaddingTypes,
-    FOLDING_PADDING_TYPES,
-    FoldingTypes,
-    FOLDING_MODES
 )
 
 class EncoderSamplerConfig:
@@ -155,29 +149,27 @@ class EncoderSamplerConfig:
                     "default": "a photo of a robot.",
                     "multiline": True
                 }),
-                "steps": ("INT", {"default": 250, "min": 1, "max": 1000}),
+                "steps": ("INT", {"default": 250, "min": 1, "max": 100000}),
                 "cfg_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0}),
                 "guidance_scale": ("FLOAT", {"default": 5, "min": 0.0, "max": 100.0}),
 
-                "folding": (get_kernel_names(), {"default": "a_walk", "tooltip": "Folding mode to use for the encoder."}),
+                "folding": (FoldingKernels.to_list(), {"default": FoldingKernels.a_walk, "tooltip": "Folding mode to use for the encoder."}),
 
                 # implemented for testing not fully functional
-                "folding_scheduler": (SCHEDULER_MODES, {"default": SCHEDULER_MODES[0]}),
+                "folding_scheduler": (SchedulerModes.to_list(), {"default": SchedulerModes.TAU, "tooltip": "Folding scheduler to use for the encoder."}),
 
                 #implemented for testing not fully functional
-                "padding_mode": (FOLDING_PADDING_TYPES,
-                                 {"default": FOLDING_PADDING_TYPES[0]}),
+                "padding_mode": (FoldingPaddingTypes.to_list(), {"default": FoldingPaddingTypes.INTERPOLATE, "tooltip": "Padding mode to use for the encoder."}),
                 #implemented for testing not fully functional
-                "pooling_mode": (FOLDING_POOLING_TYPES,
-                                 {"default": FOLDING_POOLING_TYPES[0]}),
+                "pooling_mode": (FoldingPoolingTypes.to_list(),{"default": FoldingPoolingTypes.AVERAGE, "tooltip": "Pooling mode to use for the encoder."}),
                 #doesn't work correctly yet
                 "use_alpha_mask": ("BOOLEAN", {"default": True}),
                 #todo
                 "cosine_similarity_gate": ("BOOLEAN", {"default": False}),
 
                 #todo
-                "pos_embedding": (["none", "cos", "sine", "cosine"], {"default": "cos"}),
-                "normalization_anchor": (["none", "l2", "l1", "heun", "surge", "sigma", "delta", "gate", "bong"], {"default": "surge"}),
+                "pos_embedding": (["none", "cos", "sine", "cosine"], {"default": "none"}),
+                "normalization_anchor": (["none", "l2", "l1", "heun", "surge", "sigma", "delta", "gate", "bong"], {"default": "none"}),
 
                 #doesn't work correctly
                 "top_k": ("FLOAT", {"default": 50.0, "min": 0.0, "max": 10000.0}),

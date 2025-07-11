@@ -28,20 +28,23 @@ from torch import nn
 from .formulas.schedules import FormulaScheduler   # Ensure schedules.py is in same directory or adjust import
 from .formulas.folding import FoldingKernel, get_folding_kernel  # Ensure folding.py is in same directory or adjust import
 from .formulas.padding import FoldingModifier, FoldingModifierConfig  # Ensure padding.py is in same directory or adjust import
-from .formulas.modes import FoldingTypes, FoldingPaddingTypes, ConditioningSchedulerTypes, FoldingPoolingTypes
+from .formulas.modes import FoldingPaddingTypes, FoldingPoolingTypes
+from .formulas.folding import FoldingKernels
+from .formulas.schedules import SchedulerModes
 from .alucard_exceptions import validate_shapes  # Ensure alucard_error.py is in same directory or adjust import
 
 logger = logging.getLogger(__name__)
 
 @dataclass
 class FieldWalkerConfig:
-    folding_mode: str = FoldingTypes.FOLD
-    scheduler_mode: str = ConditioningSchedulerTypes.TAU
+    folding_mode: str = FoldingKernels.gilgamesh
+    scheduler_mode: str = SchedulerModes.TAU
     t_steps: int = 6
     padding_mode: str = FoldingPaddingTypes.INTERPOLATE
     pooling_mode: str = FoldingPoolingTypes.AVERAGE
     scheduler_config: Optional[dict] = None
     context_overrides: Optional[dict] = None
+    window_managed_externally: bool = True
 
 
 class SamplerCore(nn.Module):

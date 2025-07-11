@@ -16,8 +16,9 @@
 import torch
 
 from typing import Optional, Any
-from ..sampler.schedules  import ConditioningSchedulerTypes
-from ..sampler.alucard import FoldingTypes, FoldingPaddingTypes
+from ..sampler.formulas.schedules import SchedulerModes
+from ..sampler.formulas.folding import FoldingKernels
+from ..sampler.formulas.padding import FoldingPaddingTypes
 
 class ScheduledEncoderConfig:
     """
@@ -27,14 +28,14 @@ class ScheduledEncoderConfig:
     """
     CONTEXT_WINDOW = ""
     OVERRIDE_CONTEXT_WINDOW = False
-    SCHEDULER_MODE = ConditioningSchedulerTypes.TAU  # Default scheduler mode which is rigid
-    FOLDING_MODE = FoldingTypes.FOLD  # Default folding mode
+    SCHEDULER_MODE = SchedulerModes.TAU  # Default scheduler mode which is tau
+    FOLDING_MODE = FoldingKernels.fold  # Default folding mode
     PADDING_FILL_MODE = FoldingPaddingTypes.NONE  # Determines how padding is filled in sequences
     PADDING_MODE = "max_length"  # Padding mode for sequences
-    CONTEXT_WINDOW_SIZE = 512
-    SLIDING_WINDOW_SIZE = 256
-    SLIDING_WINDOW_STRIDE = 128
-    MAX_LENGTH = 1024
+    CONTEXT_WINDOW_SIZE = 450
+    SLIDING_WINDOW_SIZE = 225
+    SLIDING_WINDOW_STRIDE = 77
+    MAX_LENGTH = 512
     FOLDING = "sliding_window"
     PADDING = "max_length"
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"

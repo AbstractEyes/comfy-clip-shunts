@@ -20,9 +20,16 @@ class FormulaFunction:
 
 
 class TauInterpolation(FormulaFunction):
+    def __init__(self, tau: Optional[float] = None, sigma_fn: Optional[Callable] = None):
+        """
+        Initializes the TauInterpolation with an optional sigma function.
+        If no sigma function is provided, it defaults to a sine function.
+        """
+        self.sigma_fn = sigma_fn
+        self.tau = tau
     def __call__(self, t, a, b, config=None):
-        tau = (config or {}).get("tau", 1.0)
-        sigma_fn = (config or {}).get("sigma_fn", None)
+        tau = (config or {}).get("tau", 1.0) or self.tau or 1.0
+        sigma_fn = (config or {}).get("sigma_fn", None) or self.sigma_fn
         sigma = sigma_fn(t) if sigma_fn else torch.sin(math.pi * t)
         tau_scale = 1 - torch.exp(-tau * t)
         delta = b - a
@@ -45,14 +52,19 @@ class CosineEnvelope(FormulaFunction):
 
 
 class WaveFunction(FormulaFunction):
+    def __init__(self, wave_freq: Optional[float]):
+        self.wave_freq = wave_freq
     def __call__(self, t, a=None, b=None, config=None):
-        freq = (config or {}).get("wave_freq", 2.0)
+        freq = (config or {}).get("wave_freq", 0.27195) or self.wave_freq
         return torch.sin(freq * math.pi * t)
 
 
 class PulseFunction(FormulaFunction):
+    def __init__(self, pulse_freq: Optional[float]):
+        self.pulse_freq = pulse_freq
+
     def __call__(self, t, a=None, b=None, config=None):
-        freq = (config or {}).get("pulse_freq", 10.0)
+        freq = (config or {}).get("pulse_freq", 5.0) or self.pulse_freq
         return torch.sin(freq * math.pi * t) * (1 - t)
 
 
@@ -101,14 +113,14 @@ class FormulaScheduler:
     def _register_formulas(self) -> dict[str, Callable]:
         return {
             "tau": TauInterpolation(),
-            "top_k": ThresholdGate(threshold=self.config.get("top_k", 0.5)),
+            "top_k": ThresholdGate(threshold=self.config.get("top_k", 0.8)),
             "top_20k": ThresholdGate(threshold=0.2),
             "top_50k": ThresholdGate(threshold=0.5),
             "cosine": CosineEnvelope(),
-            "cos": WaveFunction(),
-            "sine": WaveFunction(),  # alias
-            "wave": WaveFunction(),
-            "pulse": PulseFunction(),
+            "cos": WaveFunction(wave_freq=0.5),  # alias for cosine
+            "sine": WaveFunction(wave_freq=1.0),  # alias for sine
+            "wave": WaveFunction(wave_freq=0.27195),
+            "pulse": PulseFunction(pulse_freq=5.0),
             "shockwave": ShockwaveFunction(),
             "cascade": CascadeFunction(),
             "phase_slip": ShockwaveFunction(),
@@ -127,9 +139,42 @@ class FormulaScheduler:
         return list(self.registry.keys())
 
 
-SCHEDULER_MODES = [
-    "tau", "top_k", "top_20k", "top_50k",
-    "cosine", "cos", "sine", "wave",
-    "pulse", "shockwave", "cascade",
-    "phase_slip", "none"
-]
+class SchedulerModes:
+    """
+    List of available scheduling modes for the FormulaScheduler.
+    These modes define how the interpolation is computed.
+    """
+    TAU = "tau"
+    TOP_K = "top_k"
+    TOP_20K = "top_20k"
+    TOP_50K = "top_50k"
+    COSINE = "cosine"
+    COS = "cos"  # alias
+    SINE = "sine"  # alias
+    WAVE = "wave"
+    PULSE = "pulse"
+    SHOCKWAVE = "shockwave"
+    CASCADE = "cascade"
+    PHASE_SLIP = "phase_slip"
+    NONE = "none"  # Default mode
+
+    @staticmethod
+    def to_list() -> list[str]:
+        """
+        Returns a list of all available scheduler modes.
+        """
+        return [
+            SchedulerModes.TAU,
+            SchedulerModes.TOP_K,
+            SchedulerModes.TOP_20K,
+            SchedulerModes.TOP_50K,
+            SchedulerModes.COSINE,
+            SchedulerModes.COS,
+            SchedulerModes.SINE,
+            SchedulerModes.WAVE,
+            SchedulerModes.PULSE,
+            SchedulerModes.SHOCKWAVE,
+            SchedulerModes.CASCADE,
+            SchedulerModes.PHASE_SLIP,
+            SchedulerModes.NONE
+        ]
