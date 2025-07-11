@@ -106,6 +106,59 @@ class SlerpFolding(FoldingKernel):
         mix = alpha if alpha is not None else t
         return _slerp(a, b, mix.unsqueeze(-1))
 
+
+# -- 1. Shiva: Icy gradient decay ---------------------------------------------
+class ShivaFolding(FoldingKernel):
+    def apply(self, a, b, t, alpha=None, context=None):
+        decay_rate = context.get("shiva_cool", 4.0) if context else 4.0
+        cold = torch.exp(-decay_rate * t).unsqueeze(-1)
+        return a + (b - a) * (1.0 - cold)
+
+
+# -- 2. Ifrit: Fiery waveform spikes ------------------------------------------
+class IfritFolding(FoldingKernel):
+    def apply(self, a, b, t, alpha=None, context=None):
+        freq = context.get("ifrit_freq", 4.0)
+        amp = context.get("ifrit_amp", 1.0)
+        fire = (torch.sin(freq * torch.pi * t) ** 2).unsqueeze(-1) * amp
+        return a + fire * (b - a)
+
+
+# -- 3. Gilgamesh: Multi-vector projection from alpha -------------------------
+class GilgameshFolding(FoldingKernel):
+    def apply(self, a, b, t, alpha=None, context=None):
+        beta_axes = context.get("gilgamesh_axes", [0.25, 0.5, 0.75])
+        out = a
+        for w in beta_axes:
+            weight = torch.tensor(w, device=a.device).view(1, 1, 1)
+            delta = weight * (b - a)
+            out = out + delta * torch.sigmoid(alpha.unsqueeze(-1))
+        return out
+
+
+# -- 4. Hive: Internal scheduler cascade --------------------------------------
+class HiveFolding(FoldingKernel):
+    def apply(self, a, b, t, alpha=None, context=None):
+        step_count = context.get("steps", 8)
+        thresholds = context.get("hive_thresholds", [0.2, 0.4, 0.6, 0.8])
+        schedulers = context.get("hive_kernels", ["rigid", "fold", "ripple", "zeus"])
+        selected = "rigid"
+        for th, name in zip(thresholds, schedulers):
+            if t.mean().item() <= th:
+                selected = name
+                break
+        return get_folding_kernel(selected).apply(a, b, t, alpha, context)
+
+
+# -- 5. A_Walk: Dream‑based time walk ----------------------------------------
+class AWalkFolding(FoldingKernel):
+    def apply(self, a, b, t, alpha=None, context=None):
+        drift = torch.sin(t * math.pi).unsqueeze(-1) ** 3
+        noise = torch.randn_like(a) * 0.03
+        return a + drift * (b - a + noise)
+
+
+
 class SlipFolding(FoldingKernel):
     """
     Implements the Slip Principle: entropic‑phase gating.
@@ -122,6 +175,11 @@ class SlipFolding(FoldingKernel):
 
 
 FOLDING_KERNELS: dict[str, FoldingKernel] = {
+    "shiva": ShivaFolding(),
+    "ifrit": IfritFolding(),
+    "gilgamesh": GilgameshFolding(),
+    "hive": HiveFolding(),
+    "a_walk": AWalkFolding(),
     "rigid": RigidFolding(),
     "fold": FoldFolding(),
     "zipper": ZipperFolding(),
