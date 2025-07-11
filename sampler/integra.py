@@ -23,11 +23,11 @@ class IntegraOrchestrator:
         self.walker = FieldWalker(config.walker_config)
 
         stack = config.stack_config
-        self.window_size = stack.SLIDING_WINDOW_SIZE
-        self.stride = stack.SLIDING_WINDOW_STRIDE
-        self.max_length = stack.MAX_LENGTH
-        self.override_context = stack.OVERRIDE_CONTEXT_WINDOW
-        self.context_window_size = stack.CONTEXT_WINDOW_SIZE
+        self.window_size = stack.sliding_window_size
+        self.stride = stack.sliding_window_stride
+        self.max_length = stack.max_length
+        self.override_context = stack.override_context_window
+        self.context_window_size = stack.context_window_size
 
     def walk_encoder_field(self,
                            a: torch.Tensor,
@@ -37,46 +37,55 @@ class IntegraOrchestrator:
         Walks a full symbolic encoder field via sliding windows, governed by Integra.
         Returns recombined tensor and orchestration report.
         """
-        B, T_full, D = a.shape
-        limit = self.context_window_size if self.override_context else T_full
-        T = min(limit, T_full)
+        with torch.autocast(device_type=a.device.type, enabled=a.device.type != 'cpu'):
+            B, T_full, D = a.shape
+            limit = self.context_window_size if self.override_context else T_full
+            T = min(limit, T_full)
 
-        # Slice the initial context window (if override is active)
-        a = a[:, :T, :]
-        b = b[:, :T, :]
-        d = d[:, :T, :]
+            # Slice the initial context window (if override is active)
+            a = a[:, :T, :]
+            b = b[:, :T, :]
+            d = d[:, :T, :]
 
-        folds = []
-        starts = range(0, max(1, T - self.window_size + 1), self.stride)
+            folds = []
+            starts = range(0, max(1, T - self.window_size + 1), self.stride)
 
-        for start in starts:
-            end = start + self.window_size
-            # Clip bounds to avoid overrun
-            if end > T:
-                end = T
-                start = max(0, end - self.window_size)
+            for start in starts:
+                end = start + self.window_size
+                # Clip bounds to avoid overrun
+                if end > T:
+                    end = T
+                    start = max(0, end - self.window_size)
 
-            a_win = a[:, start:end, :]
-            b_win = b[:, start:end, :]
-            d_win = d[:, start:end, :]
+                a_win = a[:, start:end, :]
+                b_win = b[:, start:end, :]
+                d_win = d[:, start:end, :]
+                # mask the first and last token if the window to see but not utilize them
+                if self.override_context:
+                    a_win[:, 0, :] = 0.0
+                    a_win[:, -1, :] = 0.0
+                    b_win[:, 0, :] = 0.0
+                    b_win[:, -1, :] = 0.0
+                    d_win[:, 0, :] = 0.0
+                    d_win[:, -1, :] = 0.0
 
-            logger.info(f"Window slice [{start}:{end}] a_win shape: {a_win.shape}")
-            folded = self.walker.walk(a_win, b_win, d_win)
-            logger.info(f"Folded shape: {folded.shape}")
+                logger.info(f"Window slice [{start}:{end}] a_win shape: {a_win.shape}")
+                folded = self.walker.walk(a_win, b_win, d_win)
+                logger.info(f"Folded shape: {folded.shape}")
 
-            folds.append((start, end, folded))
+                folds.append((start, end, folded))
 
-        # Aggregate windowed output
-        aggregated = self.aggregate(folds, T)
+            # Aggregate windowed output
+            aggregated = self.aggregate(folds, T)
 
-        return aggregated, {
-            "tokens_processed": T,
-            "tokens_total": T_full,
-            "folds": len(folds),
-            "stride": self.stride,
-            "window_size": self.window_size,
-            "override_context": self.override_context
-        }
+            return aggregated, {
+                "tokens_processed": T,
+                "tokens_total": T_full,
+                "folds": len(folds),
+                "stride": self.stride,
+                "window_size": self.window_size,
+                "override_context": self.override_context
+            }
 
     def aggregate(self, folds, total_tokens):
         B, _, D = folds[0][2].shape

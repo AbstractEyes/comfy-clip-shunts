@@ -1,0 +1,34 @@
+import math, torch, torch.nn.functional as F
+
+import torch.nn.functional as F
+
+def match_feature_dims(x: torch.Tensor, ref: torch.Tensor,
+                       mode: str = "linear") -> torch.Tensor:
+    """
+    Resample last dimension of `x` to match `ref`.
+    Works for up‑ and down‑sampling. Keeps gradients.
+    """
+    if x.shape[-1] == ref.shape[-1]:
+        return x
+    # reshape to [B*T, D] → [B*T, 1, D] so interpolate operates on last dim
+    B, T, D_in  = x.shape
+    D_out       = ref.shape[-1]
+    x_reshape   = x.reshape(-1, 1, D_in)
+    x_resampled = F.interpolate(x_reshape, size=D_out,
+                                mode=mode, align_corners=False)
+    return x_resampled.reshape(B, T, D_out)
+
+
+def match_tokens(x: torch.Tensor, target_len: int) -> torch.Tensor:
+    """
+    Repeat or truncate token dimension until length == target_len.
+    Keeps semantic ordering (wrap‑repeat).
+    """
+    if x.shape[1] == target_len:
+        return x
+    if x.shape[1] < target_len:                                # repeat
+        reps = math.ceil(target_len / x.shape[1])
+        x    = x.repeat(1, reps, 1)
+        return x[:, :target_len, :]
+    else:                                                      # truncate
+        return x[:, :target_len, :]

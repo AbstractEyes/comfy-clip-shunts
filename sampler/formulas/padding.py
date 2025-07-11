@@ -18,51 +18,69 @@ class FoldingModifier:
         self.pooling_mode = config.pooling_mode
 
     # --- PADDING ---
+    # --- PADDING ---
     def apply_padding(
             self,
-            base: torch.Tensor,
-            folded: torch.Tensor,
-            pad_mask: torch.Tensor
+            base: torch.Tensor,        # [B, T, D]
+            folded: torch.Tensor,      # [B, T, D]
+            mask: torch.Tensor         # [B, T] | [B, T, 1] | [B, T, D]
     ) -> torch.Tensor:
         """
-        Args:
-            base: original embedding [B, T, D]
-            folded: folded output [B, T, D]
-            pad_mask: bool mask where True indicates a PAD token [B, T]
+        `mask` meaning depends on its rank:
+
+        • [B, T]      → bool/float  padding flag per token
+        • [B, T, 1]   → broadcast weight for all features
+        • [B, T, D]   → full gradient / gate per‑feature
+        Values should be in **[0,1]** where 0 shuts folded out,
+        1 keeps folded fully, and anything in‑between blends.
         """
 
-        # --- 🔐 Defensive checks
-        if pad_mask.dim() != 2:
-            raise ValueError(f"pad_mask must be [B, T], got shape {pad_mask.shape}")
-        if base.shape != folded.shape:
-            raise ValueError(f"Shape mismatch: base {base.shape}, folded {folded.shape}")
-        if pad_mask.shape[0] != base.shape[0] or pad_mask.shape[1] != base.shape[1]:
-            raise ValueError(f"pad_mask {pad_mask.shape} does not align with base {base.shape}")
+        # ---------- 1 · shape harmonisation ----------
+        if mask.dim() == 2:
+            mask = mask.unsqueeze(-1).float()           # → [B,T,1]
+        elif mask.dim() == 3 and mask.shape[-1] == 1:
+            mask = mask.float()                         # already broadcast
+        elif mask.dim() == 3 and mask.shape[-1] == base.shape[-1]:
+            mask = mask.float()                         # gradient mask
+        else:
+            raise ValueError(
+                f"[Alucard] Invalid mask shape {mask.shape}; "
+                f"expected [B,T], [B,T,1] or [B,T,D={base.shape[-1]}]"
+            )
 
-        # --- Expand mask to [B, T, 1] for broadcasting
-        alpha = pad_mask.unsqueeze(-1).float()
+        if mask.shape[0:2] != base.shape[0:2]:
+            raise ValueError(
+                f"[Alucard] Mask token dimensions {mask.shape[:2]} ≠ base {base.shape[:2]}"
+            )
 
-        if self.padding_mode == FoldingPaddingTypes.NONE:
+        # ---------- 2 · mode‑specific behaviour ----------
+        mode = self.padding_mode
+
+        # NONE ­­­→ leave folded unchanged
+        if mode == FoldingPaddingTypes.NONE:
             return folded
 
-        elif self.padding_mode == FoldingPaddingTypes.REPLACE:
-            return torch.where(alpha.bool(), folded, base)
+        # INTERPOLATE ­­­→ blend base & folded by mask
+        if mode == FoldingPaddingTypes.INTERPOLATE:
+            return mask * folded + (1.0 - mask) * base
 
-        elif self.padding_mode == FoldingPaddingTypes.INTERPOLATE:
-            return alpha * folded + (1.0 - alpha) * base
+        # REPLACE ­­­→ hard switch when mask>0.5
+        if mode == FoldingPaddingTypes.REPLACE:
+            return torch.where(mask > 0.5, folded, base)
 
-        elif self.padding_mode == FoldingPaddingTypes.GAPPED:
-            gapped = base.clone()
-            gapped[pad_mask] = 0.0
-            return gapped
+        # GAPPED ­­­→ zero‑out where mask>0.5
+        if mode == FoldingPaddingTypes.GAPPED:
+            return torch.where(mask > 0.5, torch.zeros_like(base), base)
 
-        elif self.padding_mode == FoldingPaddingTypes.SPARSE:
-            sparse = torch.zeros_like(base)
-            sparse[~pad_mask] = folded[~pad_mask]
-            return sparse
+        # SPARSE ­­­→ keep only masked portions of folded
+        if mode == FoldingPaddingTypes.SPARSE:
+            out = torch.zeros_like(base)
+            out[mask > 0.5] = folded[mask > 0.5]
+            return out
 
-        else:
-            return folded  # fallback
+        # Fallback: return folded unchanged
+        return folded
+
 
     # --- POOLING ---
     def apply_pooling(self, embeddings: List[torch.Tensor]) -> torch.Tensor:

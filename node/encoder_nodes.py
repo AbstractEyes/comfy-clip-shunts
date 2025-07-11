@@ -180,13 +180,13 @@ class EncoderSamplerConfig:
                 "pos_embedding": (["none", "cos", "sine", "cosine"], {"default": "cos"}),
                 "normalization_anchor": (["none", "l2", "l1", "heun", "surge", "sigma", "delta", "gate", "bong"], {"default": "surge"}),
 
-                "top_k": ("FLOAT", {"default": 50, "min": 0.0, "max": 10000}),
+                "top_k": ("FLOAT", {"default": 50.0, "min": 0.0, "max": 10000.0}),
                 "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0}),
                 "temperature": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0}),
                 "tau": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0}),
-                "beams": ("INT", {"default": 4, "min": 1, "max": 128}),
-                "max_windows": ("INT", {"default": 4096, "min": 8, "max": 12192}),
-                "context_window_size": ("INT", {"default": 1024, "min": 77, "max": 8192}),
+                "beams": ("INT", {"default": 4, "min": 1, "max": 32}),
+                "max_windows": ("INT", {"default": 4, "min": 1, "max": 256}),
+                "context_window_size": ("INT", {"default": 2048, "min": 77, "max": 8192}),
                 "sliding_window_size": ("INT", {"default": 77, "min": 1, "max": 2048}),
                 "sliding_window_stride": ("INT", {"default": 33, "min": 1, "max": 2048}),
 
@@ -278,7 +278,8 @@ from ..sampler.integra import IntegraConfig, IntegraOrchestrator
 from ..sampler.sliding_window import ShuntStackConfig
 from ..utils.conditioning_shifter import ConditioningShifter, ShiftConfig
 from ..sampler.formulas.schedules import FormulaScheduler
-
+from ..utils.alignment import match_feature_dims, match_tokens
+from ..sampler.alucard_exceptions import AlucardShapeError
 
 def match_project(tensor: torch.Tensor, reference: torch.Tensor, mode: str = "linear") -> torch.Tensor:
     if tensor.ndim == 4:
@@ -289,6 +290,8 @@ def match_project(tensor: torch.Tensor, reference: torch.Tensor, mode: str = "li
         return tensor
     return F.interpolate(tensor.transpose(1, 2), size=reference.shape[-1], mode=mode, align_corners=False).transpose(1, 2)
 
+from ..utils.alignment import match_feature_dims, match_tokens
+from ..sampler.alucard_exceptions import AlucardShapeError
 
 class EncoderSampler:
     @classmethod
@@ -307,86 +310,154 @@ class EncoderSampler:
     CATEGORY = "encoder/sampler"
 
 
+    # ------------------------------------------------------------------ #
+
     def sample(self, encoder_pipe, clip, config):
+        # ---------- sanity ----------
         if not encoder_pipe or not clip:
             raise ValueError("Both encoder_pipe and clip must be provided.")
 
         device = torch.device(encoder_pipe["config"]["device"])
-        cfg = config.get("config", {})
-        prompt_text = cfg.get("context_window", "a photo of a robot.")
+        cfg = config#.get("config", {})
+        prompt = config.get("context_window", "a photo of a robot.")
 
-        # Symbolic encoder field
-        shift_config = ShiftConfig(prompt=prompt_text)
-        a = ConditioningShifter.extract_encoder_embeddings(encoder_pipe, device, shift_config)
-        b = a + torch.randn_like(a) * 0.02
-        d = b - a
+        # ------------------------------------------------------------------ #
+        # 1 · Symbolic encoder field (anchor A)
+        # ------------------------------------------------------------------ #
+        shift_cfg = ShiftConfig(prompt=prompt)
+        a_raw = ConditioningShifter.extract_encoder_embeddings(encoder_pipe, device, shift_cfg)  # [B,T_enc,768]
 
-        # CLIP baseline
-        clip_tokens = clip.tokenize(prompt_text, tokenizer_options={
+        # ------------------------------------------------------------------ #
+        # 2 · CLIP perspective slices
+        # ------------------------------------------------------------------ #
+        clip_tokens = clip.tokenize(prompt, tokenizer_options={
             "padding": "max_length", "max_length": 77, "truncation": True
         })
-        clip_conditionings = clip.encode_from_tokens_scheduled(clip_tokens)
-        clip_tensor = clip_conditionings[0][0]  # [B, 77, 2048]
+        clip_cond = clip.encode_from_tokens_scheduled(clip_tokens)
+        logger.info(f"[EncoderSampler] CLIP pooled_output shape: {clip_cond[0][1].get('pooled_output').shape}")  # [B,2048]
+        logger.info(f"[EncoderSampler] CLIP condition shape: {clip_cond[0][0].shape}")  # [B,77,2048]
+        clip_full = clip_cond[0][0]  # [B,77,2048]
 
-        clip_l = clip_tensor[:, :, :768]
-        clip_g = clip_tensor[:, :, 768:]
+        clip_l_slice = clip_full[:, :, :768]  # CLIP‑L 768‑D
+        clip_g_slice = clip_full[:, :, 768:]  # CLIP‑G 1280‑D
 
-        # Assemble configs
+        # ------------------------------------------------------------------ #
+        # 3 · Path L  (works entirely in 768‑D)
+        # ------------------------------------------------------------------ #
+        b_l = match_feature_dims(clip_l_slice, a_raw).to(device)  # feature align (no change)
+        b_l = match_tokens(b_l, a_raw.shape[1]).to(device)  # token align → [B,T_enc,768]
+        d_l = b_l - a_raw  # delta_L
+
+        # ------------------------------------------------------------------ #
+        # 4 · Path G  (encoder up‑scaled to 1280‑D)
+        # ------------------------------------------------------------------ #
+        a_up = match_feature_dims(a_raw, clip_g_slice).to(device)  # 768 → 1280
+        b_g = match_tokens(clip_g_slice, a_up.shape[1]).to(device)  # [B,T_enc,1280]
+        d_g = b_g - a_up  # delta_G
+
+        # ---------------- device transfer --------------------------------- #
+        to_dev = lambda x: x.to(device) if device.type == "cuda" else x.cpu()
+        a_raw, a_up = map(to_dev, (a_raw, a_up))
+        b_l, b_g = map(to_dev, (b_l, b_g))
+        d_l, d_g = map(to_dev, (d_l, d_g))
+        clip_l_slice, clip_g_slice = map(to_dev, (clip_l_slice, clip_g_slice))
+
+        # ------------------------------------------------------------------ #
+        # 5 · Walker & Stack configs (unchanged)
+        # ------------------------------------------------------------------ #
         walker_cfg = FieldWalkerConfig(
             folding_mode=cfg.get("folding", "surge-fold"),
             scheduler_mode=cfg.get("folding_scheduler", "tau"),
-            t_steps=cfg.get("steps", 6),
-            padding_mode=cfg.get("padding_mode", "interpolate"),
+            t_steps=cfg.get("steps", 4),
+            padding_mode=cfg.get("padding_mode", "none"),
             pooling_mode=cfg.get("pooling_mode", "average"),
-            scheduler_config={"tau": cfg.get("tau", 1.0)},
-            context_overrides={"cfg_scale": cfg.get("cfg_scale", 1.0)}
-        )
-
-        stack_cfg = ShuntStackConfig()  # Replace with config-bound if parameterized
-        integra_cfg = IntegraConfig(
-            walker_config=walker_cfg,
-            stack_config=stack_cfg,
-            trace_folds=False,
-            enforce_projection=True,
-            enable_clip_alignment=True
-        )
-
-        integra = IntegraOrchestrator(integra_cfg)
-        folded, meta = integra.walk_encoder_field(a, b, d)
-
-        # Comparison logic
-        scheduler = FormulaScheduler(walker_cfg.scheduler_mode, walker_cfg.scheduler_config)
-
-        folded_l_proj = match_project(folded, clip_l)
-        folded_g_proj = match_project(folded, clip_g)
-
-        def compare_cosine(folded_proj, clip_ref):
-            sim_scores = []
-            for i in range(walker_cfg.t_steps):
-                t = torch.full_like(folded_proj[..., 0], i / (walker_cfg.t_steps - 1))
-                alpha = scheduler.compute_alpha(t, folded_proj, clip_ref)
-                f_norm = F.normalize(folded_proj, dim=-1)
-                c_norm = F.normalize(clip_ref, dim=-1)
-                sim = (f_norm * c_norm).sum(dim=-1)
-                weighted = (sim * alpha).mean().item()
-                sim_scores.append(weighted)
-            return {
-                "mean_sim": sum(sim_scores) / len(sim_scores),
-                "max_sim": max(sim_scores),
-                "min_sim": min(sim_scores),
-                "all": sim_scores
+            scheduler_config={
+                "tau": cfg.get("tau", 1.0),
+                "top_k": cfg.get("top_k", 50.0),
+                "top_p": cfg.get("top_p", 0.9),
+            },
+            context_overrides={
+                "use_alpha_mask": cfg.get("use_alpha_mask", True),
+                "cosine_gate": cfg.get("cosine_similarity_gate", False),
             }
+        )
 
-        report = {
-            "clip_l": compare_cosine(folded_l_proj, clip_l),
-            "clip_g": compare_cosine(folded_g_proj, clip_g),
-            "integra": meta
-        }
+        stack_cfg = ShuntStackConfig(
+            sliding_window_size=cfg.get("sliding_window_size", 77),
+            sliding_window_stride=cfg.get("sliding_window_stride", 33),
+            context_window_size=cfg.get("context_window_size", 2048),
+            override_context_window=cfg.get("override_context_window", True),
+            context_window=prompt,
+            max_windows=cfg.get("max_windows", 8),
+        )
 
-        folded_full = torch.cat([folded_l_proj, folded_g_proj], dim=-1)  # [B, T, 2048]
-        conditioning = [(folded_full, {"prompt": prompt_text, "source": "alucard_sampler"})]
+        integra = IntegraOrchestrator(
+            IntegraConfig(
+                walker_config=walker_cfg,
+                stack_config=stack_cfg,
+                trace_folds=False,
+                enforce_projection=cfg.get("force_projection_in", False),
+                enable_clip_alignment=cfg.get("cosine_similarity_gate", False),
+            )
+        )
 
+        # ------------------------------------------------------------------ #
+        # 6 · Walk each path separately
+        # ------------------------------------------------------------------ #
+        try:
+            raw_folded_l, meta_l = integra.walk_encoder_field(a_raw, b_l, d_l)
+            raw_folded_g, meta_g = integra.walk_encoder_field(a_up, b_g, d_g)
+        except AlucardShapeError as e:
+            raise RuntimeError(str(e))
+
+        # resize token count back to 77, feature dims already correct
+        folded_l = match_tokens(raw_folded_l, clip_l_slice.shape[1])  # [B,77,768]
+        folded_g = match_tokens(raw_folded_g, clip_g_slice.shape[1])  # [B,77,1280]
+
+        # ------------------------------------------------------------------ #
+        # 7 · Optional cosine diagnostics
+        # ------------------------------------------------------------------ #
+        def cosine_track(f_proj, c_ref, delta):
+            sched = FormulaScheduler(walker_cfg.scheduler_mode, walker_cfg.scheduler_config)
+            f_n = torch.nn.functional.normalize(f_proj, dim=-1)
+            c_n = torch.nn.functional.normalize(c_ref, dim=-1)
+            sims, alphas = [], []
+            for step in range(walker_cfg.t_steps):
+                t = torch.full_like(f_proj[..., 0], step / (walker_cfg.t_steps - 1))
+                alpha = sched.compute_alpha(t, f_proj, c_ref, context={"delta": delta})
+                sims.append((f_n * c_n).sum(dim=-1).mean().item())
+                alphas.append(alpha.mean().item())
+            return {"sim": sims, "alpha": alphas}
+
+        report = {"meta_l": meta_l, "meta_g": meta_g}
+        if cfg.get("cosine_similarity_gate", False):
+            report["clip_l"] = cosine_track(folded_l, clip_l_slice, d_l)
+            report["clip_g"] = cosine_track(folded_g, clip_g_slice, d_g)
+        # ------------------------------------------------------------------ #
+        # 8 · Pack final conditioning
+        # ------------------------------------------------------------------ #
+        folded_full = torch.cat([folded_l, folded_g], dim=-1)  # [B,77,2048]
+        logger.info(f"[EncoderSampler] Folded full shape: {folded_full.shape}")
+        # Assume 77 tokens, swap in canonical START and END tokens
+        B, T, D = folded_full.shape
+        start_token = torch.zeros((B, 1, D), device=folded_full.device)  # [CLS]-like vector (zeros)
+        end_token = torch.zeros((B, 1, D), device=folded_full.device)  # [EOS]-like vector (zeros)
+
+        # Snip interior (e.g., tokens 1 to T-2), then prepend/append swapped tokens
+        snipped = folded_full[:, 1:-1, :]  # [B, T-2, D]
+        folded_patched = torch.cat([start_token, snipped, end_token], dim=1)  # [B, T, D]
+
+        # Sanity check
+        assert folded_patched.shape == folded_full.shape, f"Shape mismatch: {folded_patched.shape} vs {folded_full.shape}"
+
+        # Extract pooled output from EOS (position 76)
+        pooled_output = folded_patched[:, -1, 768:2048]  # [B, 1280]
+
+        conditioning = [[folded_patched.double().cpu(), {"pooled_output": pooled_output.double().cpu()}]]
+        logger.info(f"[EncoderSampler] Final conditioning shape: {raw_folded_g.shape} {raw_folded_g.get_device()}")
+        logger.info(f"[EncoderSampler] Pooled output shape: {pooled_output.shape} {pooled_output.get_device()}")
         return conditioning, report
+
 
 class EncoderConfigNode:
     """

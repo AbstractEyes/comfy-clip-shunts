@@ -3,11 +3,13 @@ from dataclasses import dataclass
 from typing import Optional
 import logging
 import torch
+from torch import nn
+
 from .formulas.schedules import FormulaScheduler   # Ensure schedules.py is in same directory or adjust import
 from .formulas.folding import FoldingKernel, get_folding_kernel  # Ensure folding.py is in same directory or adjust import
 from .formulas.padding import FoldingModifier, FoldingModifierConfig  # Ensure padding.py is in same directory or adjust import
 from .formulas.modes import FoldingTypes, FoldingPaddingTypes, ConditioningSchedulerTypes, FoldingPoolingTypes
-
+from .alucard_exceptions import validate_shapes  # Ensure alucard_error.py is in same directory or adjust import
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +24,7 @@ class FieldWalkerConfig:
     context_overrides: Optional[dict] = None
 
 
-class SamplerCore:
+class SamplerCore(nn.Module):
 
     def sample(
             self,
@@ -41,31 +43,32 @@ class SamplerCore:
         Delta field `d` allows guided interpolation from base → target.
         Returns either stacked, pooled, or concatenated embeddings.
         """
+        with torch.autocast(device_type=a.device.type, enabled=a.device.type != 'cpu'):
+            validate_shapes(a, b)
+            B, T, D = a.shape
+            folds = []
+            context = context or {}
+            context["delta"] = d  # Inject delta into shared execution context
 
-        B, T, D = a.shape
-        folds = []
-        context = context or {}
-        context["delta"] = d  # Inject delta into shared execution context
+            for step in range(t_steps):
+                t_scalar = step / (t_steps - 1)
+                t = torch.full((B, T), t_scalar, device=a.device)
 
-        for step in range(t_steps):
-            t_scalar = step / (t_steps - 1)
-            t = torch.full((B, T), t_scalar, device=a.device)
+                # -- Step 1: Compute Alpha (scheduler can now use delta)
+                alpha = scheduler.compute_alpha(t, a, b, context)
 
-            # -- Step 1: Compute Alpha (scheduler can now use delta)
-            alpha = scheduler.compute_alpha(t, a, b, context)
+                # -- Step 2: Fold using Kernel (can now use delta from context)
+                folded = kernel.apply(a=a, b=b, alpha=alpha, t=t, context=context)
 
-            # -- Step 2: Fold using Kernel (can now use delta from context)
-            folded = kernel.apply(a=a, b=b, alpha=alpha, t=t, context=context)
+                # -- Step 3: Apply Padding Policy
+                if pad_mask is not None:
+                    folded = modifier.apply_padding(a, folded, pad_mask)
 
-            # -- Step 3: Apply Padding Policy
-            if pad_mask is not None:
-                folded = modifier.apply_padding(a, folded, pad_mask)
+                folds.append(folded)
 
-            folds.append(folded)
-
-        # -- Step 4: Aggregate via Pooling
-        result = modifier.apply_pooling(folds)
-        return result
+            # -- Step 4: Aggregate via Pooling
+            result = modifier.apply_pooling(folds)
+            return result
 
 
 class FieldWalker:
