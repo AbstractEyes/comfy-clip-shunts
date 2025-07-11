@@ -438,6 +438,7 @@ class EncoderSampler:
         # ------------------------------------------------------------------ #
         folded_full = torch.cat([folded_l, folded_g], dim=-1)  # [B,77,2048]
         logger.info(f"[EncoderSampler] Folded full shape: {folded_full.shape}")
+
         # Assume 77 tokens, swap in canonical START and END tokens
         B, T, D = folded_full.shape
         start_token = torch.zeros((B, 1, D), device=folded_full.device)  # [CLS]-like vector (zeros)
