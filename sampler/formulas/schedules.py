@@ -111,7 +111,7 @@ class FormulaScheduler:
             "pulse": PulseFunction(),
             "shockwave": ShockwaveFunction(),
             "cascade": CascadeFunction(),
-            "phase_slip": ShockwaveFunction(),  # placeholder reuse or implement your own
+            "phase_slip": ShockwaveFunction(),
             "none": ConstantFunction(value=1.0),
         }
 
@@ -125,3 +125,11 @@ class FormulaScheduler:
 
     def available_modes(self) -> list:
         return list(self.registry.keys())
+
+
+SCHEDULER_MODES = [
+    "tau", "top_k", "top_20k", "top_50k",
+    "cosine", "cos", "sine", "wave",
+    "pulse", "shockwave", "cascade",
+    "phase_slip", "none"
+]

@@ -199,3 +199,10 @@ FOLDING_KERNELS: dict[str, FoldingKernel] = {
 
 def get_folding_kernel(mode: str) -> FoldingKernel:
     return FOLDING_KERNELS.get(mode.lower(), RigidFolding())
+
+
+def get_kernel_names() -> list[str]:
+    """
+    Returns a sorted list of available folding kernel names.
+    """
+    return sorted(FOLDING_KERNELS.keys())

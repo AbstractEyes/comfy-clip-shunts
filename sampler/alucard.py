@@ -8,10 +8,10 @@
     folding logic, and a modifier to handle padding and pooling of the resulting embeddings.
 
     Alucard is a hivemind interpolation formula that allows for flexible and guided transformations in tensor fields
-    using many different folding and padding strategies. It is designed to work with symbolic fields,
+    using many different folding and padding strategies. It is designed to work with symbolic fields.
 
     Many of these operations simply do not work. Many are not properly implemented yet.
-    Many are likely going to be removed entirely in the future or replaced with something more effecient and useful.
+    Many are likely going to be removed entirely in the future or replaced with something more efficient and useful.
 
     Alucard however, will stay. This is a foundational piece of the ABS framework, allowing for guided interpolation
     Integra regulates him, and Alucard goes on his walks - never understanding the big picture, only caring

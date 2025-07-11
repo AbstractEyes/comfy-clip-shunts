@@ -12,6 +12,8 @@ from ..model.model_manager import get_model_manager
 from ..model.configs import ENCODER_CONFIGS, ShuntData, EncoderData
 from ..utils.conditioning_shifter import ConditioningShifter
 
+from ..sampler.formulas.folding import FOLDING_KERNELS, get_kernel_names
+from ..sampler.formulas.schedules import SCHEDULER_MODES
 
 
 class EncoderSamplerSimple:
@@ -153,43 +155,48 @@ class EncoderSamplerConfig:
                     "default": "a photo of a robot.",
                     "multiline": True
                 }),
-                "steps": ("INT", {"default": 4, "min": 1, "max": 1000}),
+                "steps": ("INT", {"default": 250, "min": 1, "max": 1000}),
                 "cfg_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0}),
                 "guidance_scale": ("FLOAT", {"default": 5, "min": 0.0, "max": 100.0}),
 
-                "folding": ([
-                                "zeus", "helios", "surge", "surge-fold", "fold", "interpolate",
-                                "collapse", "zipper", "concat-flatten", "cascade", "ripple",
-                                "slerp", "slip",  # <<< new
-                                "hard_truncate", "soft_truncate", "truncate", "none"
-                            ], {"default": "slerp"}),
+                "folding": (get_kernel_names(), {"default": "a_walk", "tooltip": "Folding mode to use for the encoder."}),
 
-                "folding_scheduler": ([
-                                          "none", "tau", "top_k", "top_20k", "top_50k",
-                                          "cosine", "cascade", "cos", "sine",
-                                          "shockwave", "pulse", "wave"
-                                      ], {"default": "none"}),
+                # implemented for testing not fully functional
+                "folding_scheduler": (SCHEDULER_MODES, {"default": SCHEDULER_MODES[0]}),
 
+                #implemented for testing not fully functional
                 "padding_mode": (FOLDING_PADDING_TYPES,
                                  {"default": FOLDING_PADDING_TYPES[0]}),
+                #implemented for testing not fully functional
                 "pooling_mode": (FOLDING_POOLING_TYPES,
                                  {"default": FOLDING_POOLING_TYPES[0]}),
+                #doesn't work correctly yet
                 "use_alpha_mask": ("BOOLEAN", {"default": True}),
+                #todo
                 "cosine_similarity_gate": ("BOOLEAN", {"default": False}),
 
+                #todo
                 "pos_embedding": (["none", "cos", "sine", "cosine"], {"default": "cos"}),
                 "normalization_anchor": (["none", "l2", "l1", "heun", "surge", "sigma", "delta", "gate", "bong"], {"default": "surge"}),
 
+                #doesn't work correctly
                 "top_k": ("FLOAT", {"default": 50.0, "min": 0.0, "max": 10000.0}),
+                #todo
                 "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0}),
+                #todo
                 "temperature": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0}),
+                #todo
                 "tau": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0}),
+                #works, i think
                 "beams": ("INT", {"default": 4, "min": 1, "max": 32}),
-                "max_windows": ("INT", {"default": 4, "min": 1, "max": 256}),
-                "context_window_size": ("INT", {"default": 2048, "min": 77, "max": 8192}),
-                "sliding_window_size": ("INT", {"default": 77, "min": 1, "max": 2048}),
-                "sliding_window_stride": ("INT", {"default": 33, "min": 1, "max": 2048}),
 
+                #works
+                "max_windows": ("INT", {"default": 32, "min": 1, "max": 2048}),
+                "context_window_size": ("INT", {"default": 2048, "min": 77, "max": 8192}),
+                "sliding_window_size": ("INT", {"default": 128, "min": 1, "max": 8192}),
+                "sliding_window_stride": ("INT", {"default": 16, "min": 1, "max": 2048}),
+
+                #todo
                 "force_projection_in": ("BOOLEAN", {"default": False, "tooltip": "Force projection of context window to model's max length."}),
                 "projection_dims_in": ("INT", {"default": 768, "min": 1, "max": 8192}),
                 "interpolation_method_in": (["lerp", "slerp", "cosine", "sine", "linear", "mixed"], {"default": "slerp", "tooltip": "Method to use for interpolating projections."}),
