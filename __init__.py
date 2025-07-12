@@ -24,10 +24,10 @@ from .node.encoder_nodes import (
     # Importing all necessary nodes for the ABS Shunt Suite
     SimpleEncoderLoader,
     EncoderLoader,
-    T5LoaderTest,
     EncoderSamplerConfig,
     # Clip-based swap and handling nodes
-    EncoderSampler
+    EncoderSampler,
+    RemoveSpecialTokens
 )
 
 
@@ -50,7 +50,6 @@ from .node.shunt_nodes import (
 )
 
 from .node.clip_nodes import (
-    #ClipTokenizerSwap, no longer needed
     AbsClipSplitter,
     ACLIPLoader,
     ADualCLIPLoader,
@@ -76,6 +75,44 @@ from .node.model_sampling_nodes import (
 
 from .node.diffusion_nodes import (
     ALoadCheckpointSimple,  # Node for loading a simple diffusion-based checkpoint model
+)
+
+from .node.mask_nodes import (
+    CreateMaskFromPrompt,
+    CreateMaskFromImage,
+    CreateEmptyMask,
+    CreateMaskFromConditioning,
+    CreateMaskFromLatent,
+    BlurMask,
+    InterpolateMaskOverTime,
+    ErodeDilateMask,
+)
+
+from .node.conditioning_nodes import (
+    ConditioningStackMultipleNode,
+    ConditioningMultiply,
+    ConditioningLoadLatents,
+    ConditioningSaveLatents,
+    ConditioningScaleMultiple,
+    ConditioningSeparateMultiple,
+    ConditioningProjectMultiple,
+    ConditioningExpRampNode,
+    ConditioningMixGateNode,
+    ConditioningApplyHardMask,
+    ConditioningApplySoftMask,
+    ConditioningPCAReduceNode,
+    ConditioningMorphologicalFilterNode,
+    ConditioningFromEncoderConditioning,
+    ConditioningSummaryStatsNode,
+    ConditioningToEncoderConditioning,
+    ConditioningDynamicThresholdNode,
+    ConditioningExtractTokenMaskNode,
+    ConditioningScheduleMaskOverTimeNode,
+    ConditioningBlendOverStepsNode,
+    ConditioningLowPassFilterNode,
+    ConditioningComputeCausalDeltaNode,
+    ConditioningReweightByAttentionNode,
+    NormalizeConditioningToMasksNode,
 )
 
 NODE_CLASS_MAPPINGS = {
@@ -119,6 +156,7 @@ NODE_CLASS_MAPPINGS = {
 
     # General utility nodes
     "Prompt": ABS_PromptNode,
+    "RemoveSpecialTokens": RemoveSpecialTokens,  # Node to remove special tokens from text inputs
     "ConcatPrompts": ABS_ConcatPrompts,
     "ADebugNode": ABS_DebugNode,  # A debug node for testing and debugging purposes
 
@@ -134,8 +172,43 @@ NODE_CLASS_MAPPINGS = {
     "SetHuggingfaceToken": SetHuggingfaceToken,  # Sets the Hugging Face token for private model access
     "SetHuggingfaceCacheDirectory": SetHuggingfaceCacheDirectory,  # Sets the Hugging Face cache directory for model storage
 
-    # Deprecated nodes
-    "T5LoaderTest": T5LoaderTest,  # deprecated, use EncoderLoader instead
+    # Mask nodes for image and latent manipulation
+    "ACreateMaskFromPrompt": CreateMaskFromPrompt,  # Creates a mask from a text prompt
+    "ACreateMaskFromImage": CreateMaskFromImage,    # Creates a mask from an image input
+    "ACreateEmptyMask": CreateEmptyMask,            # Creates an empty mask
+    "ACreateMaskFromConditioning": CreateMaskFromConditioning,  # Creates a mask from conditioning data
+    "ACreateMaskFromLatent": CreateMaskFromLatent,  # Creates a mask from latent data
+    "ABlurMask": BlurMask,                          # Blurs a mask
+    "AInterpolateMaskOverTime": InterpolateMaskOverTime,  # Interpolates a mask over time
+    "AErodeDilateMask": ErodeDilateMask,          # Erodes or dilates a mask
+
+    # Conditioning suite nodes
+    "AConditioningStackMultipleNode": ConditioningStackMultipleNode,  # Stacks multiple conditioning inputs
+    "AConditioningMultiply": ConditioningMultiply,  # Multiplies multiple conditioning inputs
+    "AConditioningLoadLatents": ConditioningLoadLatents,  # Loads latents from a file
+    "AConditioningSaveLatents": ConditioningSaveLatents,  # Saves latents to a file
+    "AConditioningScaleMultiple": ConditioningScaleMultiple,  # Scales multiple conditioning inputs
+    "AConditioningSeparateMultiple": ConditioningSeparateMultiple,  # Separates multiple conditioning inputs
+    "AConditioningProjectMultiple": ConditioningProjectMultiple,  # Projects multiple conditioning inputs
+    "AConditioningExpRampNode": ConditioningExpRampNode,  # Applies an exponential ramp to conditioning inputs
+    "AConditioningMixGateNode": ConditioningMixGateNode,  # Mixes conditioning inputs with a gate
+    "AConditioningApplyHardMask": ConditioningApplyHardMask,  # Applies a hard mask to conditioning inputs
+    "AConditioningApplySoftMask": ConditioningApplySoftMask,  # Applies a soft mask to conditioning inputs
+    "AConditioningPCAReduceNode": ConditioningPCAReduceNode,  # Reduces dimensionality of conditioning inputs using PCA
+    "AConditioningMorphologicalFilterNode": ConditioningMorphologicalFilterNode,  # Applies a morphological filter to conditioning inputs
+    "AConditioningFromEncoderConditioning": ConditioningFromEncoderConditioning,  # Converts encoder conditioning to standard conditioning
+    "AConditioningSummaryStatsNode": ConditioningSummaryStatsNode,  # Computes summary statistics for conditioning inputs
+    "AConditioningToEncoderConditioning": ConditioningToEncoderConditioning,  # Converts standard conditioning to encoder conditioning
+    "AConditioningDynamicThresholdNode": ConditioningDynamicThresholdNode,  # Applies dynamic thresholding to conditioning inputs
+    "AConditioningExtractTokenMaskNode": ConditioningExtractTokenMaskNode,  # Extracts a token mask from conditioning inputs
+    "AConditioningScheduleMaskOverTimeNode": ConditioningScheduleMaskOverTimeNode,  # Schedules a mask over time for conditioning inputs
+    "AConditioningBlendOverStepsNode": ConditioningBlendOverStepsNode,  # Blends conditioning inputs over steps
+    "AConditioningLowPassFilterNode": ConditioningLowPassFilterNode,  # Applies a low-pass filter to conditioning inputs
+    "AConditioningComputeCausalDeltaNode": ConditioningComputeCausalDeltaNode,  # Computes causal delta for conditioning inputs
+    "AConditioningReweightByAttentionNode": ConditioningReweightByAttentionNode,  # Reweights conditioning inputs by attention
+    "ANormalizeConditioningToMasksNode": NormalizeConditioningToMasksNode,  # Normalizes conditioning inputs to masks
+
+
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -176,6 +249,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 
     # General utility nodes
     "Prompt": "📝 Simple Prompt Node",
+    "RemoveSpecialTokens": "🚫 Remove Special Tokens",  # Node to remove special tokens from text inputs
     "ConcatPrompts": "🔗 Concatenate Prompts",
     "ADebugNode": "🐞 Debug Node",  # A debug node for testing and debugging purposes
 
@@ -191,8 +265,40 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SetHuggingfaceToken": "🔑 Set Hugging Face Token",  # Sets the Hugging Face token for private model access
     "SetHuggingfaceCacheDirectory": "📂 Set Hugging Face Cache Directory",  # Sets the Hugging Face cache directory for model storage
 
-    # deprecated nodes
-    "T5LoaderTest": "🚀 T5 Encoder Loader",
+    # Mask nodes for image and latent manipulation
+    "ACreateMaskFromPrompt": "🖼️ Create Mask From Prompt",  # Creates a mask from a text prompt
+    "ACreateMaskFromImage": "🖼️ Create Mask From Image",  # Creates a mask from an image input
+    "ACreateEmptyMask": "🖼️ Create Empty Mask",  # Creates an empty mask
+    "ACreateMaskFromConditioning": "🖼️ Create Mask From Conditioning",  # Creates a mask from conditioning data
+    "ACreateMaskFromLatent": "🖼️ Create Mask From Latent",  # Creates a mask from latent data
+    "ABlurMask": "🖼️ Blur Mask",  # Blurs a mask
+    "AInterpolateMaskOverTime": "⏳ Interpolate Mask Over Time",  # Interpolates a mask over time
+
+    # Conditioning suite nodes
+    "AConditioningStackMultipleNode": "📚 Stack Multiple Conditionings",  # Stacks multiple conditioning inputs
+    "AConditioningMultiply": "✖️ Multiply Conditionings",  # Multiplies multiple conditioning inputs
+    "AConditioningLoadLatents": "📂 Load Latents",  # Loads latents from a file
+    "AConditioningSaveLatents": "💾 Save Latents",  # Saves latents to a file
+    "AConditioningScaleMultiple": "📏 Scale Multiple Conditionings",  # Scales multiple conditioning inputs
+    "AConditioningSeparateMultiple": "🔍 Separate Multiple Conditionings",  # Separates multiple conditioning inputs
+    "AConditioningProjectMultiple": "📊 Project Multiple Conditionings",  # Projects multiple conditioning inputs
+    "AConditioningExpRampNode": "📈 Exponential Ramp Conditioning",  # Applies an exponential ramp to conditioning inputs
+    "AConditioningMixGateNode": "🔀 Mix Gate Conditioning",  # Mixes conditioning inputs with a gate
+    "AConditioningApplyHardMask": "🛡️ Apply Hard Mask",  # Applies a hard mask to conditioning inputs
+    "AConditioningApplySoftMask": "🌫️ Apply Soft Mask",  # Applies a soft mask to conditioning inputs
+    "AConditioningPCAReduceNode": "📉 PCA Reduce Conditioning",  # Reduces dimensionality of conditioning inputs using PCA
+    "AConditioningMorphologicalFilterNode": "🔧 Morphological Filter Conditioning",  # Applies a morphological filter to conditioning inputs
+    "AConditioningFromEncoderConditioning": "🔄 From Encoder Conditioning",  # Converts encoder conditioning to standard conditioning
+    "AConditioningSummaryStatsNode": "📊 Summary Stats Conditioning",  # Computes summary statistics for conditioning inputs
+    "AConditioningToEncoderConditioning": "🔄 To Encoder Conditioning",  # Converts standard conditioning to encoder conditioning
+    "AConditioningDynamicThresholdNode": "⚖️ Dynamic Threshold Conditioning",  # Applies dynamic thresholding to conditioning inputs
+    "AConditioningExtractTokenMaskNode": "🔍 Extract Token Mask Conditioning",  # Extracts a token mask from conditioning inputs
+    "AConditioningScheduleMaskOverTimeNode": "⏳ Schedule Mask Over Time Conditioning",  # Schedules a mask over time for conditioning inputs
+    "AConditioningBlendOverStepsNode": "🔄 Blend Over Steps Conditioning",  # Blends conditioning inputs over steps
+    "AConditioningLowPassFilterNode": "🔽 Low Pass Filter Conditioning",  # Applies a low-pass filter to conditioning inputs
+    "AConditioningComputeCausalDeltaNode": "🔄 Compute Causal Delta Conditioning",  # Computes causal delta for conditioning inputs
+    "AConditioningReweightByAttentionNode": "⚖️ Reweight By Attention Conditioning",  # Reweights conditioning inputs by attention
+    "ANormalizeConditioningToMasksNode": "🔄 Normalize Conditioning To Masks",  # Normalizes conditioning inputs to masks
 
 }
 
@@ -202,7 +308,7 @@ logger.info("""
 ╔══════════════════════════════════════════╗
 ║        🚀 ABS SHUNT SUITE 🚀            ║
 ║    Dev Advanced Bridging System Adapters ║
-║         ⚡ Version 0.7.3 ⚡                ║
+║         ⚡ Version 0.7.6 ⚡                ║
 ╚══════════════════════════════════════════╝
 """)
 

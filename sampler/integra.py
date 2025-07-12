@@ -40,6 +40,7 @@ class IntegraOrchestrator:
         with torch.autocast(device_type=a.device.type, enabled=a.device.type != 'cpu'):
             B, T_full, D = a.shape
             limit = self.context_window_size if self.override_context else T_full
+            limit = min(limit, self.max_length)
             T = min(limit, T_full)
 
             # Slice the initial context window (if override is active)
@@ -62,12 +63,12 @@ class IntegraOrchestrator:
                 d_win = d[:, start:end, :]
                 # mask the first and last token if the window to see but not utilize them
                 if self.override_context:
-                    a_win[:, 0, :] = 0.0
-                    a_win[:, -1, :] = 0.0
-                    b_win[:, 0, :] = 0.0
-                    b_win[:, -1, :] = 0.0
-                    d_win[:, 0, :] = 0.0
-                    d_win[:, -1, :] = 0.0
+                    a_win[:, 0, :] = -100.0  # Mask first token
+                    a_win[:, -1, :] = -100.0
+                    b_win[:, 0, :] = -100.0
+                    b_win[:, -1, :] = -100.0
+                    d_win[:, 0, :] = -100.0
+                    d_win[:, -1, :] = -100.0
 
                 logger.info(f"Window slice [{start}:{end}] a_win shape: {a_win.shape}")
                 folded = self.walker.walk(a_win, b_win, d_win)
@@ -76,6 +77,7 @@ class IntegraOrchestrator:
                 folds.append((start, end, folded))
 
             # Aggregate windowed output
+            logger.info(f"Aggregating {len(folds)} folds with total tokens: {T_full}")
             aggregated = self.aggregate(folds, T)
 
             return aggregated, {

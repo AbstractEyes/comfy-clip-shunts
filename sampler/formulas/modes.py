@@ -68,7 +68,7 @@ class FoldingPaddingTypes:
         Returns a list of all available padding types.
         """
         return [
-            "interpolate", "mask_edges", "mask_top_k", "replace", "gapped", "sparse", "none"
+            "interpolate", "mask_edges", "mask_top_k", "blend", "blend2", "replace", "gapped", "sparse", "none",
         ]
 
 

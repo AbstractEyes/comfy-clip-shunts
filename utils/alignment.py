@@ -2,6 +2,35 @@ import math, torch, torch.nn.functional as F
 
 import torch.nn.functional as F
 
+
+def match_project(tensor: torch.Tensor, reference: torch.Tensor, mode: str = "linear") -> torch.Tensor:
+    if tensor.ndim == 4:
+        tensor = tensor.squeeze(1)
+    if reference.ndim == 4:
+        reference = reference.squeeze(1)
+
+    B, T, D = tensor.shape
+    target_d = reference.shape[-1]
+
+    if D == target_d:
+        return tensor
+
+    # Reshape to 3D: [B*T, 1, D]
+    reshaped = tensor.reshape(B * T, 1, D)
+
+    # Interpolate feature dimension
+    interpolated = F.interpolate(
+        reshaped,
+        size=target_d,
+        mode=mode,
+        align_corners=False if mode in {"linear", "bilinear", "bicubic", "trilinear"} else None
+    )
+
+    # Reshape back to [B, T, target_d]
+    return interpolated.reshape(B, T, target_d)
+
+
+
 def match_feature_dims(x: torch.Tensor, ref: torch.Tensor,
                        mode: str = "linear") -> torch.Tensor:
     """

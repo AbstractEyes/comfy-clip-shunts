@@ -306,10 +306,12 @@ class ShuntConditioning:
         logger.info(
             f"Adapting conditioning with {len(adapter_pipe)} adapters (pool_method={pool_method}, topk={use_topk})")
 
+        encoder_pipe = dict(encoder_pipe[0])  # Ensure we have a mutable copy
+        adapter_pipe = list(adapter_pipe)  # Ensure we have a mutable copy
+        conditioning = conditioning.copy()  # Ensure we have a mutable copy
         device = torch.device(
             encoder_pipe.get("config", {}).get("device", "cuda" if torch.cuda.is_available() else "cpu")
         )
-
 
         # Create unified config with top-k parameters
         config = ShiftConfig(
@@ -432,7 +434,6 @@ class ShuntConditioning:
             conditioning, adapted_conditioning,
             config, device, all_topk_stats
         )
-
         return (adapted_conditioning, stats_str)
 
     def _format_statistics(self, modifications, guidance_predictions,
@@ -620,6 +621,8 @@ class ShuntConditioningAdvanced:
                            noise_injection, use_anchor, timestep_start, timestep_end):
 
         device = torch.device(encoder_pipe["device"])
+        encoder_pipe = dict(encoder_pipe)  # Ensure we have a mutable copy
+        adapter_pipe = list(adapter_pipe)  # Ensure we have a mutable copy
 
         # Get T5 embeddings
         with torch.no_grad():
@@ -974,6 +977,7 @@ class EasyShunt:
         from ..model.model_manager import get_model_manager
         from ..model.configs import HARMONIC_SHUNT_REPOS
 
+        conditioning = conditioning.copy()  # Ensure we have a mutable copy
         manager = get_model_manager()
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

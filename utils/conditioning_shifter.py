@@ -46,51 +46,88 @@ class AdapterOutput:
 
 
 class ConditioningShifter:
-    """Handles all modification logic"""
-
     @staticmethod
-    def extract_encoder_embeddings(encoder_pipe: Dict[str, Any], device: torch.device, shift_config: ShiftConfig) -> torch.Tensor:
-        """Extract embeddings from encoder pipe - removes 30+ lines from main class"""
-        config = encoder_pipe.get("config", {})
-        encoder_config = config.get("config", {})
+    def extract_encoder_embeddings(
+        encoder_pipe: Dict[str, Any],
+        device: torch.device,
+        shift_config: Optional[ShiftConfig | dict[str, Any]] = None,
+        sampler_cfg: Dict[str, Any] = None
+    ) -> torch.Tensor:
+        """
+        1) Clean prompt of any shunt tokens
+        2) Tokenize + encode via T5/BERT
+        3) Optionally project to sampler_cfg['projection_dims_in']
+        """
+        # 1) prompt cleanup
+        if isinstance(shift_config, dict):
+            shift_config = ShiftConfig(**shift_config)
+        raw_prompt = shift_config.prompt
+        prompt = raw_prompt#RemoveSpecialTokens.remove_special_tokens(raw_prompt)
 
-        tokenizer = encoder_pipe.get("tokenizer")
-        model = encoder_pipe.get("model")
-        context_prompt = shift_config.prompt
-        logger.info(f"Extracting embeddings for context: {context_prompt}")
-
-        # Tokenize
-        padding_type = encoder_config.get("padding", "max_length")
-        max_length = encoder_config.get("max_length", 512)
+        # 2) tokenize & encode
+        tokenizer = encoder_pipe["tokenizer"]
+        model     = encoder_pipe["model"]
+        cfg       = encoder_pipe["config"]["config"]  # your existing mini‐config
 
         tokens = tokenizer(
-            context_prompt,
+            prompt,
             return_tensors="pt",
-            padding=padding_type if padding_type != "do_not_pad" else False,
+            padding=cfg.get("padding","max_length"),
             truncation=True,
-            max_length=max_length
+            max_length=cfg.get("max_length",512)
         )
-
-        input_ids = tokens["input_ids"].to(device)
+        input_ids      = tokens["input_ids"].to(device)
         attention_mask = tokens["attention_mask"].to(device)
 
-        # Get embeddings by model type
-        model_type = config.get("model_type", "")
-
         with torch.no_grad():
-            if "t5" in model_type:
-                return model.encoder(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
+            model.to(device)
+            mtype = encoder_pipe["config"].get("model_type","")
+            if "t5" in mtype:
+                embeddings = model.encoder(input_ids=input_ids,
+                                           attention_mask=attention_mask
                 ).last_hidden_state
-            elif model_type in ["bert", "nomic_bert"]:
-                return model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    return_dict=True
+            elif mtype in ("bert","nomic_bert"):
+                embeddings = model(input_ids=input_ids,
+                                   attention_mask=attention_mask,
+                                   return_dict=True
                 ).last_hidden_state
             else:
-                raise ValueError(f"Unsupported model type: {model_type}")
+                raise ValueError(f"Unsupported encoder type {mtype!r}")
+            model.to("cpu")  # free GPU memory
+
+        # 3) optional input‐projection to match CLIP dims
+        if sampler_cfg and sampler_cfg.get("force_projection_in", False):
+            target_dims = sampler_cfg["projection_dims_in"]
+            embeddings = ConditioningShifter._project_embeddings(
+                embeddings, target_dims, sampler_cfg["interpolation_method_in"]
+            )
+
+        return embeddings.to(device)
+
+
+    @staticmethod
+    def _project_embeddings(
+        embeddings: torch.Tensor,
+        target_dim: int,
+        mode: str
+    ) -> torch.Tensor:
+        """
+        Interpolate the last dimension from D→target_dim via F.interpolate,
+        preserving batch & sequence dims.
+        """
+        B, T, D = embeddings.shape
+        if D == target_dim:
+            return embeddings
+
+        # [B*T, 1, D] → interpolate → [B*T, 1, target_dim] → back to [B,T,target_dim]
+        flat = embeddings.reshape(B*T, 1, D)
+        proj = torch.nn.functional.interpolate(
+            flat.float(),
+            size=target_dim,
+            mode=mode,
+            align_corners=(mode in {"linear","bilinear","trilinear"})
+        )
+        return proj.reshape(B, T, target_dim)
 
     @staticmethod
     def run_adapter(adapter_model: ConditionModulationShuntAdapter,
@@ -104,24 +141,25 @@ class ConditioningShifter:
 
         #encoder_embeddings, clip_slice = reshape_for_shunt(encoder_embeddings, clip_slice, adapter_model)
 
-        outputs = adapter_model(encoder_embeddings.float(), clip_slice.float(), config=gen_config)
+        with torch.no_grad():
+            outputs = adapter_model(encoder_embeddings.float(), clip_slice.float(), config=gen_config)
 
-        if isinstance(outputs, tuple) and len(outputs) == 8:
-            anchor, delta, log_sigma, attn_c2m, attn_m2c, tau, g_pred, gate = outputs
-            return AdapterOutput(
-                anchor=anchor,
-                delta=delta,  # Already has gate multiplied!
-                log_sigma=log_sigma,
-                tau=tau,
-                g_pred=g_pred,
-                gate=gate,
-                adapter_type=adapter_type,
-                slice_range=slice_range,
-                attn_c2m=attn_c2m,
-                attn_m2c=attn_m2c
-            )
-        else:
-            raise ValueError(f"Unexpected adapter output format: {type(outputs)}")
+            if isinstance(outputs, tuple) and len(outputs) == 8:
+                anchor, delta, log_sigma, attn_c2m, attn_m2c, tau, g_pred, gate = outputs
+                return AdapterOutput(
+                    anchor=anchor,
+                    delta=delta,  # Already has gate multiplied!
+                    log_sigma=log_sigma,
+                    tau=tau,
+                    g_pred=g_pred,
+                    gate=gate,
+                    adapter_type=adapter_type,
+                    slice_range=slice_range,
+                    attn_c2m=attn_c2m,
+                    attn_m2c=attn_m2c
+                )
+            else:
+                raise ValueError(f"Unexpected adapter output format: {type(outputs)}")
 
     @staticmethod
     def apply_topk_selection(output: AdapterOutput, config: ShiftConfig) -> Tuple[torch.Tensor, torch.Tensor]:

@@ -1,3 +1,7 @@
+from dataclasses import dataclass
+
+import torch
+
 import comfy
 import comfy.utils
 import importlib
@@ -106,3 +110,4 @@ class ABS_DebugNode:
         message = "Debug: " + ", ".join(str(arg) for arg in args)
         logging.info(message)
         return ()
+

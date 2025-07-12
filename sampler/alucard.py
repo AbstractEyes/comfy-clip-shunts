@@ -27,8 +27,9 @@ from torch import nn
 
 from .formulas.schedules import FormulaScheduler   # Ensure schedules.py is in same directory or adjust import
 from .formulas.folding import FoldingKernel, get_folding_kernel  # Ensure folding.py is in same directory or adjust import
-from .formulas.padding import FoldingModifier, FoldingModifierConfig  # Ensure padding.py is in same directory or adjust import
+from .formulas.padding import FoldingModifier  # Ensure padding.py is in same directory or adjust import
 from .formulas.modes import FoldingPaddingTypes, FoldingPoolingTypes
+from .formulas.pooling import WindowPooling
 from .formulas.folding import FoldingKernels
 from .formulas.schedules import SchedulerModes
 from .alucard_exceptions import validate_shapes  # Ensure alucard_error.py is in same directory or adjust import
@@ -37,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class FieldWalkerConfig:
+    name: str = ""
     folding_mode: str = FoldingKernels.gilgamesh
     scheduler_mode: str = SchedulerModes.TAU
     t_steps: int = 6
@@ -57,7 +59,8 @@ class SamplerCore(nn.Module):
             t_steps: int,  # total interpolation steps
             scheduler: FormulaScheduler,  # provides alpha, tau, etc.
             kernel: FoldingKernel,  # folding mode executor
-            modifier: FoldingModifier,  # padding/pooling control
+            padding: FoldingModifier,  # padding/pooling control
+            pooling: WindowPooling,  # pooling strategy
             pad_mask: Optional[torch.Tensor] = None,  # [B, T] bool
             context: Optional[dict] = None  # extra runtime info
     ) -> torch.Tensor:
@@ -68,6 +71,10 @@ class SamplerCore(nn.Module):
         """
         with torch.autocast(device_type=a.device.type, enabled=a.device.type != 'cpu'):
             validate_shapes(a, b)
+            #they're ready, lets clone them.
+            a = a.clone()
+            b = b.clone()
+            d = d.clone() if d is not None else (b - a).clone()
             B, T, D = a.shape
             folds = []
             context = context or {}
@@ -85,26 +92,23 @@ class SamplerCore(nn.Module):
 
                 # -- Step 3: Apply Padding Policy
                 if pad_mask is not None:
-                    folded = modifier.apply_padding(a, folded, pad_mask)
+                    folded = padding.apply_padding(a, folded, pad_mask)
 
                 folds.append(folded)
 
             # -- Step 4: Aggregate via Pooling
-            result = modifier.apply_pooling(folds)
+            result = pooling.apply(self, folds)
             return result
 
 
 class FieldWalker:
     def __init__(self, config: FieldWalkerConfig):
         self.config = config
+        self.name = config.name or "Alucard"
         self.scheduler = FormulaScheduler(config.scheduler_mode, config.scheduler_config or {})
         self.kernel = get_folding_kernel(config.folding_mode)
-        self.modifier = FoldingModifier(
-            FoldingModifierConfig(
-                padding_mode=config.padding_mode,
-                pooling_mode=config.pooling_mode
-            )
-        )
+        self.padding = FoldingModifier({"padding_mode":config.padding_mode,})
+        self.pooling = WindowPooling({"pooling_mode": config.pooling_mode})
         self.core = SamplerCore()
 
     def walk(self, a: torch.Tensor, b: torch.Tensor, pad_mask: Optional[torch.Tensor] = None,
@@ -119,7 +123,8 @@ class FieldWalker:
             t_steps=self.config.t_steps,
             scheduler=self.scheduler,
             kernel=self.kernel,
-            modifier=self.modifier,
+            pooling=self.pooling,
+            padding=self.padding,
             pad_mask=pad_mask,
             context=context
         )
