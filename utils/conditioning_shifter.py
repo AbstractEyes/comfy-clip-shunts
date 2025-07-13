@@ -27,6 +27,8 @@ class ShiftConfig:
     topk_percentage: float = 100.0  # Percentage of tokens to keep
     tau_temperature: float = 1.0  # Temperature scaling for tau
     topk_mode: str = "attention"  # "attention", "gate", "combined", "tau_softmax"
+    guidance_scale: float = 1.0,
+    max_tokens: int = 77  # Maximum number of tokens to process
 
 
 @dataclass
@@ -74,7 +76,7 @@ class ConditioningShifter:
             return_tensors="pt",
             padding=cfg.get("padding","max_length"),
             truncation=True,
-            max_length=cfg.get("max_length",512)
+            max_length=cfg.get("max_tokens",cfg.get("max_length", 512)),
         )
         input_ids      = tokens["input_ids"].to(device)
         attention_mask = tokens["attention_mask"].to(device)
@@ -230,9 +232,9 @@ class ConditioningShifter:
         """Apply modifications based on config.pool_method"""
         torch.manual_seed(config.seed if config.seed >= 0 else torch.randint(0, 2**32, (1,)).item())
 
+        modified = clip_slice.clone()
         if config.pool_method == "sequential":
             # Apply each adapter sequentially
-            modified = clip_slice.clone()
             for output in outputs:
                 modified = ConditioningShifter._apply_single(modified, output, config)
             return modified
@@ -240,7 +242,7 @@ class ConditioningShifter:
         elif config.pool_method == "weighted_average":
             # Pool all adapters then apply once
             if len(outputs) == 1:
-                return ConditioningShifter._apply_single(clip_slice, outputs[0], config)
+                return ConditioningShifter._apply_single(modified, outputs[0], config)
 
             pooled = ConditioningShifter._pool_outputs(outputs)
             return ConditioningShifter._apply_single(clip_slice, pooled, config)
@@ -271,7 +273,7 @@ class ConditioningShifter:
             delta = delta * topk_mask_expanded
 
         # Apply strength
-        delta_final = delta * config.strength
+        delta_final = delta
 
         # Apply based on anchor mode
         if config.use_anchor:
@@ -349,3 +351,52 @@ class ConditioningShifter:
             attn_c2m=pooled_attn_c2m,
             attn_m2c=pooled_attn_m2c
         )
+
+    @staticmethod
+    def conditioning_set_values(conditioning, values={}, append=False):
+        """
+        Set values in conditioning based on provided values.
+        Original set values was provided by comfyui node_helpers.py
+
+        """
+        c = []
+        for t in conditioning:
+            n = [t[0], t[1].copy()]
+            for k in values:
+                val = values[k]
+                if append:
+                    old_val = n[1].get(k, None)
+                    if old_val is not None:
+                        val = old_val + val
+
+                n[1][k] = val
+            c.append(n)
+
+        return
+
+    @staticmethod
+    def conditioning_set_strength(conditioning, cond_strength: float, pool_strength: float = 1.0):
+        """
+        Set strength in conditioning based on provided strength - we need to manually modify instead of setting values.
+            [    [base_tensor, { "pooled_outputs": pool, ... other dict entries } ], ...    ]
+        """
+        c = []
+        for t in conditioning:
+            base_tensor = t[0].copy()
+            # Set our usage strength, then find out if we have pooled outputs
+            base_tensor *= cond_strength
+            kwarg_dict = t[1].clone() if t[1] is not None else {} # copies the config params for later use
+
+            # lets get and remove the pooled outputs if they exist
+            pooled: Optional[None | torch.Tensor] = kwarg_dict.get("pooled_outputs", None)
+            if pooled is not None:
+                del kwarg_dict["pooled_outputs"]
+                pooled = pooled.clone()
+                # If we have pooled outputs, apply the pooled strength
+                pooled *= pool_strength
+                kwarg_dict["pooled_outputs"] = pooled
+
+            c.append([base_tensor, kwarg_dict])
+
+
+

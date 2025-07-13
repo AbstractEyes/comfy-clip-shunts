@@ -260,9 +260,9 @@ class ShuntConditioning:
                 "prompt": ("STRING", {"default": "A photo of a robot.", "multiline": True}),
                 "seed": ("INT", {"default": 420, "min": -1, "max": 2**32 - 1, "step": 1}),
                 "strength": ("FLOAT", {"default": 0.5, "min": -10.0, "max": 10.00, "step": 0.1}),
-                "delta_mean": ("FLOAT", {"default": 0.3, "min": -2.0, "max": 2.00, "step": 0.1}),
-                "delta_scale": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 5.00, "step": 0.1}),
-                "sigma_scale": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 2.00, "step": 0.1}),
+                "delta_mean": ("FLOAT", {"default": 0.3, "min": -50.0, "max": 50.00, "step": 0.1}),
+                "delta_scale": ("FLOAT", {"default": 0.3, "min": -100.0, "max": 100.00, "step": 0.1}),
+                "sigma_scale": ("FLOAT", {"default": 0.3, "min": -100.0, "max": 100.00, "step": 0.1}),
                 "gate_probability": ("FLOAT", {"default": 0.50, "min": 0.0, "max": 1.00, "step": 0.01}),
                 "gate_threshold": ("FLOAT", {"default": 0.27, "min": 0.0, "max": 1.00, "step": 0.01}),
                 "noise_injection": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 0.99, "step": 0.01}),
@@ -270,10 +270,11 @@ class ShuntConditioning:
                 "pool_method": (["sequential", "weighted_average"], {"default": "sequential"}),
                 # Top-K parameters
                 "use_topk": ("BOOLEAN", {"default": True}),
-                "topk_percentage": ("FLOAT", {"default": 25.0, "min": 1.0, "max": 100.0, "step": 1.0}),
-                "tau_temperature": ("FLOAT", {"default": 50.0, "min": 0.1, "max": 1000.0, "step": 0.1}),
+                "topk_percentage": ("FLOAT", {"default": 25.0, "min": -100.0, "max": 100.0, "step": 1.0}),
+                "tau_temperature": ("FLOAT", {"default": 50.0, "min": -1000.0, "max": 1000.0, "step": 0.1}),
                 "topk_mode": (["attention", "gate", "combined", "tau_softmax", "attention_collaborative"], {"default": "attention"}),
-                "guidance_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 50.0, "step": 0.1}),
+                "guidance_scale": ("FLOAT", {"default": 5.0, "min": -10000.0, "max": 10000.0, "step": 0.1}),
+                "max_tokens": ("INT", {"default": 2048, "min": 1, "max": 4096, "step": 1}),
             },
         }
 
@@ -301,7 +302,8 @@ class ShuntConditioning:
                            topk_percentage,
                            tau_temperature,
                            topk_mode,
-                           guidance_scale):
+                           guidance_scale,
+                           max_tokens):
 
         logger.info(
             f"Adapting conditioning with {len(adapter_pipe)} adapters (pool_method={pool_method}, topk={use_topk})")
@@ -329,7 +331,9 @@ class ShuntConditioning:
             use_topk=use_topk,
             topk_percentage=topk_percentage,
             tau_temperature=tau_temperature,
-            topk_mode=topk_mode
+            topk_mode=topk_mode,
+            guidance_scale=guidance_scale,
+            max_tokens=max_tokens
         )
 
         # Get encoder embeddings (extracted to shifter)

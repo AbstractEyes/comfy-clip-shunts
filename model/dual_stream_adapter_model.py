@@ -154,7 +154,7 @@ class ConditionModulationShuntAdapter(nn.Module):
         if max_guidance <= 0:
             max_guidance = self.max_guidance
         if max_guidance <= 0:
-            max_guidance = 10
+            max_guidance = config.get("guidance_scale", 10.0)
 
         cond_b = self.condition_projection(cond_seq)
         mod_b  = self.modulation_projection(mod_seq)
@@ -263,6 +263,7 @@ class TwoStreamShuntAdapter(nn.Module):
             max_guidance = self.max_guidance
         if max_guidance <= 0:
             max_guidance = 10
+        max_guidance = config.get("guidance_scale", 5.0)
 
         t5_b   = self.proj_t5(t5_seq)
         clip_b = self.proj_clip(clip_seq)

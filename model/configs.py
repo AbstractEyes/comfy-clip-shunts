@@ -444,6 +444,18 @@ ENCODER_CONFIGS = {
         "type": "bert",
         "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
     },
+    "bert-large-cased": {
+        "repo_name": "google-bert/bert-large-cased",
+        "name": "bert-large-cased",
+        "type": "bert",
+        "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+    },
+    "bert-base-multilingual-cased": {
+        "repo_name": "google-bert/bert-base-multilingual-cased",
+        "name": "bert-base-multilingual-cased",
+        "type": "bert",
+        "use_huggingface": True,  # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+    },
     "t5xxl": {
         "repo_name": "google/t5-xxl-lm-adapt",
         "name": "t5-xxl",
@@ -516,9 +528,34 @@ ENCODER_CONFIGS = {
             "vocab_size": 69328,
         }
     },
+    "flan-t5-small": {
+        "repo_name": "google/flan-t5-small",
+        "name": "flan-t5-small",
+        "type": "t5",
+        "use_huggingface": True,
+        # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+    },
     "flan-t5-base": {
         "repo_name": "google/flan-t5-base",
         "name": "flan-t5-base",
+        "type": "t5",
+        "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+    },
+    "flan-t5-large": {
+        "repo_name": "google/flan-t5-large",
+        "name": "flan-t5-large",
+        "type": "t5",
+        "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+    },
+    "flan-t5-xl": {
+        "repo_name": "google/flan-t5-xl",
+        "name": "flan-t5-xl",
+        "type": "t5",
+        "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+    },
+    "flan-t5-xxl": {
+        "repo_name": "google/flan-t5-xxl",
+        "name": "flan-t5-xxl",
         "type": "t5",
         "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
     },

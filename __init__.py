@@ -89,30 +89,31 @@ from .node.mask_nodes import (
 )
 
 from .node.conditioning_nodes import (
-    ConditioningStackMultipleNode,
-    ConditioningMultiply,
-    ConditioningLoadLatents,
-    ConditioningSaveLatents,
-    ConditioningScaleMultiple,
-    ConditioningSeparateMultiple,
-    ConditioningProjectMultiple,
-    ConditioningExpRampNode,
-    ConditioningMixGateNode,
-    ConditioningApplyHardMask,
-    ConditioningApplySoftMask,
-    ConditioningPCAReduceNode,
-    ConditioningMorphologicalFilterNode,
-    ConditioningFromEncoderConditioning,
-    ConditioningSummaryStatsNode,
-    ConditioningToEncoderConditioning,
-    ConditioningDynamicThresholdNode,
-    ConditioningExtractTokenMaskNode,
-    ConditioningScheduleMaskOverTimeNode,
-    ConditioningBlendOverStepsNode,
-    ConditioningLowPassFilterNode,
-    ConditioningComputeCausalDeltaNode,
-    ConditioningReweightByAttentionNode,
-    NormalizeConditioningToMasksNode,
+    ConditioningStackMultipleNode,       # ready
+    ConditioningMultiply,                # untested
+    ConditioningLoadLatents,             # untested
+    ConditioningSaveLatents,             # untested
+    ConditioningSeparateMultiple,        # untested
+    ConditioningProjectMultiple,         # untested
+    ConditioningExpRampNode,             # untested
+    ConditioningMixGateNode,             # untested
+    ConditioningApplyHardMask,           # untested
+    ConditioningApplySoftMask,           # untested
+    ConditioningPCAReduceNode,           # untested
+    ConditioningMorphologicalFilterNode, # untested
+    ConditioningFromEncoderConditioning, # untested
+    ConditioningSummaryStatsNode,        # untested
+    ConditioningToEncoderConditioning,   # untested
+    ConditioningDynamicThresholdNode,    # untested
+    ConditioningExtractTokenMaskNode,    # untested
+    ConditioningScheduleMaskOverTimeNode,# untested
+    ConditioningBlendOverStepsNode,      # untested
+    ConditioningLowPassFilterNode,       # untested
+    ConditioningComputeCausalDeltaNode,  # untested
+    ConditioningReweightByAttentionNode, # untested
+    NormalizeConditioningToMasksNode,    # untested
+    ConditioningSetDeviceNode,           # untested
+    ConditioningSetDtypeNode,            # untested
 )
 
 NODE_CLASS_MAPPINGS = {
@@ -159,13 +160,14 @@ NODE_CLASS_MAPPINGS = {
     "RemoveSpecialTokens": RemoveSpecialTokens,  # Node to remove special tokens from text inputs
     "ConcatPrompts": ABS_ConcatPrompts,
     "ADebugNode": ABS_DebugNode,  # A debug node for testing and debugging purposes
+    "AConditioningSetDeviceNode": ConditioningSetDeviceNode,  # Sets the device for conditioning nodes
+    "AConditioningSetDtypeNode": ConditioningSetDtypeNode,  # Sets the dtype for conditioning nodes
 
     # Clip-based nodes
     "ACLIPLoader": ACLIPLoader,               # Loads a dual CLIP model (clip-l, clip-g)
     "ADualCLIPLoader": ADualCLIPLoader,       # Loads a dual CLIP model (clip-l, clip-g)
     "ATripleCLIPLoader": ATripleCLIPLoader,   # Loads a triple CLIP model (clip-l, clip-g, t5)
     "AQuadrupleCLIPLoader": AQuadrupleCLIPLoader, # Loads a quadruple CLIP model (clip-l, clip-g, t5, llama)
-    #"ClipTokenizerSwap": ClipTokenizerSwap,     # added v0.4.0
     "AbsClipSplitter": AbsClipSplitter,         # added v0.4.0
 
     # HuggingFace nodes for additional functionality
@@ -187,7 +189,6 @@ NODE_CLASS_MAPPINGS = {
     "AConditioningMultiply": ConditioningMultiply,  # Multiplies multiple conditioning inputs
     "AConditioningLoadLatents": ConditioningLoadLatents,  # Loads latents from a file
     "AConditioningSaveLatents": ConditioningSaveLatents,  # Saves latents to a file
-    "AConditioningScaleMultiple": ConditioningScaleMultiple,  # Scales multiple conditioning inputs
     "AConditioningSeparateMultiple": ConditioningSeparateMultiple,  # Separates multiple conditioning inputs
     "AConditioningProjectMultiple": ConditioningProjectMultiple,  # Projects multiple conditioning inputs
     "AConditioningExpRampNode": ConditioningExpRampNode,  # Applies an exponential ramp to conditioning inputs
@@ -232,7 +233,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ShuntScheduler": "📊 Shunt Scheduler",
     "UnloadShuntModels": "🗑️ Unload Shunt Models",
 
-    # Conditioning and passthrough nodes
+    # Shunt specific Conditioning and passthrough nodes
     "ShuntConditioning": "🔌 Shunt Conditioning",
     "ShuntConditioningAdvanced": "🎛️ Shunt Conditioning Advanced",
 
@@ -252,6 +253,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "RemoveSpecialTokens": "🚫 Remove Special Tokens",  # Node to remove special tokens from text inputs
     "ConcatPrompts": "🔗 Concatenate Prompts",
     "ADebugNode": "🐞 Debug Node",  # A debug node for testing and debugging purposes
+    "AConditioningSetDeviceNode": "🔄 Set Conditioning Device",  # Sets the device for conditioning nodes
 
     # Clip-based nodes
     "AQuadrupleCLIPLoader": "📦 Quadruple CLIP Loader",  # Loads a quadruple CLIP model (clip-l, clip-g, t5, llama)
@@ -279,7 +281,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "AConditioningMultiply": "✖️ Multiply Conditionings",  # Multiplies multiple conditioning inputs
     "AConditioningLoadLatents": "📂 Load Latents",  # Loads latents from a file
     "AConditioningSaveLatents": "💾 Save Latents",  # Saves latents to a file
-    "AConditioningScaleMultiple": "📏 Scale Multiple Conditionings",  # Scales multiple conditioning inputs
     "AConditioningSeparateMultiple": "🔍 Separate Multiple Conditionings",  # Separates multiple conditioning inputs
     "AConditioningProjectMultiple": "📊 Project Multiple Conditionings",  # Projects multiple conditioning inputs
     "AConditioningExpRampNode": "📈 Exponential Ramp Conditioning",  # Applies an exponential ramp to conditioning inputs
@@ -308,7 +309,7 @@ logger.info("""
 ╔══════════════════════════════════════════╗
 ║        🚀 ABS SHUNT SUITE 🚀            ║
 ║    Dev Advanced Bridging System Adapters ║
-║         ⚡ Version 0.7.6 ⚡                ║
+║         ⚡ Version 0.7.8 ⚡                ║
 ╚══════════════════════════════════════════╝
 """)
 

@@ -249,7 +249,6 @@ class ModelManager:
         if not force_reload and self.is_loaded(adapter_id):
             logger.info(f"Using cached adapter: {adapter_id}")
             return self._maybe_convert_dtype(adapter_id, dtype, device)
-
         try:
             # Import here to avoid circular imports
             from .dual_stream_adapter_model import ConditionModulationShuntAdapter

@@ -61,7 +61,7 @@ class EncodeEmbeddings:
             raise ValueError("Encoder pipeline must be provided.")
         device = torch.device(device)
         # Extract embeddings using the ConditioningShifter
-        embeddings = ConditioningShifter.extract_encoder_embeddings(encoder, device=device, config=encoder_config)
+        embeddings = ConditioningShifter.extract_encoder_embeddings(encoder, device=torch.device(), config=encoder_config)
 
         return ([EncoderEmbeddings(embeddings, config=encoder_config)],)
 
@@ -1028,3 +1028,97 @@ class SimpleEncoderLoader:
             "config": config_dict,
         },)
 
+
+class T5LoaderTest:
+    """
+    Loads T5 encoder-decoder model and prepares tokenized context for adapters.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model_name": (list(ENCODER_CONFIGS.keys()), {"default": "google/flan-t5-base"}),
+                "local_path": ("STRING", {"default": "", "tooltip": "Local path override. If empty, use HuggingFace."}),
+                "context_window": ("STRING", {"default": "a photo of a robot.", "multiline": True}),
+                "override_context_window": ("BOOLEAN", {"default": True}),
+                "sliding_window_size": ("INT", {"default": 512, "min": 1, "max": 2048}),
+                "sliding_window_stride": ("INT", {"default": 256, "min": 1, "max": 2048}),
+                "max_length": ("INT", {"default": 77, "min": 1, "max": 512}),
+                "padding": (["max_length", "longest", "do_not_pad"], {"default": "max_length"}),
+                "max_slices": ("INT", {"default": 10, "min": 1, "max": 100}),
+                "min_slices": ("INT", {"default": 1, "min": 1, "max": 100}),
+                "truncate_option": (["fold", "interpolate", "collapse", "zipper"], {"default": "fold"}),
+                "device": (["cpu", "cuda", "mps"], {"default": "cuda" if torch.cuda.is_available() else "cpu"})
+            }
+        }
+
+    RETURN_TYPES = ("ENCODER_PIPE",)
+    RETURN_NAMES = ("encoder_pipe",)
+    FUNCTION = "load"
+    CATEGORY = "adapter/testing"
+    DEPRECATED = True
+
+    def load(self, model_name, local_path, context_window, override_context_window,
+             sliding_window_size, sliding_window_stride, max_length, padding,
+             max_slices, min_slices, truncate_option, device):
+        """Load the T5 model and tokenizer, and encode a sample context window."""
+
+        # Get model manager
+        model_manager = get_model_manager()
+
+        # Determine model source
+        model_config = ENCODER_CONFIGS.get(model_name, {})
+        model_source = local_path or model_config.get("repo_name", "")
+
+        if not model_source:
+            raise ValueError(f"No path found for model '{model_name}'.")
+
+        # Create unique model ID
+        model_id = f"t5_{model_name}_{hash(model_source)}"
+
+        # Load model and tokenizer through manager
+        device_obj = torch.device(device)
+        result = model_manager.load_t5_model(
+            model_id=model_id,
+            model_name_or_path=model_source,
+            device=device_obj,
+            dtype=torch.float32
+        )
+
+        if not result:
+            raise RuntimeError(f"Failed to load T5 model: {model_name}")
+
+        model, tokenizer = result
+
+
+        # Tokenize context
+        input_ids, attention_mask = None, None
+        if override_context_window:
+            tokens = tokenizer(
+                context_window,
+                return_tensors="pt",
+                padding=padding if padding != "do_not_pad" else False,
+                truncation=True,
+                max_length=max_length
+            )
+            input_ids = tokens["input_ids"].to(device_obj)
+            attention_mask = tokens["attention_mask"].to(device_obj)
+
+        return ([{
+                    "model": model,
+                    "tokenizer": tokenizer,
+                    "input_ids": input_ids,
+                    "attention_mask": attention_mask,
+                    "prompt": context_window,
+                    "max_slices": max_slices,
+                    "min_slices": min_slices,
+                    "sliding_window_size": sliding_window_size,
+                    "sliding_window_stride": sliding_window_stride,
+                    "override_context_window": override_context_window,
+                    "max_length": max_length,
+                    "padding": padding,
+                    "truncate_option": truncate_option,
+                    "device": str(device),
+                    "model_id": model_id  # Include for tracking
+                }],)

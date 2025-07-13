@@ -51,6 +51,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from ..utils.alignment import match_feature_dims
 import comfy
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+from ..utils.conditioning_shifter import ConditioningShifter
+
+
 
 
 class ConditioningStackMultipleNode:
@@ -64,6 +72,10 @@ class ConditioningStackMultipleNode:
             "required": {
                 "conditioning_1": ("CONDITIONING", {}),
                 "conditioning_2": ("CONDITIONING", {}),
+                #"time_start": ("INT", {"default": 0.0, "min": 0, "max": 1.0, "tooltip": "Start time for the first conditioning."}),
+                #"time_end": ("INT", {"default": 1.0, "min": 0, "max": 1.0, "tooltip": "End time for the last conditioning."}),
+                #"cond_strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "tooltip": "Strength of the conditioning stack."}),
+                #"pool_strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "tooltip": "Strength of the pooled output."}),
             },
             "optional": {
                 "conditioning_3": ("CONDITIONING", {}),
@@ -76,7 +88,16 @@ class ConditioningStackMultipleNode:
     FUNCTION = "stack_conditionings"
     CATEGORY = "utils/conditioning"
 
-    def stack_conditionings(self, conditioning_1: list, conditioning_2: list, conditioning_3=None, conditioning_4=None, conditioning_5=None):
+    def stack_conditionings(self,
+                            conditioning_1: list,
+                            conditioning_2: list,
+                            #time_start: float = 0,
+                            #time_end: float = 1.0,
+                            #cond_strength: float = 1.0,
+                            #pool_strength: float = 1.0,
+                            conditioning_3=None,
+                            conditioning_4=None,
+                            conditioning_5=None):
         """
         Stacks up to 5 conditioning pipes into a single conditioning stack.
         This allows for complex conditioning setups to be managed easily.
@@ -91,7 +112,74 @@ class ConditioningStackMultipleNode:
         if conditioning_5 is not None:
             conditionings.extend(conditioning_5)
 
+        #ConditioningShifter.conditioning_set_values(conditionings, {"time_start", time_start, "time_start", time_end })
+        #if cond_strength != 1.0 or pool_strength != 1.0:
+        #    conditionings = ConditioningShifter.conditioning_set_strength(conditionings, cond_strength, pool_strength)
+
         return (conditionings,)
+
+class ConditioningSetDtypeNode:
+    """
+    A node to set the dtype of all conditioning tensors.
+    This is useful for ensuring that the conditioning tensors are in the correct dtype for the model.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "conditioning": ("CONDITIONING", {}),
+                "dtype":       (["float64", "float32", "float16", "bfloat16"], {"default": "float32", "tooltip": "Dtype to set the conditioning tensors to."}),
+            }
+        }
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION = "set_dtype_conds"
+    CATEGORY = "utils/conditioning"
+
+    def set_dtype_conds(self, conditioning: list, dtype: str):
+        """
+        Set the dtype for all conditioning tensors.
+        This is useful for ensuring that the conditioning tensors are in the correct dtype.
+        """
+        out = []
+        for combined, info in conditioning:
+            combined = combined.to(dtype)
+            for k, v in info.items():
+                if isinstance(v, torch.Tensor):
+                    info[k] = v.to(dtype)
+            out.append([combined, info])
+        return (out,)
+
+class ConditioningSetDeviceNode:
+    # guarantee the device is set for the conditioning tensors
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "conditioning": ("CONDITIONING", {}),
+                "device":       (["cpu", "cuda", "mps"], {"default": "cpu", "tooltip": "Device to set the conditioning tensors to."}),
+            }
+        }
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION = "set_device_conds"
+    CATEGORY = "utils/conditioning"
+    def set_device_conds(self, conditioning: list, device: str):
+        """
+        Set the device for all conditioning tensors.
+        This is useful for ensuring that the conditioning tensors are on the correct device.
+        """
+        out = []
+        for combined, info in conditioning:
+            combined = combined.to(device)
+            for k, v in info.items():
+                if isinstance(v, torch.Tensor):
+                    info[k] = v.to(device)
+                if k == "device":
+                    info[k] = device
+            out.append([combined, info])
+        return (out,)
 
 class NormalizeConditioningToMasksNode:
     """
@@ -187,7 +275,16 @@ class ConditioningProjectMultiple:
         return {
             "required": {
                 "conditioning": ("CONDITIONING", {}),
-                "reference":    ("CONDITIONING", {}),
+                "proj_method": (["linear", "bilinear", "bicubic", "trilinear"], {"default": "linear",
+                                                                                 "tooltip": "Method to use for projecting the conditioning tensors."}),
+                "primary_batch":      ("INT", {"default": 1, "min": -1, "max": 100, "tooltip": "Number of conditioning tensors to project."}),
+                "primary_tokens":   ("INT", {"default": 77, "min": -1, "max": 1000, "tooltip": "Number of tokens to project."}),
+                "primary_features": ("INT", {"default": 4096, "min": -1, "max": 8192, "tooltip": "Number of features to project."}),
+
+                "pooled_batch": ("INT", {"default": 1, "min": -1, "max": 100, "tooltip": "Number of pooled tensors to project."}),
+                "pooled_tokens": ("INT", {"default": 1, "min": -1, "max": 100, "tooltip": "Number of pooled tokens to project."}),
+                "pooled_features": ("INT", {"default": 768, "min": -1, "max": 4096, "tooltip": "Number of pooled features to project."}),
+
             }
         }
     RETURN_TYPES = ("CONDITIONING",)
@@ -195,57 +292,76 @@ class ConditioningProjectMultiple:
     FUNCTION = "project_multiple"
     CATEGORY = "utils/conditioning"
 
-    def project_multiple(self, conditioning: list, reference: list):
+    def project_multiple(self, conditioning: list,
+                         proj_method: str = "linear",
+                         primary_batch: int = -1,
+                         primary_tokens: int = -1,
+                         primary_features: int = -1,
+                         pooled_tokens: int = -1,
+                         pooled_batch: int = -1,
+                         pooled_features: int = -1):
         """
         For each [combined, info] in conditioning, resample combined’s last dim
         to match reference[0][0].
         """
-        if not reference or not isinstance(reference[0], list):
-            return (conditioning,)
-        ref_tensor = reference[0][0]
-        out = []
-        for combined, info in conditioning:
-            proj = match_feature_dims(combined, ref_tensor)
-            out.append([proj, info])
+        try:
+            conditioning = list(conditioning)
+            out = []
+            for combined, info in conditioning:
+                # 1) get reference shape
+                combined = combined.clone()
+                info = dict(info)  # ensure info is a dict
+                ref = combined.shape
+                if primary_batch < 0: primary_batch = ref[0]
+                if primary_tokens < 0: primary_tokens = ref[1]
+                if primary_features < 0: primary_features = ref[2]
+
+                # 2) resample combined
+                if proj_method == "linear":
+                    combined = match_feature_dims(combined, torch.zeros((primary_batch, primary_tokens, primary_features), device=combined.device), mode="linear")
+                elif proj_method == "bilinear":
+                    combined = match_feature_dims(combined, torch.zeros((primary_batch, primary_tokens, primary_features), device=combined.device), mode="bilinear")
+                elif proj_method == "bicubic":
+                    combined = match_feature_dims(combined, torch.zeros((primary_batch, primary_tokens, primary_features), device=combined.device), mode="bicubic")
+                elif proj_method == "trilinear":
+                    combined = match_feature_dims(combined, torch.zeros((primary_batch, primary_tokens, primary_features), device=combined.device), mode="trilinear")
+
+                # 3) resample pooled
+                pooled = info.get("pooled_output", None)
+                if pooled is not None:
+                    # clone it
+                    pooled = pooled.clone()
+                    if pooled_batch < 0: pooled_batch = pooled.shape[0]
+                    if pooled_tokens < 0: pooled_tokens = pooled.shape[1]
+                    if pooled_features < 0: pooled_features = pooled.shape[2]
+                    if proj_method == "linear":
+                        pooled = match_feature_dims(pooled, torch.zeros((pooled_batch, pooled_tokens, pooled_features), device=pooled.device), mode="linear")
+                    elif proj_method == "bilinear":
+                        pooled = match_feature_dims(pooled, torch.zeros((pooled_batch, pooled_tokens, pooled_features), device=pooled.device), mode="bilinear")
+                    elif proj_method == "bicubic":
+                        pooled = match_feature_dims(pooled, torch.zeros((pooled_batch, pooled_tokens, pooled_features), device=pooled.device), mode="bicubic")
+                    elif proj_method == "trilinear":
+                        pooled = match_feature_dims(pooled, torch.zeros((pooled_batch, pooled_tokens, pooled_features), device=pooled.device), mode="trilinear")
+                else:
+                    # create empty tensor with correct shape
+                    pooled = torch.zeros((pooled_batch, pooled_tokens, pooled_features), device=combined.device)
+                # 4) repackage
+                info = info.copy()
+                info["pooled_output"] = pooled
+                out.append([combined, info])
+        except Exception as e:
+            logger.error(f"Error in ConditioningProjectMultiple: {e}")
+            return (conditioning, )
+
         return (out,)
-
-
-# 3. ConditioningScaleMultiple
-class ConditioningScaleMultiple:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "conditioning": ("CONDITIONING", {}),
-                "scale":        ("FLOAT", {"default": 1.0, "min": 0.0}),
-            }
-        }
-    RETURN_TYPES = ("CONDITIONING",)
-    RETURN_NAMES = ("scaled",)
-    FUNCTION = "scale_multiple"
-    CATEGORY = "utils/conditioning"
-
-    def scale_multiple(self, conditioning: list, scale: float):
-        """
-        Multiply each combined tensor and its pooled_output (if present) by scale.
-        """
-        out = []
-        for combined, info in conditioning:
-            c = combined * scale
-            i = {}
-            for k, v in info.items():
-                i[k] = v * scale if isinstance(v, torch.Tensor) else v
-            out.append([c, i])
-        return (out,)
-
 
 # 4. ConditioningSeparateMultiple
 class ConditioningSeparateMultiple:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"conditioning": ("CONDITIONING", {})}}
-    RETURN_TYPES = ("CONDITIONING", "CONDITIONING")
-    RETURN_NAMES = ("combined_list", "pooled_list")
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "CONDITIONING", "CONDITIONING", "CONDITIONING", "CONDITIONING")
+    RETURN_NAMES = ("combined_list", "pooled_list", "individual_1", "individual_2", "individual_3", "individual_4", "individual_5")
     FUNCTION = "separate_multiple"
     CATEGORY = "utils/conditioning"
 
