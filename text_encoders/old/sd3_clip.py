@@ -4,22 +4,47 @@
 from comfy import sd1_clip
 from comfy import sdxl_clip
 from transformers import T5TokenizerFast
-import comfy.text_encoders.t5
+from .t5 import T5 as t5a
 import torch
 import os
 import comfy.model_management
 import logging
 
+logger = logging.getLogger(__name__)
+
 class T5XXLModel(sd1_clip.SDClipModel):
     def __init__(self, device="cpu", layer="last", layer_idx=None, dtype=None, attention_mask=False, model_options={}):
-        textmodel_json_config = os.path.join(os.path.dirname(os.path.realpath(__file__)), "t5_config_xxl.json")
+        logger.info("Initializing T5XXLModel with options: {}".format(model_options))
+        if model_options.get("unchained_t5", False):
+            logger.info("Using unchained T5XXL text encoder")
+            textmodel_json_config = os.path.join(os.path.dirname(os.path.realpath(__file__)), "t5_config_unchained_xxl.json")
+        else:
+            if model_options.get("distilled_t5", False):
+                logger.info("Using distilled T5 Base text encoder")
+                textmodel_json_config = os.path.join(os.path.dirname(os.path.realpath(__file__)), "distillt5_config.json")
+            else:
+                logger.info("Using chained T5XXL baseline text encoder")
+                textmodel_json_config = os.path.join(os.path.dirname(os.path.realpath(__file__)), "t5_config_xxl.json")
         t5xxl_scaled_fp8 = model_options.get("t5xxl_scaled_fp8", None)
+        if model_options.get("distilled_t5", False):
+            name = "t5_base"
+        else:
+            name = "t5xxl"
         if t5xxl_scaled_fp8 is not None:
             model_options = model_options.copy()
             model_options["scaled_fp8"] = t5xxl_scaled_fp8
 
-        model_options = {**model_options, "model_name": "t5xxl"}
-        super().__init__(device=device, layer=layer, layer_idx=layer_idx, textmodel_json_config=textmodel_json_config, dtype=dtype, special_tokens={"end": 1, "pad": 0}, model_class=comfy.text_encoders.t5.T5, enable_attention_masks=attention_mask, return_attention_masks=attention_mask, model_options=model_options)
+        model_options = {**model_options, "model_name": name}
+        super().__init__(device=device,
+                         layer=layer,
+                         layer_idx=layer_idx,
+                         textmodel_json_config=textmodel_json_config,
+                         dtype=dtype,
+                         special_tokens={"end": 1, "pad": 0},
+                         model_class=t5a,
+                         enable_attention_masks=attention_mask,
+                         return_attention_masks=attention_mask,
+                         model_options=model_options)
 
 
 def t5_xxl_detect(state_dict, prefix=""):
@@ -159,11 +184,30 @@ class SD3ClipModel(torch.nn.Module):
         else:
             return self.t5xxl.load_sd(sd)
 
-def sd3_clip(clip_l=True, clip_g=True, t5=True, dtype_t5=None, t5xxl_scaled_fp8=None, t5_attention_mask=False):
+def sd3_clip(clip_l=True, clip_g=True, t5=True, dtype_t5=None, t5xxl_scaled_fp8=None, t5_attention_mask=False, unchained_t5=False, distilled_t5=False, device="cpu", dtype=None, model_options={}):
     class SD3ClipModel_(SD3ClipModel):
-        def __init__(self, device="cpu", dtype=None, model_options={}):
+        def __init__(self, device="cpu", dtype=None, model_options={}, unchained_t5=unchained_t5, distilled_t5=distilled_t5):
             if t5xxl_scaled_fp8 is not None and "t5xxl_scaled_fp8" not in model_options:
                 model_options = model_options.copy()
                 model_options["t5xxl_scaled_fp8"] = t5xxl_scaled_fp8
-            super().__init__(clip_l=clip_l, clip_g=clip_g, t5=t5, dtype_t5=dtype_t5, t5_attention_mask=t5_attention_mask, device=device, dtype=dtype, model_options=model_options)
+            if unchained_t5:
+                model_options = model_options.copy()
+                model_options["unchained_t5"] = True
+            else:
+                model_options = model_options.copy()
+                model_options["unchained_t5"] = False
+            if distilled_t5:
+                model_options = model_options.copy()
+                model_options["distilled_t5"] = True
+            else:
+                model_options = model_options.copy()
+                model_options["distilled_t5"] = False
+            super().__init__(clip_l=clip_l,
+                             clip_g=clip_g,
+                             t5=t5,
+                             dtype_t5=dtype_t5,
+                             t5_attention_mask=t5_attention_mask,
+                             device=device,
+                             dtype=dtype,
+                             model_options=model_options)
     return SD3ClipModel_
