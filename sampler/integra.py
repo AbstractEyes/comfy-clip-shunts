@@ -1,9 +1,21 @@
+import math
+
 import torch
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Optional
 from dataclasses import dataclass
 from .alucard import FieldWalker, FieldWalkerConfig
 from .sliding_window import ShuntStackConfig
 import logging
+import torch.nn.functional as F
+from .formulas.schedules import FormulaScheduler   # Ensure schedules.py is in same directory or adjust import
+from .formulas.folding import FoldingKernel, get_folding_kernel  # Ensure folding.py is in same directory or adjust import
+from .formulas.padding import FoldingModifier  # Ensure padding.py is in same directory or adjust import
+from .formulas.modes import FoldingPaddingTypes, FoldingPoolingTypes
+from .formulas.pooling import WindowPooling
+from .formulas.folding import FoldingKernels
+from .formulas.schedules import SchedulerModes
+from .alucard_exceptions import validate_shapes  # Ensure alucard_error.py is in same directory or adjust import
+
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +33,10 @@ class IntegraOrchestrator:
     def __init__(self, config: IntegraConfig):
         self.config = config
         self.walker = FieldWalker(config.walker_config)
-
+        #self.scheduler = FormulaScheduler(config.walker_config.scheduler_mode, config.walker_config.scheduler_config or {})
+        self.kernel = get_folding_kernel(config.walker_config.folding_mode)
+        self.padding = FoldingModifier({"padding_mode":config.walker_config.padding_mode,})
+        self.pooling = WindowPooling({"pooling_mode": config.walker_config.pooling_mode})
         stack = config.stack_config
         self.window_size = stack.sliding_window_size
         self.stride = stack.sliding_window_stride
@@ -37,6 +52,7 @@ class IntegraOrchestrator:
         Walks a full symbolic encoder field via sliding windows, governed by Integra.
         Returns recombined tensor and orchestration report.
         """
+        # prepare pooling, padding, scheduler, and folding kernel
         with torch.autocast(device_type=a.device.type, enabled=a.device.type != 'cpu'):
             B, T_full, D = a.shape
             limit = self.context_window_size if self.override_context else T_full
@@ -49,7 +65,7 @@ class IntegraOrchestrator:
             d = d[:, :T, :]
 
             folds = []
-            starts = range(0, max(1, T - self.window_size + 1), self.stride)
+            starts = self._compute_window_starts(T, a.squeeze(0))
 
             for start in starts:
                 end = start + self.window_size
@@ -62,13 +78,13 @@ class IntegraOrchestrator:
                 b_win = b[:, start:end, :]
                 d_win = d[:, start:end, :]
                 # mask the first and last token if the window to see but not utilize them
-                if self.override_context:
-                    a_win[:, 0, :] = -100.0  # Mask first token
-                    a_win[:, -1, :] = -100.0
-                    b_win[:, 0, :] = -100.0
-                    b_win[:, -1, :] = -100.0
-                    d_win[:, 0, :] = -100.0
-                    d_win[:, -1, :] = -100.0
+                #if self.override_context:
+                #    a_win[:, 0, :] = -100.0  # Mask first token
+                #    a_win[:, -1, :] = -100.0
+                #    b_win[:, 0, :] = -100.0
+                #    b_win[:, -1, :] = -100.0
+                #    d_win[:, 0, :] = -100.0
+                #    d_win[:, -1, :] = -100.0
 
                 logger.info(f"Window slice [{start}:{end}] a_win shape: {a_win.shape}")
                 folded = self.walker.walk(a_win, b_win, d_win)
@@ -89,17 +105,78 @@ class IntegraOrchestrator:
                 "override_context": self.override_context
             }
 
-    def aggregate(self, folds, total_tokens):
-        B, _, D = folds[0][2].shape
-        device = folds[0][2].device
-        acc = torch.zeros(B, total_tokens, D, device=device)
-        wsum = torch.zeros(B, total_tokens, 1, device=device)
+    def aggregate(self, folds, _):
+        collapsed = [chunk.mean(0) for _, _, chunk in folds]
+        return self.pooling.apply(self, collapsed)
 
-        for start, end, chunk in folds:
-            length = end - start
-            tri = torch.linspace(0, 1, length, device=device).unsqueeze(0).unsqueeze(-1)
-            tri = torch.minimum(tri, 1 - tri) * 2
-            acc[:, start:end, :] += chunk * tri
-            wsum[:, start:end, :] += tri
+    # --- helper: build pad-mask for one window ----------------------------
+    def _build_pad_mask(self,
+                        ids_len: int,
+                        cls_pos: int = 0,
+                        eof_pos: Optional[int] = None) -> torch.Tensor:
+        """
+        Returns a [1, ids_len] bool Tensor where False ⇒ token should be
+        *ignored* by the fold (padding), True ⇒ keep it.
+        • CLS (and optional EOF) are kept.
+        • If override_context is on, we also drop first/last token.
+        """
+        mask = torch.ones(1, ids_len, dtype=torch.bool)
+        # keep CLS / EOF
+        mask[:, cls_pos] = True
+        if eof_pos is not None and eof_pos < ids_len:
+            mask[:, eof_pos] = True
+        # when override_context, silent-drop first/last token
+        if self.override_context:
+            mask[:, 0] = False
+            mask[:, -1] = False
+        return mask
 
-        return acc / wsum.clamp(min=1e-6)
+    # ------------------------------------------------------------------
+    # choose at most `max_windows` windows whose start positions are
+    # either (A) evenly spaced, or (B) chosen at local-min similarity
+    # ------------------------------------------------------------------
+    def _compute_window_starts(self,
+                               T: int,
+                               embeddings: Optional[torch.Tensor] = None) -> List[int]:
+        """
+        Return list of window-start indices (len ≤ max_windows).
+        """
+        if self.window_size >= T:
+            return [0]  # one window == whole prompt
+
+        W = self.config.stack_config.max_windows
+        if W is None or W <= 1:  # ➊ guard: only one window wanted
+            return [0]  # just start at 0
+
+        # --- evenly spaced baseline ---------------------------------
+        stride = math.ceil((T - self.window_size) / (W - 1))
+        stride = max(stride, 1)
+        starts = list(range(0, T - self.window_size + 1, stride))
+        starts = starts[:W]  # clamp in case we overshot
+
+        # --- similarity refinement (optional) -----------------------
+        if embeddings is not None:
+            with torch.no_grad():
+                sims = F.cosine_similarity(embeddings[:-1], embeddings[1:], dim=-1)
+                for i in range(1, len(starts) - 1):
+                    seg = slice(max(0, starts[i] - 4), min(T - 1, starts[i] + 4))
+                    local_min = sims[seg].argmin().item() + seg.start
+                    starts[i] = max(0, min(local_min, T - self.window_size))
+            starts = sorted(set(starts))
+
+        return starts
+
+    #def aggregate(self, folds, total_tokens):
+    #    B, _, D = folds[0][2].shape
+    #    device = folds[0][2].device
+    #    acc = torch.zeros(B, total_tokens, D, device=device)
+    #    wsum = torch.zeros(B, total_tokens, 1, device=device)
+#
+    #    for start, end, chunk in folds:
+    #        length = end - start
+    #        tri = torch.linspace(0, 1, length, device=device).unsqueeze(0).unsqueeze(-1)
+    #        tri = torch.minimum(tri, 1 - tri) * 2
+    #        acc[:, start:end, :] += chunk * tri
+    #        wsum[:, start:end, :] += tri
+#
+    #    return acc / wsum.clamp(min=1e-6)

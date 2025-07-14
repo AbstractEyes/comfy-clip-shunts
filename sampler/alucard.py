@@ -60,7 +60,7 @@ class SamplerCore(nn.Module):
             scheduler: FormulaScheduler,  # provides alpha, tau, etc.
             kernel: FoldingKernel,  # folding mode executor
             padding: FoldingModifier,  # padding/pooling control
-            pooling: WindowPooling,  # pooling strategy
+            pooling: WindowPooling,  # pooling strategy, may implement again later
             pad_mask: Optional[torch.Tensor] = None,  # [B, T] bool
             context: Optional[dict] = None  # extra runtime info
     ) -> torch.Tensor:
@@ -97,8 +97,12 @@ class SamplerCore(nn.Module):
                 folds.append(folded)
 
             # -- Step 4: Aggregate via Pooling
-            result = pooling.apply(self, folds)
-            return result
+            #result = pooling.apply(self, folds)
+
+            # Removes the pooling behavior, as he is incapable of seeing the big picture.
+            #torch.stack(folds)
+            # replaces the pooling behavior with a simple stack for Integra to process.
+            return torch.stack(folds)
 
 
 class FieldWalker:

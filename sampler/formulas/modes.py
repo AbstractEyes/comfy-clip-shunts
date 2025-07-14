@@ -2,7 +2,7 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Optional, Union
 
-from custom_nodes.comfyui_controlnet_aux.src.custom_midas_repo.midas.blocks import Interpolate
+#from custom_nodes.comfyui_controlnet_aux.src.custom_midas_repo.midas.blocks import Interpolate
 
 
 #@dataclass

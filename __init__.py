@@ -309,7 +309,7 @@ logger.info("""
 ╔══════════════════════════════════════════╗
 ║        🚀 ABS SHUNT SUITE 🚀            ║
 ║    Dev Advanced Bridging System Adapters ║
-║         ⚡ Version 0.7.8 ⚡                ║
+║         ⚡ Version 0.8.0 ⚡                ║
 ╚══════════════════════════════════════════╝
 """)
 
