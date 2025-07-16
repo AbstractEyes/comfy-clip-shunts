@@ -88,6 +88,7 @@ from .node.mask_nodes import (
     ErodeDilateMask,
 )
 
+
 from .node.conditioning_nodes import (
     ConditioningStackMultipleNode,       # ready
     ConditioningMultiply,                # untested
@@ -114,6 +115,7 @@ from .node.conditioning_nodes import (
     NormalizeConditioningToMasksNode,    # untested
     ConditioningSetDeviceNode,           # untested
     ConditioningSetDtypeNode,            # untested
+    ABS_WAS_ConditioningBlend,           # semi-ready ported from WAS
 )
 
 NODE_CLASS_MAPPINGS = {
@@ -184,32 +186,48 @@ NODE_CLASS_MAPPINGS = {
     "AInterpolateMaskOverTime": InterpolateMaskOverTime,  # Interpolates a mask over time
     "AErodeDilateMask": ErodeDilateMask,          # Erodes or dilates a mask
 
-    # Conditioning suite nodes
-    "AConditioningStackMultipleNode": ConditioningStackMultipleNode,  # Stacks multiple conditioning inputs
-    "AConditioningMultiply": ConditioningMultiply,  # Multiplies multiple conditioning inputs
+    # Save/load Conditionings and Embeddings
     "AConditioningLoadLatents": ConditioningLoadLatents,  # Loads latents from a file
     "AConditioningSaveLatents": ConditioningSaveLatents,  # Saves latents to a file
+
+    # Conditioning suite nodes
+    # Conditioning stackers and multi-conditioning nodes
+    "AConditioningStackMultipleNode": ConditioningStackMultipleNode,  # Stacks multiple conditioning inputs
     "AConditioningSeparateMultiple": ConditioningSeparateMultiple,  # Separates multiple conditioning inputs
+    # combine them back together using stack
+
+    # Projection and resizing
     "AConditioningProjectMultiple": ConditioningProjectMultiple,  # Projects multiple conditioning inputs
+    "AConditioningPCAReduceNode": ConditioningPCAReduceNode,  # Reduces dimensionality of conditioning inputs using PCA
+    "AConditioningReweightByAttentionNode": ConditioningReweightByAttentionNode,  # Reweights conditioning inputs by attention
+    "AConditioningMorphologicalFilterNode": ConditioningMorphologicalFilterNode,  # Applies a morphological filter to conditioning inputs
+
+    # Math formulas and operations on math
+    "AConditioningMultiply": ConditioningMultiply,  # Multiplies multiple conditioning inputs
     "AConditioningExpRampNode": ConditioningExpRampNode,  # Applies an exponential ramp to conditioning inputs
     "AConditioningMixGateNode": ConditioningMixGateNode,  # Mixes conditioning inputs with a gate
+    "AConditioningComputeCausalDeltaNode": ConditioningComputeCausalDeltaNode,  # Computes causal delta for conditioning inputs
+    "AConditioningLowPassFilterNode": ConditioningLowPassFilterNode,  # Applies a low-pass filter to conditioning inputs
+
+    # Conditioning mask nodes - some redundancy with inherent ComfyUI mask nodes
     "AConditioningApplyHardMask": ConditioningApplyHardMask,  # Applies a hard mask to conditioning inputs
     "AConditioningApplySoftMask": ConditioningApplySoftMask,  # Applies a soft mask to conditioning inputs
-    "AConditioningPCAReduceNode": ConditioningPCAReduceNode,  # Reduces dimensionality of conditioning inputs using PCA
-    "AConditioningMorphologicalFilterNode": ConditioningMorphologicalFilterNode,  # Applies a morphological filter to conditioning inputs
-    "AConditioningFromEncoderConditioning": ConditioningFromEncoderConditioning,  # Converts encoder conditioning to standard conditioning
-    "AConditioningSummaryStatsNode": ConditioningSummaryStatsNode,  # Computes summary statistics for conditioning inputs
-    "AConditioningToEncoderConditioning": ConditioningToEncoderConditioning,  # Converts standard conditioning to encoder conditioning
-    "AConditioningDynamicThresholdNode": ConditioningDynamicThresholdNode,  # Applies dynamic thresholding to conditioning inputs
-    "AConditioningExtractTokenMaskNode": ConditioningExtractTokenMaskNode,  # Extracts a token mask from conditioning inputs
-    "AConditioningScheduleMaskOverTimeNode": ConditioningScheduleMaskOverTimeNode,  # Schedules a mask over time for conditioning inputs
-    "AConditioningBlendOverStepsNode": ConditioningBlendOverStepsNode,  # Blends conditioning inputs over steps
-    "AConditioningLowPassFilterNode": ConditioningLowPassFilterNode,  # Applies a low-pass filter to conditioning inputs
-    "AConditioningComputeCausalDeltaNode": ConditioningComputeCausalDeltaNode,  # Computes causal delta for conditioning inputs
-    "AConditioningReweightByAttentionNode": ConditioningReweightByAttentionNode,  # Reweights conditioning inputs by attention
+    "AConditioningDynamicThresholdNode": ConditioningDynamicThresholdNode, # Applies dynamic thresholding to conditioning inputs
+    "AConditioningExtractTokenMaskNode": ConditioningExtractTokenMaskNode, # Extracts a token mask from conditioning inputs
+
     "ANormalizeConditioningToMasksNode": NormalizeConditioningToMasksNode,  # Normalizes conditioning inputs to masks
 
+    # Pipeline differentiators, useful for sending details down the pipeline without crashing the sampler.
+    "AConditioningToEncoderConditioning": ConditioningToEncoderConditioning,  # Converts standard conditioning to encoder conditioning
+    "AConditioningFromEncoderConditioning": ConditioningFromEncoderConditioning,  # Converts encoder conditioning to standard conditioning
 
+    # Scheduler and schedule-based helpers
+    "AConditioningSummaryStatsNode": ConditioningSummaryStatsNode,  # Computes summary statistics for conditioning inputs
+    "AConditioningScheduleMaskOverTimeNode": ConditioningScheduleMaskOverTimeNode,  # Schedules a mask over time for conditioning inputs
+    "AConditioningBlendOverStepsNode": ConditioningBlendOverStepsNode,  # Blends conditioning inputs over steps
+
+    # Imported and extended conditioning nodes
+    "ABS_WAS_ConditioningBlend": ABS_WAS_ConditioningBlend,  # Semi-ready ported from WAS, blends conditioning inputs over steps
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -300,6 +318,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "AConditioningComputeCausalDeltaNode": "🔄 Compute Causal Delta Conditioning",  # Computes causal delta for conditioning inputs
     "AConditioningReweightByAttentionNode": "⚖️ Reweight By Attention Conditioning",  # Reweights conditioning inputs by attention
     "ANormalizeConditioningToMasksNode": "🔄 Normalize Conditioning To Masks",  # Normalizes conditioning inputs to masks
+
+    "ABS_WAS_ConditioningBlend": "🔄 WAS Conditioning Blend",  # Semi-ready ported from WAS, blends conditioning inputs over steps
 
 }
 

@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 from .modes import FoldingPaddingTypes, FoldingPoolingTypes
 # --------------------------------------------------------------------- #
 
+
 class FoldingModifier:
     def __init__(self, config: Optional[dict] = None):
         if config is None:
@@ -42,6 +43,8 @@ class FoldingModifier:
         if config is None:
             config = {}
         self.padding_mode = config.get("padding_mode", self.padding_mode)
+        # cast to the highest precision between base and folded, upscale mask if needed
+        # added hard upscaling to test for precision issues, uncertain if this affects generations yet
         if self.padding_mode is None:
             self.padding_mode = FoldingPaddingTypes.NONE
 

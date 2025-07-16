@@ -54,10 +54,12 @@ class IntegraOrchestrator:
         """
         # prepare pooling, padding, scheduler, and folding kernel
         with torch.autocast(device_type=a.device.type, enabled=a.device.type != 'cpu'):
+            a, b, d = upscale_trio(a, b, d)  # Ensure all tensors are in the same dtype
             B, T_full, D = a.shape
             limit = self.context_window_size if self.override_context else T_full
             limit = min(limit, self.max_length)
             T = min(limit, T_full)
+
 
             # Slice the initial context window (if override is active)
             a = a[:, :T, :]
@@ -166,17 +168,52 @@ class IntegraOrchestrator:
 
         return starts
 
-    #def aggregate(self, folds, total_tokens):
-    #    B, _, D = folds[0][2].shape
-    #    device = folds[0][2].device
-    #    acc = torch.zeros(B, total_tokens, D, device=device)
-    #    wsum = torch.zeros(B, total_tokens, 1, device=device)
+DTYPE_PECKING_ORDER = {
+    torch.float64: 1,  # we prioritize lowest to upscale to
+    torch.float32: 2,
+    torch.float16: 3,
+    torch.bfloat16: 4,
+}
+
+def upscale_trio(
+        base: torch.Tensor,  # [B, T, D]
+        folded: torch.Tensor,  # [B, T, D]
+        mask: torch.Tensor  # [B, T] | [B, T, 1] | [B, T, D]
+) -> (torch.Tensor, torch.Tensor, Optional[torch.Tensor], list):
+    """
+    Upscales base and folded tensors to the highest precision between them.
+    Returns upscaled base and folded tensors.
+    """
+    if not isinstance(base, torch.Tensor) or not isinstance(folded, torch.Tensor):
+        raise TypeError(
+            f"[Alucard] Expected base and folded to be torch.Tensor, "
+            f"got {type(base)} and {type(folded)}"
+        )
+
+    # Determine the highest precision dtype
+    dtypes = [base.dtype, folded.dtype, mask.dtype] if isinstance(mask, torch.Tensor) else [base.dtype,
+                                                                                            folded.dtype]
+    highest_dtype = min(dtypes, key=lambda x: DTYPE_PECKING_ORDER[x])
+
+    # Upscale both tensors to the highest dtype
+    base = base.clone().to(highest_dtype) if base.dtype != highest_dtype else base
+    folded = folded.clone().to(highest_dtype) if folded.dtype != highest_dtype else folded
+    if isinstance(mask, torch.Tensor):
+        mask = mask.clone().to(highest_dtype) if mask.dtype != highest_dtype else mask
+
+    return base, folded, mask  # just upscale it all in uniform
+
+#def aggregate(self, folds, total_tokens):
+#    B, _, D = folds[0][2].shape
+#    device = folds[0][2].device
+#    acc = torch.zeros(B, total_tokens, D, device=device)
+#    wsum = torch.zeros(B, total_tokens, 1, device=device)
 #
-    #    for start, end, chunk in folds:
-    #        length = end - start
-    #        tri = torch.linspace(0, 1, length, device=device).unsqueeze(0).unsqueeze(-1)
-    #        tri = torch.minimum(tri, 1 - tri) * 2
-    #        acc[:, start:end, :] += chunk * tri
-    #        wsum[:, start:end, :] += tri
+#    for start, end, chunk in folds:
+#        length = end - start
+#        tri = torch.linspace(0, 1, length, device=device).unsqueeze(0).unsqueeze(-1)
+#        tri = torch.minimum(tri, 1 - tri) * 2
+#        acc[:, start:end, :] += chunk * tri
+#        wsum[:, start:end, :] += tri
 #
-    #    return acc / wsum.clamp(min=1e-6)
+#    return acc / wsum.clamp(min=1e-6)
