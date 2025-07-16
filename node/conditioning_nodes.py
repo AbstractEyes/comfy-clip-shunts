@@ -1064,7 +1064,8 @@ class ABS_WAS_ConditioningBlend:
                 "blending_mode": (list(blending_modes.keys()),),
                 "blending_strength": ("FLOAT", {"default": 0.5, "min": -10.0, "max": 10.0, "step": 0.001}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
-                "amount_blended": ("INT", {"default": -1, "min": -1, "max": 1000, "step": 1, "tooltip": "If set to -1, will use the length of conditioning_a."}),
+                "squash": ("BOOLEAN", {"default": False, "tooltip": "Average each input group before blending."}),
+                "amount_blended": ("INT", {"default": -1, "min": -1, "max": 1000, "step": 1}),
             },
             "optional": {
                 "conditioning_b": ("CONDITIONING", {"default": []}),
@@ -1074,10 +1075,9 @@ class ABS_WAS_ConditioningBlend:
     RETURN_TYPES = ("CONDITIONING",)
     RETURN_NAMES = ("conditioning",)
     FUNCTION = "combine"
-
     CATEGORY = "conditioning"
 
-    def combine(self, conditioning_a, blending_mode, blending_strength, seed, amount_blended=-1, conditioning_b=[]):
+    def combine(self, conditioning_a, blending_mode, blending_strength, seed, squash=False, amount_blended=-1, conditioning_b=[]):
         if seed > 0:
             torch.manual_seed(seed)
 
@@ -1088,20 +1088,54 @@ class ABS_WAS_ConditioningBlend:
 
         device = conditioning_a[0][0].device
         blend_fn = blending_modes[blending_mode]
+        blend_weight = torch.tensor(blending_strength, device=device)
 
+        if squash:
+            # Average A
+            a_seqs = [entry[0] for entry in conditioning_a]
+            a_avg = self.project_to_dominant_length(a_seqs, device)
+
+            a_pooleds = [
+                pooled for entry in conditioning_a
+                if (pooled := entry[1].get("pooled_output", None)) is not None
+            ]
+
+
+            pa_avg = torch.stack(a_pooleds).mean(dim=0) if a_pooleds else None
+
+            # Average B
+            b_seqs = [entry[0] for entry in conditioning_b]
+            b_avg = self.project_to_dominant_length(b_seqs, device)
+            logger.info(f"a_avg shape: {a_avg.shape}")
+            logger.info(f"b_avg shape: {b_avg.shape}")
+
+            b_pooleds = [
+                pooled for entry in conditioning_b
+                if (pooled := entry[1].get("pooled_output", None)) is not None
+            ]
+            pb_avg = torch.stack(b_pooleds).mean(dim=0) if b_pooleds else None
+
+            # Apply blend
+            a_proj, b_proj = self.align_pair_length(a_avg, b_avg, device)
+            cond = normalize(blend_fn(a_proj, b_proj, 1 - blend_weight))
+
+            pooled = None
+            if pa_avg is not None and pb_avg is not None:
+                pooled = normalize(blend_fn(pa_avg, pb_avg, 1 - blend_weight))
+
+            return ([[cond, {"pooled_output": pooled}]],)
+
+        # Pairwise blend (non-squashed)
         result = []
         num_blend = len(conditioning_a) if amount_blended == -1 else min(amount_blended, len(conditioning_a))
 
-        if not conditioning_b or len(conditioning_b) == 0:
-            # we clone A to avoid modifying the original conditioning_a, and mark it as B
+        if not conditioning_b:
             conditioning_b = [[a.clone(), meta] for a, meta in conditioning_a]
-
 
         for i in range(num_blend):
             a, meta_a = conditioning_a[i]
             pa = meta_a.get("pooled_output", None)
 
-            # repeat through all B variants
             for b, meta_b in conditioning_b:
                 pb = meta_b.get("pooled_output", None)
 
@@ -1109,9 +1143,9 @@ class ABS_WAS_ConditioningBlend:
                 if pa is not None: pa = pa.to(device).clone()
                 if pb is not None: pb = pb.to(device).clone()
 
-                blend_weight = torch.tensor(blending_strength, device=device)
+                a_proj, b_proj = self.align_pair_length(a, b, device)
+                cond = normalize(blend_fn(a_proj, b_proj, 1 - blend_weight))
 
-                cond = normalize(blend_fn(a, b, 1 - blend_weight))
                 pooled = None
                 if pa is not None and pb is not None:
                     pooled = normalize(blend_fn(pa, pb, 1 - blend_weight))
@@ -1120,3 +1154,35 @@ class ABS_WAS_ConditioningBlend:
 
         return (result,)
 
+    def project_to_dominant_length(self, tensors: list[torch.Tensor], device):
+        lengths = [t.shape[1] for t in tensors]
+        dominant_len = max(set(lengths), key=lengths.count)
+
+        def resize(t):
+            t = t.to(device)
+            L = t.shape[1]
+            if L == dominant_len:
+                return t
+            elif L > dominant_len:
+                return t[:, :dominant_len]
+            else:
+                pad = torch.zeros((t.shape[0], dominant_len - L, t.shape[2]), device=t.device)
+                return torch.cat([t, pad], dim=1)
+
+        return torch.stack([resize(t) for t in tensors]).mean(dim=0)
+
+    def align_pair_length(self, a: torch.Tensor, b: torch.Tensor, device):
+        """Ensure a and b have the same token length (T) for safe blending."""
+        T = max(a.shape[1], b.shape[1])
+
+        def pad_to(t):
+            L = t.shape[1]
+            if L == T:
+                return t
+            elif L > T:
+                return t[:, :T]
+            else:
+                pad = torch.zeros((t.shape[0], T - L, t.shape[2]), device=t.device)
+                return torch.cat([t, pad], dim=1)
+
+        return pad_to(a.to(device)), pad_to(b.to(device))

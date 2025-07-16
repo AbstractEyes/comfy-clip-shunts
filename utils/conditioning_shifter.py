@@ -21,7 +21,7 @@ class ShiftConfig:
     gate_threshold: float = 0.1
     noise_injection: float = 0.0
     use_anchor: bool = True
-    pool_method: str = "sequential"  # "sequential" or "weighted_average"
+    pool_method: str = "weighted_average"  # "sequential" or "weighted_average"
     # Top-K parameters
     use_topk: bool = False
     topk_percentage: float = 100.0  # Percentage of tokens to keep
@@ -29,6 +29,15 @@ class ShiftConfig:
     topk_mode: str = "attention"  # "attention", "gate", "combined", "tau_softmax"
     guidance_scale: float = 1.0,
     max_tokens: int = 77  # Maximum number of tokens to process
+    # Optimization parameters for batch processing
+    batch_size: int = 4 # use no more than 4 for now, as without this it causes ram explosions with pooled outputs
+    ram_capacity: float = 0.1  # Percentage of RAM to use, we divide up the pipeline into slices of ram based on batches
+    vram_capacity: float = 0.1  # Percentage of VRAM to use
+    eager_offloading: bool = True  # Whether to offload tensors to CPU after processing, or cache to disc if overwhelmed
+    squash_similarity: bool = True  #
+
+    # The models are very small, but the entire structure around calculating the embeddings is quite large;
+    # This requires that we need to be careful with memory usage.
 
 
 @dataclass
