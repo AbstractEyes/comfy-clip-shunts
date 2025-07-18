@@ -3,6 +3,8 @@ import math
 import torch
 from typing import Tuple, List, Dict, Optional
 from dataclasses import dataclass
+
+from comfy import model_management
 from .alucard import FieldWalker, FieldWalkerConfig
 from .sliding_window import ShuntStackConfig
 import logging
@@ -16,6 +18,7 @@ from .formulas.folding import FoldingKernels
 from .formulas.schedules import SchedulerModes
 from .alucard_exceptions import validate_shapes  # Ensure alucard_error.py is in same directory or adjust import
 
+from comfy.utils import ProgressBar
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,7 @@ class IntegraConfig:
     trace_folds: bool = False  # Optional: store each windowed fold for debug
     enforce_projection: bool = True  # Optional: auto-project symbolic fields if needed
     enable_clip_alignment: bool = True  # Optional: perform scheduler-aware comparison to CLIP
+    use_rose_similarity: bool = False  # Optional: use Rose similarity for window selection
 
 
 class IntegraOrchestrator:
@@ -35,7 +39,7 @@ class IntegraOrchestrator:
         self.walker = FieldWalker(config.walker_config)
         #self.scheduler = FormulaScheduler(config.walker_config.scheduler_mode, config.walker_config.scheduler_config or {})
         self.kernel = get_folding_kernel(config.walker_config.folding_mode)
-        self.padding = FoldingModifier({"padding_mode":config.walker_config.padding_mode,})
+        self.padding = FoldingModifier({"padding_mode": config.walker_config.padding_mode,})
         self.pooling = WindowPooling({"pooling_mode": config.walker_config.pooling_mode})
         stack = config.stack_config
         self.window_size = stack.sliding_window_size
@@ -53,6 +57,7 @@ class IntegraOrchestrator:
         Returns recombined tensor and orchestration report.
         """
         # prepare pooling, padding, scheduler, and folding kernel
+
         with torch.autocast(device_type=a.device.type, enabled=a.device.type != 'cpu'):
             a, b, d = upscale_trio(a, b, d)  # Ensure all tensors are in the same dtype
             B, T_full, D = a.shape
@@ -68,8 +73,9 @@ class IntegraOrchestrator:
 
             folds = []
             starts = self._compute_window_starts(T, a.squeeze(0))
-
-            for start in starts:
+            pbar = ProgressBar(len(starts))
+            for i, start in enumerate(starts):
+                model_management.throw_exception_if_processing_interrupted()
                 end = start + self.window_size
                 # Clip bounds to avoid overrun
                 if end > T:
@@ -91,7 +97,7 @@ class IntegraOrchestrator:
                 logger.info(f"Window slice [{start}:{end}] a_win shape: {a_win.shape}")
                 folded = self.walker.walk(a_win, b_win, d_win)
                 logger.info(f"Folded shape: {folded.shape}")
-
+                pbar.update(i + 1)
                 folds.append((start, end, folded))
 
             # Aggregate windowed output
@@ -107,7 +113,7 @@ class IntegraOrchestrator:
                 "override_context": self.override_context
             }
 
-    def aggregate(self, folds, _):
+    def aggregate(self, folds, _) -> torch.Tensor:
         collapsed = [chunk.mean(0) for _, _, chunk in folds]
         return self.pooling.apply(self, collapsed)
 
@@ -159,7 +165,21 @@ class IntegraOrchestrator:
         # --- similarity refinement (optional) -----------------------
         if embeddings is not None:
             with torch.no_grad():
-                sims = F.cosine_similarity(embeddings[:-1], embeddings[1:], dim=-1)
+                if self.config.use_rose_similarity:
+                    from ..utils.rose_util import rose_score
+                    if embeddings.ndim == 3:
+                        need = embeddings.mean(dim=1)
+                        relation = embeddings[:, 1:, :].mean(dim=1)
+                        purpose = embeddings[:, :-1, :].mean(dim=1)
+                        sims = rose_score(embeddings[:, :-1, :], need, relation, purpose)
+                    else:
+                        # Fallback for [T, D] shape (single batch already squeezed)
+                        need = embeddings.mean(dim=0, keepdim=True)
+                        relation = embeddings[1:, :].mean(dim=0, keepdim=True)
+                        purpose = embeddings[:-1, :].mean(dim=0, keepdim=True)
+                        sims = rose_score(embeddings[:-1, :], need, relation, purpose)
+                else:
+                    sims = F.cosine_similarity(embeddings[:-1], embeddings[1:], dim=-1)
                 for i in range(1, len(starts) - 1):
                     seg = slice(max(0, starts[i] - 4), min(T - 1, starts[i] + 4))
                     local_min = sims[seg].argmin().item() + seg.start
@@ -193,13 +213,13 @@ def upscale_trio(
     # Determine the highest precision dtype
     dtypes = [base.dtype, folded.dtype, mask.dtype] if isinstance(mask, torch.Tensor) else [base.dtype,
                                                                                             folded.dtype]
-    highest_dtype = min(dtypes, key=lambda x: DTYPE_PECKING_ORDER[x])
+    target_dtype = min(dtypes, key=lambda x: DTYPE_PECKING_ORDER[x])
 
     # Upscale both tensors to the highest dtype
-    base = base.clone().to(highest_dtype) if base.dtype != highest_dtype else base
-    folded = folded.clone().to(highest_dtype) if folded.dtype != highest_dtype else folded
+    base = base.clone().to(target_dtype) if base.dtype != target_dtype else base
+    folded = folded.clone().to(target_dtype) if folded.dtype != target_dtype else folded
     if isinstance(mask, torch.Tensor):
-        mask = mask.clone().to(highest_dtype) if mask.dtype != highest_dtype else mask
+        mask = mask.clone().to(target_dtype) if mask.dtype != target_dtype else mask
 
     return base, folded, mask  # just upscale it all in uniform
 

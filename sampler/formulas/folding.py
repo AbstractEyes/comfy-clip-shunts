@@ -129,7 +129,7 @@ class IfritFolding(FoldingKernel):
 # -- 3. Gilgamesh: Multi-vector projection from alpha -------------------------
 class GilgameshFolding(FoldingKernel):
     def apply(self, a, b, t, alpha=None, context=None):
-        beta_axes = context.get("gilgamesh_axes", [0.25, 0.5, 0.75])
+        beta_axes = context.get("gilgamesh_axes", [0.25, 0.33, 0.5, 0.66, 0.75])
         out = a
         for w in beta_axes:
             weight = torch.tensor(w, device=a.device).view(1, 1, 1)

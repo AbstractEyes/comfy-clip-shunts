@@ -16,9 +16,22 @@
 
     License: Apache License 2.0
 """
+import asyncio
+
 import comfy
 import logging
+
+
 logger = logging.getLogger(__name__)
+
+
+#from symbolic_model_core import  (
+#    model_core
+#)
+
+
+# asyncio.run(run_vram_test())  # Run the VRAM test to initialize the VramBank
+
 
 from .node.encoder_nodes import (
     # Importing all necessary nodes for the ABS Shunt Suite
@@ -87,6 +100,10 @@ from .node.mask_nodes import (
     InterpolateMaskOverTime,
     ErodeDilateMask,
 )
+
+#from .node.new_clip_nodes import (
+#    #ABS_ModelSelector
+#)
 
 
 from .node.conditioning_nodes import (
@@ -165,12 +182,15 @@ NODE_CLASS_MAPPINGS = {
     "AConditioningSetDeviceNode": ConditioningSetDeviceNode,  # Sets the device for conditioning nodes
     "AConditioningSetDtypeNode": ConditioningSetDtypeNode,  # Sets the dtype for conditioning nodes
 
-    # Clip-based nodes
+    # OLD Clip-based nodes
     "ACLIPLoader": ACLIPLoader,               # Loads a dual CLIP model (clip-l, clip-g)
     "ADualCLIPLoader": ADualCLIPLoader,       # Loads a dual CLIP model (clip-l, clip-g)
     "ATripleCLIPLoader": ATripleCLIPLoader,   # Loads a triple CLIP model (clip-l, clip-g, t5)
     "AQuadrupleCLIPLoader": AQuadrupleCLIPLoader, # Loads a quadruple CLIP model (clip-l, clip-g, t5, llama)
     "AbsClipSplitter": AbsClipSplitter,         # added v0.4.0
+
+    # New Clip-based nodes
+    #"ABS_ModelSelector": ABS_ModelSelector,   # Model selector for choosing between different CLIP models
 
     # HuggingFace nodes for additional functionality
     "SetHuggingfaceToken": SetHuggingfaceToken,  # Sets the Hugging Face token for private model access
@@ -273,13 +293,16 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ADebugNode": "🐞 Debug Node",  # A debug node for testing and debugging purposes
     "AConditioningSetDeviceNode": "🔄 Set Conditioning Device",  # Sets the device for conditioning nodes
 
-    # Clip-based nodes
+    # OLD Clip-based nodes
     "AQuadrupleCLIPLoader": "📦 Quadruple CLIP Loader",  # Loads a quadruple CLIP model (clip-l, clip-g, t5, llama)
     "ACLIPLoader": "📦 A-CLIP Loader",  # Loads a dual CLIP model (clip-l, clip-g)
     "ADualCLIPLoader": "📦 Dual CLIP Loader",  # Loads a dual CLIP model (clip-l, clip-g)
     "ATripleCLIPLoader": "📦 Triple CLIP Loader",  # Loads a triple CLIP model (clip-l, clip-g, t5)
     "ClipTokenizerSwap": "🔄 Clip Tokenizer Swap",
     "AbsClipSplitter": "🔗 Abs Clip Splitter",
+
+    # New Clip-based nodes
+    "ABS_ModelSelector": "🔍 ABS Model Selector",  # Model selector for choosing between different CLIP models
 
     # HuggingFace nodes for additional functionality
     "SetHuggingfaceToken": "🔑 Set Hugging Face Token",  # Sets the Hugging Face token for private model access
@@ -350,6 +373,7 @@ except ImportError:
     logger.error("❌ platform is not installed. Please install it to use ABS Shunt Suite.")
     raise
 
+
 def print_system_summary():
     bar = "=" * 60
     logger.info(f"\n{bar}")
@@ -364,7 +388,6 @@ def print_system_summary():
     # RAM
     ram_gib = psutil.virtual_memory().total / 1024 ** 3
     logger.info(f" System RAM  : {ram_gib:.2f} GiB")
-
 
     # GPU
     if torch.cuda.is_available():

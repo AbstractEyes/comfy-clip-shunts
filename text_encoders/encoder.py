@@ -100,11 +100,6 @@ class EncoderWrapper(nn.Module):
             encoder = self.encoders[encoder_name]
             encoder_input = inputs.get(encoder_name, inputs)
             outputs[encoder_name] = encoder(encoder_input)
-        else:
-            # Process all encoders
-            for name, encoder in self.encoders.items():
-                if name in inputs:
-                    outputs[name] = encoder(inputs[name])
 
         return outputs
 

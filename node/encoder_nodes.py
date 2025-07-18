@@ -195,57 +195,67 @@ class EncoderSamplerConfig:
     def INPUT_TYPES(cls):
         return {
             "required": {
+                # passes the context window downstream with a flag that determines if it overrides the default
                 "override_context_window": ("BOOLEAN", {"default": True}),
+                # a helper point, necessary for the alucard sampler to work
                 "context_window": ("STRING", {
                     "default": "a photo of a robot.",
                     "multiline": True
-                }),
+                }), # the downstream respects the override flag, and if downstream has no prompt it uses the default
+                # a core fundamental trait of alucard
                 "steps": ("INT", {"default": 250, "min": 1, "max": 100000}),
+
+                # Completely unimplemented, likely to never be used
                 "cfg_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0}),
                 "guidance_scale": ("FLOAT", {"default": 5, "min": 0.0, "max": 100.0}),
 
-                "folding": (FoldingKernels.to_list(), {"default": FoldingKernels.a_walk, "tooltip": "Folding mode to use for the encoder."}),
+                # Absolutely fantastic set of formulas.
+                "folding": (FoldingKernels.to_list(), {"default": FoldingKernels.shiva, "tooltip": "Folding mode to use for the encoder."}),
 
-                # implemented for testing not fully functional
-                "folding_scheduler": (SchedulerModes.to_list(), {"default": SchedulerModes.TAU, "tooltip": "Folding scheduler to use for the encoder."}),
+                # implemented for testing, some schedulers fail and require edge cases to be handled
+                "folding_scheduler": (SchedulerModes.to_list(), {"default": SchedulerModes.COSINE, "tooltip": "Folding scheduler to use for the encoder."}),
 
-                #implemented for testing not fully functional
-                "padding_mode": (FoldingPaddingTypes.to_list(), {"default": FoldingPaddingTypes.INTERPOLATE, "tooltip": "Padding mode to use for the encoder."}),
-                #implemented for testing not fully functional
-                "pooling_mode": (FoldingPoolingTypes.to_list(),{"default": FoldingPoolingTypes.AVERAGE, "tooltip": "Pooling mode to use for the encoder."}),
-                #doesn't work correctly yet
+                # implemented for testing, disabled for debugging
+                "padding_mode": (FoldingPaddingTypes.to_list(), {"default": FoldingPaddingTypes.SPARSE, "tooltip": "Padding mode to use for the encoder."}),
+                # implemented for testing, works splendidly
+                "pooling_mode": (FoldingPoolingTypes.to_list(),{"default": FoldingPoolingTypes.SIMILARITY_MASK, "tooltip": "Pooling mode to use for the encoder."}),
+                # predominantly ignored, but used in some places
                 "use_alpha_mask": ("BOOLEAN", {"default": True}),
-                #todo
+                # todo - flag implemented not respected, is implemented elsewhere
                 "cosine_similarity_gate": ("BOOLEAN", {"default": False}),
 
-                #todo
+                # todo - not implemented yet
                 "pos_embedding": (["none", "cos", "sine", "cosine"], {"default": "none"}),
                 "normalization_anchor": (["none", "l2", "l1", "heun", "surge", "sigma", "delta", "gate", "bong"], {"default": "none"}),
 
-                #doesn't work correctly
+                # doesn't work correctly, connected but not implemented everywhere
                 "top_k": ("FLOAT", {"default": 50.0, "min": 0.0, "max": 10000.0}),
-                #todo
+                # connected, but not implemented everywhere
                 "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0}),
-                #todo
+                # connected, but only on some code paths
                 "temperature": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0}),
-                #todo
+                # not connected
                 "tau": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0}),
-                #works, i think
+                #not connected, requires cache
                 "beams": ("INT", {"default": 4, "min": 1, "max": 32}),
 
                 #works
                 "max_windows": ("INT", {"default": 32, "min": 1, "max": 2048}),
                 "context_window_size": ("INT", {"default": 2048, "min": 77, "max": 8192}),
-                "sliding_window_size": ("INT", {"default": 128, "min": 1, "max": 8192}),
-                "sliding_window_stride": ("INT", {"default": 16, "min": 1, "max": 2048}),
+                "sliding_window_size": ("INT", {"default": 77, "min": 1, "max": 8192}),
+                "sliding_window_stride": ("INT", {"default": 77, "min": 1, "max": 2048}),
 
-                #todo
+                # projection in works, projection out is not implemented for model specifics yet but will work.
                 "force_projection_in": ("BOOLEAN", {"default": False, "tooltip": "Force projection of context window to model's max length."}),
                 "projection_dims_in": ("INT", {"default": 768, "min": 1, "max": 8192}),
                 "interpolation_method_in": (["lerp", "slerp", "cosine", "sine", "linear", "mixed"], {"default": "slerp", "tooltip": "Method to use for interpolating projections."}),
                 "force_projection_out": ("BOOLEAN", {"default": False, "tooltip": "Force projection of model output to context window size."}),
                 "projection_dims_out": ("INT", {"default": 768, "min": 1, "max": 8192}),
                 "interpolation_method_out": (["lerp", "slerp", "cosine", "sine", "linear", "mixed"], {"default": "slerp", "tooltip": "Method to use for interpolating model output projections."}),
+                "use_rose_similarity": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Use ROSE-based symbolic similarity instead of cosine similarity for resonance evaluation."
+                }),
             }
         }
 
@@ -282,7 +292,8 @@ class EncoderSamplerConfig:
                     interpolation_method_in,
                     force_projection_out,
                     projection_dims_out,
-                    interpolation_method_out):
+                    interpolation_method_out,
+                    use_rose_similarity):
         """Prepare the configuration dict with the provided parameters."""
         return ({
             "override_context_window": override_context_window,
@@ -312,7 +323,8 @@ class EncoderSamplerConfig:
             "interpolation_method_in": interpolation_method_in,
             "force_projection_out": force_projection_out,
             "projection_dims_out": projection_dims_out,
-            "interpolation_method_out": interpolation_method_out
+            "interpolation_method_out": interpolation_method_out,
+            "use_rose_similarity": use_rose_similarity,
         },)
 
 from ..sampler.alucard import FieldWalker, FieldWalkerConfig
@@ -402,10 +414,12 @@ from ..utils.alignment import match_project, match_feature_dims, match_tokens
 from ..sampler.formulas.schedules import FormulaScheduler
 from ..sampler.alucard_exceptions import AlucardShapeError
 
+
 logger = logging.getLogger(__name__)
 
 class EncoderSampler:
     CLIP_VARIATIONS = ["clip_l", "clip_g"]
+    MODES = ["sdxl"]
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -415,11 +429,15 @@ class EncoderSampler:
                 "encoders": ("ENCODER_PIPE", {}),
                 "clip":       ("CLIP", {}),
                 "config":     ("ENCODER_SAMPLER_CONFIG", {}),
+                "mode": ( EncoderSampler.MODES, {"default": "sdxl", "tooltip": "Select the mode for the encoder sampler."} ),
+            },
+            "optional": {
+                "prompt_in": ("STRING", {"default": None, "multiline": True}),
             }
         }
 
-    RETURN_TYPES = ("CONDITIONING", "DICT")
-    RETURN_NAMES = ("conditioning", "debug_report")
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "DICT")
+    RETURN_NAMES = ("sampled_conditioning", "raw_conditioning", "debug_report")
     FUNCTION = "sample"
     CATEGORY = "encoder/sampler"
 
@@ -429,9 +447,21 @@ class EncoderSampler:
         encoders: List[Dict[str,Any]],
         clip,
         config: Dict[str,Any],
+        mode: str = "sdxl",
+        prompt_in: Optional[str] = None
     ):
+        prompt = prompt_in
+        other_prompt = config.get("context_window", None)
+        override_context_window = config.get("override_context_window", False)
         device = torch.device(config.get("device", "cpu"))
-        prompt = config["context_window"]
+        if override_context_window and other_prompt is not None:
+            prompt = other_prompt
+        else:
+            if prompt is None:
+                prompt = config.get("context_window", None)
+
+        if not prompt:
+            raise ValueError("No prompt provided. Please provide a valid prompt for sampling.")
 
         # 1) Extract symbolic embeddings from each encoder in the pipeline
         a_raws = [
@@ -440,8 +470,8 @@ class EncoderSampler:
         ]
 
         # 2) Run the CLIP model once and slice into your two variants
-        clip_full   = self._extract_clip(clip, prompt, device)     # [B, T_clip, D_clip]
-        clip_slices = self._slice_clip(clip_full)                  # {"clip_l":…, "clip_g":…}
+        clip_full, pool   = self._extract_clip(clip, prompt, device)     # [B, T_clip, D_clip]
+        clip_slices = self._slice_clip(clip_full.clone())                  # {"clip_l":…, "clip_g":…}
 
         # 3) For every (encoder × clip-variant) pair, run the fold/walk
         folded_list = []
@@ -456,7 +486,7 @@ class EncoderSampler:
         # 5) Package into ComfyUI conditioning format
         conditioning = self._pack_conditioning(folded_full, config, device)
         debug_report = None  # or collect meta if you like
-        return conditioning, debug_report
+        return conditioning, [[clip_full, pool]], debug_report
 
 
     # ————— Helpers ————— #
@@ -481,8 +511,10 @@ class EncoderSampler:
         tokens = clip.tokenize(prompt,
             tokenizer_options={"padding":"max_length","max_length":77,"truncation":True}
         )
-        cond = clip.encode_from_tokens_scheduled(tokens)[0][0]  # [B,77,2048]
-        return cond.to(device)
+        raw = clip.encode_from_tokens_scheduled(tokens)  # [B,77,2048]
+        cond = raw[0][0]
+        pool = raw[0][1]
+        return cond.to(device), pool
 
 
     def _slice_clip(self, clip_full: torch.Tensor) -> Dict[str, torch.Tensor]:
@@ -575,6 +607,7 @@ class EncoderSampler:
             trace_folds=False,
             enforce_projection=cfg["force_projection_in"],
             enable_clip_alignment=cfg["cosine_similarity_gate"],
+            use_rose_similarity=cfg["use_rose_similarity"],
         ))
 
 

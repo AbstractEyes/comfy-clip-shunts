@@ -595,29 +595,6 @@ class ModelManager:
 
         return model
 
-    # ------------------------------------------------------------------ #
-    #  EncoderWrapper convenience
-    def as_encoder(self, namespaced_key: str) -> Optional["EncoderWrapper"]:
-        """
-        Wrap a cached model (+ optional tokenizer) into an EncoderWrapper.
-        """
-        from .encoder_wrapper import EncoderWrapper  # adjust relative path
-
-        mi = self.get_model(namespaced_key)
-        if mi is None:
-            logger.warning("as_encoder: %s not found in cache", namespaced_key)
-            return None
-
-        tok = mi.metadata.get("tokenizer") if mi.metadata else None
-        ew = EncoderWrapper(
-            identifier=namespaced_key,
-            encoders={namespaced_key: mi.model},
-            tokenizers={namespaced_key: tok} if tok else {},
-            device=mi.device,
-            config=mi.config,
-        )
-        return ew
-
 
     def __del__(self):
         """Cleanup on deletion"""
@@ -636,3 +613,14 @@ def get_model_manager(cache_dir: Optional[str] = None) -> ModelManager:
         _global_model_manager = ModelManager(cache_dir=cache_dir)
 
     return _global_model_manager
+
+
+
+@dataclass
+class ClipPipelineConfig:
+    # houses the information required for this CLIP model down the pipeline, can exist or not.
+    clip_type: str
+    model_path: str
+    dtype: torch.dtype
+    tokenizer: Optional[str] = None
+    source: Optional[str] = None

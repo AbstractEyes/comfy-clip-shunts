@@ -1,0 +1,22 @@
+[project]
+name = "symbolic_model_core"
+version = "0.1.0"
+description = "Modular symbolic encoder framework for AI and ComfyUI systems"
+authors = [
+    { name = "AbstractPhil", email = "abstractpowered@outlook.com" }
+]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "torch>=2.0.0",
+    "transformers>=4.35.0"
+]
+
+license = { text = "Apache-2.0" }
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["model_core"]

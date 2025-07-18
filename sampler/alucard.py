@@ -25,6 +25,7 @@ import logging
 import torch
 from torch import nn
 
+from comfy import model_management
 from .formulas.schedules import FormulaScheduler   # Ensure schedules.py is in same directory or adjust import
 from .formulas.folding import FoldingKernel, get_folding_kernel  # Ensure folding.py is in same directory or adjust import
 from .formulas.padding import FoldingModifier  # Ensure padding.py is in same directory or adjust import
@@ -81,6 +82,7 @@ class SamplerCore(nn.Module):
             context["delta"] = d  # Inject delta into shared execution context
 
             for step in range(t_steps):
+                model_management.throw_exception_if_processing_interrupted()
                 t_scalar = step / (t_steps - 1)
                 t = torch.full((B, T), t_scalar, device=a.device)
 

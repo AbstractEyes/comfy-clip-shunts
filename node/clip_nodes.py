@@ -276,3 +276,50 @@ class AbsClipSplitter:
             output["llm"],
             output["unknown"] if output["unknown"] else None,
         )
+
+
+
+from typing import Tuple
+
+from ..abs_sd.multi_clip_registry import MultiClipRegistry
+
+class CLIPPipelineTranslatorNode:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "clip": ("CLIP",),
+                "model_type": (["SDXL", "NoobXL", "HiDream", "PixArt", "Flux", "Custom"],),
+            }
+        }
+
+    RETURN_TYPES = ("CLIP_PIPELINE", "CLIP_ROUTER", "MULTICLIP_REGISTRY", "DICT")
+    RETURN_NAMES = ("pipeline", "clip_router", "multi_clip_dict", "meta")
+    FUNCTION = "translate"
+    CATEGORY = "ABS/CLIP"
+
+    def translate(self, clip, model_type: str) -> Tuple:
+        # Extract structured entries
+        raw_entries = MultiClipRegistry.extract_from_comfy(clip)
+        registry = MultiClipRegistry()
+        for entry in raw_entries.values():
+            registry.add_entry(entry)
+
+        # Build symbolic router dictionary
+        router = registry.to_cliprouter_dict()
+
+        # Placeholder pipeline (attach orchestration class here later)
+        pipeline = {
+            "registry": registry,
+            "router": router,
+            "source_model": clip,
+            "model_type": model_type
+        }
+
+        meta = {
+            "model_type": model_type,
+            "router_keys": list(router.keys()),
+            "entry_count": len(registry.entries)
+        }
+
+        return (pipeline, router, registry.entries, meta)

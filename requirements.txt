@@ -6,3 +6,4 @@ langdetect
 numpy
 scipy
 matplotlib
+-e ./symbolic_model_core

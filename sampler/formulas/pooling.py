@@ -11,6 +11,14 @@ from .modes import FoldingPaddingTypes, FoldingPoolingTypes
 # --------------------------------------------------------------------- #
 
 
+class WindowPoolingConfig:
+    """
+    Configuration class for WindowPooling.
+    This class defines the pooling mode and other parameters for the WindowPooling process.
+    """
+    def __init__(self, pooling_mode: FoldingPoolingTypes = FoldingPoolingTypes.AVERAGE):
+        self.pooling_mode = pooling_mode
+
 
 class WindowPooling:
     # takes in and aggregates the pooled embeddings from the folding process from alucard
@@ -27,6 +35,9 @@ class WindowPooling:
         Args:
             embeddings: list of [B, T, D] or [B, D] tensors to pool across
         """
+        if config is not None:
+            self.config = config
+            self.pooling_mode = self.config.get("pooling_mode", FoldingPoolingTypes.AVERAGE)
 
         stack = torch.stack(embeddings)
         logger.info(f"[Pooling] Pooling {len(embeddings)} embeddings of shape {stack.shape} with mode {self.pooling_mode}")
