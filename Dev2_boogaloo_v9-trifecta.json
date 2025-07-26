@@ -1,0 +1,2671 @@
+{
+  "id": "87c0986d-0324-4941-a60b-8722cd576ca2",
+  "revision": 0,
+  "last_node_id": 39,
+  "last_link_id": 75,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "ADualCLIPLoader",
+      "pos": [
+        -12060,
+        -2750
+      ],
+      "size": [
+        360,
+        130
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            1,
+            6
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "ADualCLIPLoader",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "clip_l.safetensors",
+        "clip_g_frozen.safetensors",
+        "sdxl",
+        "default"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "ADualCLIPLoader",
+      "pos": [
+        -12030,
+        -2350
+      ],
+      "size": [
+        370,
+        130
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            5,
+            7
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "ADualCLIPLoader",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "Sim-EPRED-Ω-72_clip_l.safetensors",
+        "Sim-EPRED-Ω-72_clip_g.safetensors",
+        "sdxl",
+        "default"
+      ]
+    },
+    {
+      "id": 10,
+      "type": "ADualCLIPLoader",
+      "pos": [
+        -12040,
+        -1840
+      ],
+      "size": [
+        370,
+        130
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            8,
+            9
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "ADualCLIPLoader",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "Omega_73_Custom_FP32_clip_L.safetensors",
+        "Omega_73_Custom_FP32_clip_G.safetensors",
+        "sdxl",
+        "default"
+      ]
+    },
+    {
+      "id": 6,
+      "type": "EncoderSamplerConfig",
+      "pos": [
+        -12640,
+        -2470
+      ],
+      "size": [
+        400,
+        760
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "encoder_sampler_config",
+          "type": "ENCODER_SAMPLER_CONFIG",
+          "links": [
+            3,
+            10,
+            11,
+            12,
+            13,
+            14
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "EncoderSamplerConfig",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        false,
+        "",
+        50,
+        1,
+        5,
+        "shiva",
+        "cosine",
+        "none",
+        "similarity_mask",
+        true,
+        true,
+        "none",
+        "none",
+        50,
+        0.9,
+        1,
+        1,
+        4,
+        64,
+        2048,
+        77,
+        11,
+        false,
+        768,
+        "linear",
+        false,
+        768,
+        "linear",
+        true
+      ]
+    },
+    {
+      "id": 13,
+      "type": "ABS_WAS_ConditioningBlend",
+      "pos": [
+        -10580,
+        -2880
+      ],
+      "size": [
+        276.5249938964844,
+        222
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "conditioning_a",
+          "type": "CONDITIONING",
+          "link": 22
+        },
+        {
+          "name": "conditioning_b",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 23
+        }
+      ],
+      "outputs": [
+        {
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "links": [
+            28
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "ABS_WAS_ConditioningBlend",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "hslerp",
+        0.5,
+        420,
+        "fixed",
+        false,
+        -1,
+        true
+      ]
+    },
+    {
+      "id": 2,
+      "type": "ALoadCheckpointSimple",
+      "pos": [
+        -12250,
+        -3070
+      ],
+      "size": [
+        590,
+        130
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            34
+          ]
+        },
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": null
+        },
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            43
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "ALoadCheckpointSimple",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "sdxl\\sd_xl_base_1.0.safetensors"
+      ]
+    },
+    {
+      "id": 17,
+      "type": "ClownsharKSampler_Beta",
+      "pos": [
+        -9960,
+        -3040
+      ],
+      "size": [
+        270,
+        630
+      ],
+      "flags": {},
+      "order": 23,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "shape": 7,
+          "type": "MODEL",
+          "link": 35
+        },
+        {
+          "name": "positive",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 28
+        },
+        {
+          "name": "negative",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 29
+        },
+        {
+          "name": "latent_image",
+          "shape": 7,
+          "type": "LATENT",
+          "link": 31
+        },
+        {
+          "name": "sigmas",
+          "shape": 7,
+          "type": "SIGMAS",
+          "link": null
+        },
+        {
+          "name": "guides",
+          "shape": 7,
+          "type": "GUIDES",
+          "link": null
+        },
+        {
+          "name": "options",
+          "shape": 7,
+          "type": "OPTIONS",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "LATENT",
+          "links": null
+        },
+        {
+          "name": "denoised",
+          "type": "LATENT",
+          "links": [
+            44
+          ]
+        },
+        {
+          "name": "options",
+          "type": "OPTIONS",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "res4lyf",
+        "ver": "bf23b77b0b062ec17142b6e4a4ffda5bd0410909",
+        "Node name for S&R": "ClownsharKSampler_Beta",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        0.5,
+        "multistep/res_2m",
+        "simple",
+        20,
+        -1,
+        1,
+        7.500000000000002,
+        420,
+        "fixed",
+        "standard",
+        true
+      ]
+    },
+    {
+      "id": 24,
+      "type": "VAEDecode",
+      "pos": [
+        -9470,
+        -3070
+      ],
+      "size": [
+        140,
+        46
+      ],
+      "flags": {},
+      "order": 28,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 44
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 45
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            46
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.44",
+        "Node name for S&R": "VAEDecode",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 26,
+      "type": "VAEDecode",
+      "pos": [
+        -9497.119140625,
+        -2385.830322265625
+      ],
+      "size": [
+        140,
+        46
+      ],
+      "flags": {},
+      "order": 29,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 47
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 48
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            50
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.44",
+        "Node name for S&R": "VAEDecode",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 22,
+      "type": "VAEDecode",
+      "pos": [
+        -9470,
+        -1780
+      ],
+      "size": [
+        140,
+        46
+      ],
+      "flags": {},
+      "order": 30,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 42
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 49
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            51
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.44",
+        "Node name for S&R": "VAEDecode",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 19,
+      "type": "ClownsharKSampler_Beta",
+      "pos": [
+        -9970,
+        -2340
+      ],
+      "size": [
+        270,
+        630
+      ],
+      "flags": {},
+      "order": 24,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "shape": 7,
+          "type": "MODEL",
+          "link": 36
+        },
+        {
+          "name": "positive",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 32
+        },
+        {
+          "name": "negative",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 33
+        },
+        {
+          "name": "latent_image",
+          "shape": 7,
+          "type": "LATENT",
+          "link": 38
+        },
+        {
+          "name": "sigmas",
+          "shape": 7,
+          "type": "SIGMAS",
+          "link": null
+        },
+        {
+          "name": "guides",
+          "shape": 7,
+          "type": "GUIDES",
+          "link": null
+        },
+        {
+          "name": "options",
+          "shape": 7,
+          "type": "OPTIONS",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "LATENT",
+          "links": null
+        },
+        {
+          "name": "denoised",
+          "type": "LATENT",
+          "links": [
+            47
+          ]
+        },
+        {
+          "name": "options",
+          "type": "OPTIONS",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "res4lyf",
+        "ver": "bf23b77b0b062ec17142b6e4a4ffda5bd0410909",
+        "Node name for S&R": "ClownsharKSampler_Beta",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        0.5,
+        "multistep/res_2m",
+        "simple",
+        20,
+        -1,
+        1,
+        7.500000000000002,
+        420,
+        "fixed",
+        "standard",
+        true
+      ]
+    },
+    {
+      "id": 25,
+      "type": "SaveImage",
+      "pos": [
+        -9270,
+        -3080
+      ],
+      "size": [
+        490,
+        550
+      ],
+      "flags": {},
+      "order": 32,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 46
+        }
+      ],
+      "outputs": [],
+      "title": "A woman with long blonde hair walking beside a window at dusk",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.44",
+        "Node name for S&R": "SaveImage",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "ComfyUI"
+      ]
+    },
+    {
+      "id": 27,
+      "type": "SaveImage",
+      "pos": [
+        -8740,
+        -3090
+      ],
+      "size": [
+        520,
+        570
+      ],
+      "flags": {},
+      "order": 33,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 50
+        }
+      ],
+      "outputs": [],
+      "title": "A woman wearing a wide-brimmed sun hat looking toward the ocean",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.44",
+        "Node name for S&R": "SaveImage",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "ComfyUI"
+      ]
+    },
+    {
+      "id": 20,
+      "type": "ClownsharKSampler_Beta",
+      "pos": [
+        -9960,
+        -1660
+      ],
+      "size": [
+        270,
+        630
+      ],
+      "flags": {},
+      "order": 26,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "shape": 7,
+          "type": "MODEL",
+          "link": 37
+        },
+        {
+          "name": "positive",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 40
+        },
+        {
+          "name": "negative",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 41
+        },
+        {
+          "name": "latent_image",
+          "shape": 7,
+          "type": "LATENT",
+          "link": 39
+        },
+        {
+          "name": "sigmas",
+          "shape": 7,
+          "type": "SIGMAS",
+          "link": null
+        },
+        {
+          "name": "guides",
+          "shape": 7,
+          "type": "GUIDES",
+          "link": null
+        },
+        {
+          "name": "options",
+          "shape": 7,
+          "type": "OPTIONS",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "LATENT",
+          "links": null
+        },
+        {
+          "name": "denoised",
+          "type": "LATENT",
+          "links": [
+            42
+          ]
+        },
+        {
+          "name": "options",
+          "type": "OPTIONS",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "res4lyf",
+        "ver": "bf23b77b0b062ec17142b6e4a4ffda5bd0410909",
+        "Node name for S&R": "ClownsharKSampler_Beta",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        0.5,
+        "multistep/res_2m",
+        "simple",
+        20,
+        -1,
+        1,
+        7.500000000000002,
+        420,
+        "fixed",
+        "standard",
+        true
+      ]
+    },
+    {
+      "id": 28,
+      "type": "SaveImage",
+      "pos": [
+        -8170,
+        -3090
+      ],
+      "size": [
+        560,
+        580
+      ],
+      "flags": {},
+      "order": 34,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 51
+        }
+      ],
+      "outputs": [],
+      "title": "A woman wearing casual denim jeans standing on a wooden bridge in a park",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.44",
+        "Node name for S&R": "SaveImage",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "ComfyUI"
+      ]
+    },
+    {
+      "id": 30,
+      "type": "VAEDecode",
+      "pos": [
+        -8137.71240234375,
+        -2083.591552734375
+      ],
+      "size": [
+        140,
+        46
+      ],
+      "flags": {},
+      "order": 35,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 52
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 64
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            53
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.44",
+        "Node name for S&R": "VAEDecode",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 15,
+      "type": "ABS_WAS_ConditioningBlend",
+      "pos": [
+        -10550,
+        -1830
+      ],
+      "size": [
+        276.5249938964844,
+        222
+      ],
+      "flags": {},
+      "order": 20,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "conditioning_a",
+          "type": "CONDITIONING",
+          "link": 26
+        },
+        {
+          "name": "conditioning_b",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 27
+        }
+      ],
+      "outputs": [
+        {
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "links": [
+            40
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "ABS_WAS_ConditioningBlend",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "hslerp",
+        0.5,
+        420,
+        "fixed",
+        false,
+        -1,
+        true
+      ]
+    },
+    {
+      "id": 9,
+      "type": "EncoderSampler",
+      "pos": [
+        -11250,
+        -2100
+      ],
+      "size": [
+        400,
+        200
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "encoders",
+          "type": "ENCODER_PIPE",
+          "link": 18
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 5
+        },
+        {
+          "name": "config",
+          "type": "ENCODER_SAMPLER_CONFIG",
+          "link": 11
+        },
+        {
+          "name": "reckless_config",
+          "shape": 7,
+          "type": "RECKLESS_ENCODER_CONFIG",
+          "link": null
+        },
+        {
+          "name": "clip_gate_config",
+          "shape": 7,
+          "type": "ENCODER_GATE_CONFIG",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "sampled_conditioning",
+          "type": "CONDITIONING",
+          "links": null
+        },
+        {
+          "name": "raw_conditioning",
+          "type": "CONDITIONING",
+          "links": [
+            33,
+            57
+          ]
+        },
+        {
+          "name": "debug_report",
+          "type": "DICT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "EncoderSampler",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "sdxl",
+        ""
+      ],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 8,
+      "type": "EncoderSampler",
+      "pos": [
+        -11250,
+        -2610
+      ],
+      "size": [
+        400,
+        200
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "encoders",
+          "type": "ENCODER_PIPE",
+          "link": 16
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 6
+        },
+        {
+          "name": "config",
+          "type": "ENCODER_SAMPLER_CONFIG",
+          "link": 10
+        },
+        {
+          "name": "reckless_config",
+          "shape": 7,
+          "type": "RECKLESS_ENCODER_CONFIG",
+          "link": null
+        },
+        {
+          "name": "clip_gate_config",
+          "shape": 7,
+          "type": "ENCODER_GATE_CONFIG",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "sampled_conditioning",
+          "type": "CONDITIONING",
+          "links": null
+        },
+        {
+          "name": "raw_conditioning",
+          "type": "CONDITIONING",
+          "links": [
+            29,
+            58
+          ]
+        },
+        {
+          "name": "debug_report",
+          "type": "DICT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "EncoderSampler",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "sdxl",
+        ""
+      ],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 11,
+      "type": "EncoderSampler",
+      "pos": [
+        -11250,
+        -1590
+      ],
+      "size": [
+        400,
+        200
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "encoders",
+          "type": "ENCODER_PIPE",
+          "link": 20
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 8
+        },
+        {
+          "name": "config",
+          "type": "ENCODER_SAMPLER_CONFIG",
+          "link": 14
+        },
+        {
+          "name": "reckless_config",
+          "shape": 7,
+          "type": "RECKLESS_ENCODER_CONFIG",
+          "link": null
+        },
+        {
+          "name": "clip_gate_config",
+          "shape": 7,
+          "type": "ENCODER_GATE_CONFIG",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "sampled_conditioning",
+          "type": "CONDITIONING",
+          "links": null
+        },
+        {
+          "name": "raw_conditioning",
+          "type": "CONDITIONING",
+          "links": [
+            41,
+            59
+          ]
+        },
+        {
+          "name": "debug_report",
+          "type": "DICT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "EncoderSampler",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "sdxl",
+        ""
+      ],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 18,
+      "type": "EmptyLatentImage",
+      "pos": [
+        -10230,
+        -3230
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            31,
+            38,
+            39,
+            62
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.44",
+        "Node name for S&R": "EmptyLatentImage",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        1024,
+        1024,
+        1
+      ]
+    },
+    {
+      "id": 21,
+      "type": "Reroute",
+      "pos": [
+        -10091.546875,
+        -3027.255859375
+      ],
+      "size": [
+        75,
+        26
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "",
+          "type": "*",
+          "link": 34
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "MODEL",
+          "links": [
+            35,
+            36,
+            37,
+            73
+          ]
+        }
+      ],
+      "properties": {
+        "showOutputText": false,
+        "horizontal": false,
+        "widget_ue_connectable": {}
+      }
+    },
+    {
+      "id": 23,
+      "type": "Reroute",
+      "pos": [
+        -9600,
+        -3130
+      ],
+      "size": [
+        75,
+        26
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "",
+          "type": "*",
+          "link": 43
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "VAE",
+          "links": [
+            45,
+            48,
+            49,
+            64
+          ]
+        }
+      ],
+      "properties": {
+        "showOutputText": false,
+        "horizontal": false,
+        "widget_ue_connectable": {}
+      }
+    },
+    {
+      "id": 3,
+      "type": "EncoderLoader",
+      "pos": [
+        -11930,
+        -3370
+      ],
+      "size": [
+        270,
+        202
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "encoder_pipe",
+          "type": "ENCODER_PIPE",
+          "links": [
+            15,
+            16,
+            17,
+            18,
+            19,
+            20
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "EncoderLoader",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "bert-beatrix-2048",
+        "",
+        2048,
+        "max_length",
+        "float32",
+        "cuda",
+        true
+      ]
+    },
+    {
+      "id": 14,
+      "type": "ABS_WAS_ConditioningBlend",
+      "pos": [
+        -10552.23046875,
+        -2332.66943359375
+      ],
+      "size": [
+        276.5249938964844,
+        222
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "conditioning_a",
+          "type": "CONDITIONING",
+          "link": 24
+        },
+        {
+          "name": "conditioning_b",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 25
+        }
+      ],
+      "outputs": [
+        {
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "links": [
+            32
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "ABS_WAS_ConditioningBlend",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "hslerp",
+        0.5,
+        420,
+        "fixed",
+        false,
+        -1,
+        true
+      ]
+    },
+    {
+      "id": 35,
+      "type": "ABS_WAS_ConditioningBlend",
+      "pos": [
+        -8964.0224609375,
+        -2171.673095703125
+      ],
+      "size": [
+        276.5249938964844,
+        222
+      ],
+      "flags": {},
+      "order": 27,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "conditioning_a",
+          "type": "CONDITIONING",
+          "link": 69
+        },
+        {
+          "name": "conditioning_b",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 70
+        }
+      ],
+      "outputs": [
+        {
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "links": [
+            71
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "widget_ue_connectable": {},
+        "Node name for S&R": "ABS_WAS_ConditioningBlend"
+      },
+      "widgets_values": [
+        "hslerp",
+        0.5,
+        420,
+        "fixed",
+        false,
+        -1,
+        true
+      ]
+    },
+    {
+      "id": 5,
+      "type": "EncoderSampler",
+      "pos": [
+        -11250,
+        -2870
+      ],
+      "size": [
+        400,
+        200
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "encoders",
+          "type": "ENCODER_PIPE",
+          "link": 15
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 1
+        },
+        {
+          "name": "config",
+          "type": "ENCODER_SAMPLER_CONFIG",
+          "link": 3
+        },
+        {
+          "name": "reckless_config",
+          "shape": 7,
+          "type": "RECKLESS_ENCODER_CONFIG",
+          "link": null
+        },
+        {
+          "name": "clip_gate_config",
+          "shape": 7,
+          "type": "ENCODER_GATE_CONFIG",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "sampled_conditioning",
+          "type": "CONDITIONING",
+          "links": [
+            22,
+            55
+          ]
+        },
+        {
+          "name": "raw_conditioning",
+          "type": "CONDITIONING",
+          "links": [
+            23,
+            67
+          ]
+        },
+        {
+          "name": "debug_report",
+          "type": "DICT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "EncoderSampler",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "sdxl",
+        "A woman with long blonde hair walking beside a window at dusk, jessica simpson"
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 7,
+      "type": "EncoderSampler",
+      "pos": [
+        -11260,
+        -2360
+      ],
+      "size": [
+        400,
+        200
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "encoders",
+          "type": "ENCODER_PIPE",
+          "link": 17
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 7
+        },
+        {
+          "name": "config",
+          "type": "ENCODER_SAMPLER_CONFIG",
+          "link": 12
+        },
+        {
+          "name": "reckless_config",
+          "shape": 7,
+          "type": "RECKLESS_ENCODER_CONFIG",
+          "link": null
+        },
+        {
+          "name": "clip_gate_config",
+          "shape": 7,
+          "type": "ENCODER_GATE_CONFIG",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "sampled_conditioning",
+          "type": "CONDITIONING",
+          "links": [
+            24,
+            54
+          ]
+        },
+        {
+          "name": "raw_conditioning",
+          "type": "CONDITIONING",
+          "links": [
+            25,
+            66
+          ]
+        },
+        {
+          "name": "debug_report",
+          "type": "DICT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "EncoderSampler",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "sdxl",
+        "A woman wearing a wide-brimmed sun hat looking toward the ocean, jessica simpson"
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 12,
+      "type": "EncoderSampler",
+      "pos": [
+        -11250,
+        -1850
+      ],
+      "size": [
+        400,
+        200
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "encoders",
+          "type": "ENCODER_PIPE",
+          "link": 19
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 9
+        },
+        {
+          "name": "config",
+          "type": "ENCODER_SAMPLER_CONFIG",
+          "link": 13
+        },
+        {
+          "name": "reckless_config",
+          "shape": 7,
+          "type": "RECKLESS_ENCODER_CONFIG",
+          "link": null
+        },
+        {
+          "name": "clip_gate_config",
+          "shape": 7,
+          "type": "ENCODER_GATE_CONFIG",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "sampled_conditioning",
+          "type": "CONDITIONING",
+          "links": [
+            26,
+            56
+          ]
+        },
+        {
+          "name": "raw_conditioning",
+          "type": "CONDITIONING",
+          "links": [
+            27,
+            65
+          ]
+        },
+        {
+          "name": "debug_report",
+          "type": "DICT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "EncoderSampler",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "sdxl",
+        "A woman wearing casual denim jeans standing on a wooden bridge in a park, jessica simpson"
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 31,
+      "type": "SaveImage",
+      "pos": [
+        -7920,
+        -2440
+      ],
+      "size": [
+        560,
+        580
+      ],
+      "flags": {},
+      "order": 36,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 53
+        }
+      ],
+      "outputs": [],
+      "title": "All Together",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.44",
+        "Node name for S&R": "SaveImage",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "ComfyUI"
+      ]
+    },
+    {
+      "id": 33,
+      "type": "AConditioningStackMultipleNode",
+      "pos": [
+        -9520,
+        -1630
+      ],
+      "size": [
+        238.27499389648438,
+        106
+      ],
+      "flags": {},
+      "order": 22,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "conditioning_1",
+          "type": "CONDITIONING",
+          "link": 58
+        },
+        {
+          "name": "conditioning_2",
+          "type": "CONDITIONING",
+          "link": 57
+        },
+        {
+          "name": "conditioning_3",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 59
+        },
+        {
+          "name": "conditioning_4",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": null
+        },
+        {
+          "name": "conditioning_5",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "conditionings",
+          "type": "CONDITIONING",
+          "links": [
+            61
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "AConditioningStackMultipleNode",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 37,
+      "type": "ClownsharKSampler_Beta",
+      "pos": [
+        -9000,
+        -1560
+      ],
+      "size": [
+        270,
+        630
+      ],
+      "flags": {},
+      "order": 25,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "shape": 7,
+          "type": "MODEL",
+          "link": 75
+        },
+        {
+          "name": "positive",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 72
+        },
+        {
+          "name": "negative",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": null
+        },
+        {
+          "name": "latent_image",
+          "shape": 7,
+          "type": "LATENT",
+          "link": null
+        },
+        {
+          "name": "sigmas",
+          "shape": 7,
+          "type": "SIGMAS",
+          "link": null
+        },
+        {
+          "name": "guides",
+          "shape": 7,
+          "type": "GUIDES",
+          "link": null
+        },
+        {
+          "name": "options",
+          "shape": 7,
+          "type": "OPTIONS",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "LATENT",
+          "links": null
+        },
+        {
+          "name": "denoised",
+          "type": "LATENT",
+          "links": []
+        },
+        {
+          "name": "options",
+          "type": "OPTIONS",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "res4lyf",
+        "ver": "bf23b77b0b062ec17142b6e4a4ffda5bd0410909",
+        "widget_ue_connectable": {},
+        "Node name for S&R": "ClownsharKSampler_Beta"
+      },
+      "widgets_values": [
+        0.5,
+        "multistep/res_2m",
+        "simple",
+        50,
+        -1,
+        1,
+        7.500000000000002,
+        420,
+        "fixed",
+        "standard",
+        true
+      ]
+    },
+    {
+      "id": 34,
+      "type": "AConditioningStackMultipleNode",
+      "pos": [
+        -9440,
+        -2100
+      ],
+      "size": [
+        238.27499389648438,
+        106
+      ],
+      "flags": {},
+      "order": 21,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "conditioning_1",
+          "type": "CONDITIONING",
+          "link": 67
+        },
+        {
+          "name": "conditioning_2",
+          "type": "CONDITIONING",
+          "link": 66
+        },
+        {
+          "name": "conditioning_3",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 65
+        },
+        {
+          "name": "conditioning_4",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": null
+        },
+        {
+          "name": "conditioning_5",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "conditionings",
+          "type": "CONDITIONING",
+          "links": [
+            70
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "AConditioningStackMultipleNode",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 32,
+      "type": "AConditioningStackMultipleNode",
+      "pos": [
+        -9450,
+        -2290
+      ],
+      "size": [
+        238.27499389648438,
+        106
+      ],
+      "flags": {},
+      "order": 19,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "conditioning_1",
+          "type": "CONDITIONING",
+          "link": 54
+        },
+        {
+          "name": "conditioning_2",
+          "type": "CONDITIONING",
+          "link": 55
+        },
+        {
+          "name": "conditioning_3",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 56
+        },
+        {
+          "name": "conditioning_4",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": null
+        },
+        {
+          "name": "conditioning_5",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "conditionings",
+          "type": "CONDITIONING",
+          "links": [
+            69,
+            72
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "AbstractEyes/comfy-clip-shunts",
+        "ver": "87552daf4758b2cc8f526c19066ca6fc711a61e9",
+        "Node name for S&R": "AConditioningStackMultipleNode",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 29,
+      "type": "ClownsharKSampler_Beta",
+      "pos": [
+        -8627.7119140625,
+        -1963.5916748046875
+      ],
+      "size": [
+        270,
+        630
+      ],
+      "flags": {},
+      "order": 31,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "shape": 7,
+          "type": "MODEL",
+          "link": 74
+        },
+        {
+          "name": "positive",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 71
+        },
+        {
+          "name": "negative",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 61
+        },
+        {
+          "name": "latent_image",
+          "shape": 7,
+          "type": "LATENT",
+          "link": 62
+        },
+        {
+          "name": "sigmas",
+          "shape": 7,
+          "type": "SIGMAS",
+          "link": null
+        },
+        {
+          "name": "guides",
+          "shape": 7,
+          "type": "GUIDES",
+          "link": null
+        },
+        {
+          "name": "options",
+          "shape": 7,
+          "type": "OPTIONS",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "LATENT",
+          "links": null
+        },
+        {
+          "name": "denoised",
+          "type": "LATENT",
+          "links": [
+            52
+          ]
+        },
+        {
+          "name": "options",
+          "type": "OPTIONS",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "res4lyf",
+        "ver": "bf23b77b0b062ec17142b6e4a4ffda5bd0410909",
+        "Node name for S&R": "ClownsharKSampler_Beta",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        0.5,
+        "multistep/res_2m",
+        "simple",
+        50,
+        -1,
+        1,
+        7.500000000000002,
+        420,
+        "fixed",
+        "standard",
+        true
+      ]
+    },
+    {
+      "id": 38,
+      "type": "Reroute",
+      "pos": [
+        -8952.1748046875,
+        -1826.965087890625
+      ],
+      "size": [
+        75,
+        26
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "",
+          "type": "*",
+          "link": 73
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "MODEL",
+          "links": [
+            74,
+            75
+          ]
+        }
+      ],
+      "properties": {
+        "showOutputText": false,
+        "horizontal": false
+      }
+    },
+    {
+      "id": 39,
+      "type": "Note",
+      "pos": [
+        -11560,
+        -3390
+      ],
+      "size": [
+        270,
+        88
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "bert-beatrix-2048 operates fastest at fp32"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      5,
+      1,
+      "CLIP"
+    ],
+    [
+      3,
+      6,
+      0,
+      5,
+      2,
+      "ENCODER_SAMPLER_CONFIG"
+    ],
+    [
+      5,
+      4,
+      0,
+      9,
+      1,
+      "CLIP"
+    ],
+    [
+      6,
+      1,
+      0,
+      8,
+      1,
+      "CLIP"
+    ],
+    [
+      7,
+      4,
+      0,
+      7,
+      1,
+      "CLIP"
+    ],
+    [
+      8,
+      10,
+      0,
+      11,
+      1,
+      "CLIP"
+    ],
+    [
+      9,
+      10,
+      0,
+      12,
+      1,
+      "CLIP"
+    ],
+    [
+      10,
+      6,
+      0,
+      8,
+      2,
+      "ENCODER_SAMPLER_CONFIG"
+    ],
+    [
+      11,
+      6,
+      0,
+      9,
+      2,
+      "ENCODER_SAMPLER_CONFIG"
+    ],
+    [
+      12,
+      6,
+      0,
+      7,
+      2,
+      "ENCODER_SAMPLER_CONFIG"
+    ],
+    [
+      13,
+      6,
+      0,
+      12,
+      2,
+      "ENCODER_SAMPLER_CONFIG"
+    ],
+    [
+      14,
+      6,
+      0,
+      11,
+      2,
+      "ENCODER_SAMPLER_CONFIG"
+    ],
+    [
+      15,
+      3,
+      0,
+      5,
+      0,
+      "ENCODER_PIPE"
+    ],
+    [
+      16,
+      3,
+      0,
+      8,
+      0,
+      "ENCODER_PIPE"
+    ],
+    [
+      17,
+      3,
+      0,
+      7,
+      0,
+      "ENCODER_PIPE"
+    ],
+    [
+      18,
+      3,
+      0,
+      9,
+      0,
+      "ENCODER_PIPE"
+    ],
+    [
+      19,
+      3,
+      0,
+      12,
+      0,
+      "ENCODER_PIPE"
+    ],
+    [
+      20,
+      3,
+      0,
+      11,
+      0,
+      "ENCODER_PIPE"
+    ],
+    [
+      22,
+      5,
+      0,
+      13,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      23,
+      5,
+      1,
+      13,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      24,
+      7,
+      0,
+      14,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      25,
+      7,
+      1,
+      14,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      26,
+      12,
+      0,
+      15,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      27,
+      12,
+      1,
+      15,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      28,
+      13,
+      0,
+      17,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      29,
+      8,
+      1,
+      17,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      31,
+      18,
+      0,
+      17,
+      3,
+      "LATENT"
+    ],
+    [
+      32,
+      14,
+      0,
+      19,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      33,
+      9,
+      1,
+      19,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      34,
+      2,
+      0,
+      21,
+      0,
+      "*"
+    ],
+    [
+      35,
+      21,
+      0,
+      17,
+      0,
+      "MODEL"
+    ],
+    [
+      36,
+      21,
+      0,
+      19,
+      0,
+      "MODEL"
+    ],
+    [
+      37,
+      21,
+      0,
+      20,
+      0,
+      "MODEL"
+    ],
+    [
+      38,
+      18,
+      0,
+      19,
+      3,
+      "LATENT"
+    ],
+    [
+      39,
+      18,
+      0,
+      20,
+      3,
+      "LATENT"
+    ],
+    [
+      40,
+      15,
+      0,
+      20,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      41,
+      11,
+      1,
+      20,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      42,
+      20,
+      1,
+      22,
+      0,
+      "LATENT"
+    ],
+    [
+      43,
+      2,
+      2,
+      23,
+      0,
+      "*"
+    ],
+    [
+      44,
+      17,
+      1,
+      24,
+      0,
+      "LATENT"
+    ],
+    [
+      45,
+      23,
+      0,
+      24,
+      1,
+      "VAE"
+    ],
+    [
+      46,
+      24,
+      0,
+      25,
+      0,
+      "IMAGE"
+    ],
+    [
+      47,
+      19,
+      1,
+      26,
+      0,
+      "LATENT"
+    ],
+    [
+      48,
+      23,
+      0,
+      26,
+      1,
+      "VAE"
+    ],
+    [
+      49,
+      23,
+      0,
+      22,
+      1,
+      "VAE"
+    ],
+    [
+      50,
+      26,
+      0,
+      27,
+      0,
+      "IMAGE"
+    ],
+    [
+      51,
+      22,
+      0,
+      28,
+      0,
+      "IMAGE"
+    ],
+    [
+      52,
+      29,
+      1,
+      30,
+      0,
+      "LATENT"
+    ],
+    [
+      53,
+      30,
+      0,
+      31,
+      0,
+      "IMAGE"
+    ],
+    [
+      54,
+      7,
+      0,
+      32,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      55,
+      5,
+      0,
+      32,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      56,
+      12,
+      0,
+      32,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      57,
+      9,
+      1,
+      33,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      58,
+      8,
+      1,
+      33,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      59,
+      11,
+      1,
+      33,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      61,
+      33,
+      0,
+      29,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      62,
+      18,
+      0,
+      29,
+      3,
+      "LATENT"
+    ],
+    [
+      64,
+      23,
+      0,
+      30,
+      1,
+      "VAE"
+    ],
+    [
+      65,
+      12,
+      1,
+      34,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      66,
+      7,
+      1,
+      34,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      67,
+      5,
+      1,
+      34,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      69,
+      32,
+      0,
+      35,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      70,
+      34,
+      0,
+      35,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      71,
+      35,
+      0,
+      29,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      72,
+      32,
+      0,
+      37,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      73,
+      21,
+      0,
+      38,
+      0,
+      "*"
+    ],
+    [
+      74,
+      38,
+      0,
+      29,
+      0,
+      "MODEL"
+    ],
+    [
+      75,
+      38,
+      0,
+      37,
+      0,
+      "MODEL"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ue_links": [],
+    "ds": {
+      "scale": 0.8390545288825282,
+      "offset": [
+        11795.507575472811,
+        2725.8248065679336
+      ]
+    },
+    "links_added_by_ue": [],
+    "frontendVersion": "1.23.4",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}
