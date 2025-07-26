@@ -323,3 +323,32 @@ class CLIPPipelineTranslatorNode:
         }
 
         return (pipeline, router, registry.entries, meta)
+
+
+class ClipSetDtypeNode:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "clip": ("CLIP",),
+                "dtype": (["float32", "float16", "bfloat16"], {"default": "float32"}),
+            }
+        }
+
+    RETURN_TYPES = ("CLIP",)
+    RETURN_NAMES = ("clip",)
+    FUNCTION = "set_dtype"
+    CATEGORY = "ABS/CLIP"
+
+    def set_dtype(self, clip, dtype: str) -> Tuple:
+        """
+        Sets the dtype of the provided CLIP model.
+        """
+        if dtype == "float32":
+            clip.to(torch.float32)
+        elif dtype == "float16":
+            clip.to(torch.float16)
+        elif dtype == "bfloat16":
+            clip.to(torch.bfloat16)
+
+        return (clip,)

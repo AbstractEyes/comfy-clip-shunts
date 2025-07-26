@@ -248,10 +248,10 @@ class EncoderSamplerConfig:
                 # projection in works, projection out is not implemented for model specifics yet but will work.
                 "force_projection_in": ("BOOLEAN", {"default": False, "tooltip": "Force projection of context window to model's max length."}),
                 "projection_dims_in": ("INT", {"default": 768, "min": 1, "max": 8192}),
-                "interpolation_method_in": (["lerp", "slerp", "cosine", "sine", "linear", "mixed"], {"default": "slerp", "tooltip": "Method to use for interpolating projections."}),
+                "interpolation_method_in": (["linear", "slerp", "cosine", "sine", "mixed"], {"default": "linear", "tooltip": "Method to use for interpolating projections."}),
                 "force_projection_out": ("BOOLEAN", {"default": False, "tooltip": "Force projection of model output to context window size."}),
                 "projection_dims_out": ("INT", {"default": 768, "min": 1, "max": 8192}),
-                "interpolation_method_out": (["lerp", "slerp", "cosine", "sine", "linear", "mixed"], {"default": "slerp", "tooltip": "Method to use for interpolating model output projections."}),
+                "interpolation_method_out": (["linear", "slerp", "cosine", "sine", "mixed"], {"default": "linear", "tooltip": "Method to use for interpolating model output projections."}),
                 "use_rose_similarity": ("BOOLEAN", {
                     "default": False,
                     "tooltip": "Use ROSE-based symbolic similarity instead of cosine similarity for resonance evaluation."
@@ -417,22 +417,115 @@ from ..sampler.alucard_exceptions import AlucardShapeError
 
 logger = logging.getLogger(__name__)
 
+
+class LegacyEncoderModelUsageConfig:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "use_clip_l": ("BOOLEAN", {"default": True, "tooltip": "Use the CLIP-L variant."}),
+                "use_clip_g": ("BOOLEAN", {"default": True, "tooltip": "Use the CLIP-G variant."}),
+                "use_t5": ("BOOLEAN", {"default": True, "tooltip": "Use the T5 variant."}),
+                "use_llama": ("BOOLEAN", {"default": False, "tooltip": "Use the Llama variant."}),
+                "use_clip_l_mask": ("BOOLEAN", {"default": True, "tooltip": "Use the CLIP-L mask for the conditioning."}),
+                "use_clip_g_mask": ("BOOLEAN", {"default": True, "tooltip": "Use the CLIP-G mask for the conditioning."}),
+                "use_t5_mask": ("BOOLEAN", {"default": True, "tooltip": "Use the T5 mask for the conditioning."}),
+                "use_llama_mask": ("BOOLEAN", {"default": False, "tooltip": "Use the Llama mask for the conditioning."}),
+            }
+        }
+
+    RETURN_TYPES = ("ENCODER_GATE_CONFIG",)
+    RETURN_NAMES = ("encoder_gate_config",)
+    FUNCTION = "configure"
+    CATEGORY = "encoder/gate"
+
+    def configure(self,
+                    use_clip_l: bool = True,
+                    use_clip_g: bool = True,
+                    use_t5: bool = True,
+                    use_llama: bool = False,
+                    use_clip_l_mask: bool = True,
+                    use_clip_g_mask: bool = True,
+                    use_t5_mask: bool = True,
+                    use_llama_mask: bool = False):
+        """Prepare the configuration dict with the provided parameters."""
+        return ({
+            "use_clip_l": use_clip_l,
+            "use_clip_g": use_clip_g,
+            "use_t5": use_t5,
+            "use_llama": use_llama,
+            "use_clip_l_mask": use_clip_l_mask,
+            "use_clip_g_mask": use_clip_g_mask,
+            "use_t5_mask": use_t5_mask,
+            "use_llama_mask": use_llama_mask
+        },)
+
+
+class RecklessEncoderConfig:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "slice_to_fill": ("BOOL", {"default": False, "tooltip": "Flail as it fills the whole context window. Good luck."}),
+                "shuffle_tokens": ("BOOL", {"default": False, "tooltip": "Shuffle the tokens in the input. This is a bad idea."}),
+                "shuffle_seed": ("INT", {"default": 420, "min": 0, "max": 10000000, "tooltip": "Seed for the random shuffle. This is a bad idea."}),
+                "obliterate": ("BOOL", {"default": False, "tooltip": "Fun mode. Anything I feel like doing."}),
+                "slice_context_window": ("INT", {"default": -1, "min": -1, "max": 16384, "tooltip": "The context window size to slice the input to."}),
+                "refold_truncated": ("BOOL", {"default": False, "tooltip": "Ignore the maximum length of the clips and instead refold the difference."}),
+                "use_wrong_clips": ("BOOL", {"default": False, "tooltip": "Use clips that are not compatible with the model."}),
+                "square_hole": ("BOOL", {"default": False, "tooltip": "It goes in the square hole. Everything does."}),
+                "use_all_masks": ("BOOL", {"default": False, "tooltip": "Use all available masks for the conditioning."}),
+                "use_no_masks": ("BOOL", {"default": False, "tooltip": "Use no masks for the conditioning."}),
+            }
+        }
+
+    RETURN_TYPES = ("RECKLESS_ENCODER_CONFIG",)
+    RETURN_NAMES = ("reckless_encoder_config",)
+    FUNCTION = "configure"
+    CATEGORY = "encoder/reckless"
+
+    def configure(self, slice_to_fill: bool = False,
+                        shuffle_tokens: bool = False,
+                        shuffle_seed: int = 420,
+                        obliterate: bool = False,
+                        slice_context_window: int = -1,
+                        refold_truncated: bool = False,
+                        use_wrong_clips: bool = False,
+                        square_hole: bool = False,
+                        use_all_masks: bool = False,
+                        use_no_masks: bool = False):
+        """Prepare the configuration dict with the provided parameters."""
+        return ({
+            "slice_to_fill": slice_to_fill,
+            "shuffle_tokens": shuffle_tokens,
+            "shuffle_seed": shuffle_seed,
+            "obliterate": obliterate,
+            "slice_context_window": slice_context_window,
+            "refold_truncated": refold_truncated,
+            "use_wrong_clips": use_wrong_clips,
+            "square_hole": square_hole,
+            "use_all_masks": use_all_masks,
+            "use_no_masks": use_no_masks
+        },)
+
+
+
 class EncoderSampler:
-    CLIP_VARIATIONS = ["clip_l", "clip_g"]
-    MODES = ["sdxl"]
+    MODES = ["sdxl", "sd1", "flux", "hidream"]
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                # now accepts a list of encoder pipelines
                 "encoders": ("ENCODER_PIPE", {}),
-                "clip":       ("CLIP", {}),
-                "config":     ("ENCODER_SAMPLER_CONFIG", {}),
-                "mode": ( EncoderSampler.MODES, {"default": "sdxl", "tooltip": "Select the mode for the encoder sampler."} ),
+                "clip": ("CLIP", {}),
+                "config": ("ENCODER_SAMPLER_CONFIG", {}),
+                "mode": (EncoderSampler.MODES, {"default": "sdxl"}),
             },
             "optional": {
                 "prompt_in": ("STRING", {"default": None, "multiline": True}),
+                "reckless_config": ("RECKLESS_ENCODER_CONFIG", {"default": {}}),
+                "clip_gate_config": ("ENCODER_GATE_CONFIG", {"default": {}}),
             }
         }
 
@@ -441,143 +534,131 @@ class EncoderSampler:
     FUNCTION = "sample"
     CATEGORY = "encoder/sampler"
 
-
     def sample(
         self,
-        encoders: List[Dict[str,Any]],
+        encoders,
         clip,
-        config: Dict[str,Any],
-        mode: str = "sdxl",
-        prompt_in: Optional[str] = None
+        config,
+        mode="sdxl",
+        prompt_in=None,
+        reckless_config=None,
+        clip_gate_config=None,
     ):
-        prompt = prompt_in
-        other_prompt = config.get("context_window", None)
-        override_context_window = config.get("override_context_window", False)
+        prompt = prompt_in or config.get("context_window", "a photo of a robot.")
         device = torch.device(config.get("device", "cpu"))
-        if override_context_window and other_prompt is not None:
-            prompt = other_prompt
-        else:
-            if prompt is None:
-                prompt = config.get("context_window", None)
 
-        if not prompt:
-            raise ValueError("No prompt provided. Please provide a valid prompt for sampling.")
+        a_raws = [self.__extract_symbolic(pipe, prompt, device) for pipe in encoders]
 
-        # 1) Extract symbolic embeddings from each encoder in the pipeline
-        a_raws = [
-            self._extract_symbolic(pipe, prompt, device)
-            for pipe in encoders
-        ]
+        cond, data = self.__schedule_and_extract_conds(clip, prompt, device, mode=mode)
+        orig_clip_full = cond.clone()
+        orig_pool_dict_full = data.get("pool", None)
+        orig_features_full = data.get("features", None)
+        orig_pool_full = orig_pool_dict_full.get("pooled_output").clone()
+        orig_features_full = orig_features_full.clone() if orig_features_full is not None else None
+        clip_slices = self.__slice_conds(cond.clone(), orig_pool_full, orig_features_full, mode=mode)
 
-        # 2) Run the CLIP model once and slice into your two variants
-        clip_full, pool   = self._extract_clip(clip, prompt, device)     # [B, T_clip, D_clip]
-        clip_slices = self._slice_clip(clip_full.clone())                  # {"clip_l":…, "clip_g":…}
+        folded_outputs: Dict[str, List[torch.Tensor]] = {}
 
-        # 3) For every (encoder × clip-variant) pair, run the fold/walk
-        folded_list = []
         for a_raw in a_raws:
-            for var in self.CLIP_VARIATIONS:
-                folded = self._run_path(a_raw, clip_slices[var], config, device)
-                folded_list.append(folded)
+            for cond_name, slice in clip_slices.items():
+                folded = self._run_path(a_raw, cond_name, slice, config, device)
+                folded_outputs.setdefault(cond_name, []).append(folded)
 
-        # 4) Concatenate all outputs along the feature dimension
-        folded_full = torch.cat(folded_list, dim=-1)  # [B, T_clip, sum(D_i)]
+        if not folded_outputs:
+            raise RuntimeError("No encoder-condition slices folded successfully.")
 
-        # 5) Package into ComfyUI conditioning format
-        conditioning = self._pack_conditioning(folded_full, config, device)
-        debug_report = None  # or collect meta if you like
-        return conditioning, [[clip_full, pool]], debug_report
+        conditioning = self._pack_conditioning_from_registry(
+            folded_outputs=folded_outputs,
+            cfg=config,
+            device=device,
+            mode=mode,
+        )
 
+        pooled = conditioning[0][1].get("pooled_output", None)
+        if mode == "flux":
+            orig_pool_ready = {
+                "pooled_output": orig_pool_full.clone() if orig_pool_full is not None else None
+            }
+        else:
+            orig_pool_ready = {
+                "pooled_output": orig_pool_full.clone()# if pooled is not None else None
+            }
+        raw_conditioning = [[orig_clip_full, orig_pool_ready]]
+        # log the conds and the pools of both outputs
 
-    # ————— Helpers ————— #
+        return conditioning, raw_conditioning, {}
 
-    def _extract_symbolic(self, pipe: Dict, prompt: str, device: torch.device) -> torch.Tensor:
-        """
-        Run your ConditioningShifter against one encoder_pipe,
-        returning a [B, T_enc, D_enc] tensor on `device`.
-        """
-        # move the model to the correct device
+    def __extract_symbolic(self, pipe, prompt, device):
         if "model" in pipe:
             pipe["model"].to(device)
         shift_cfg = ShiftConfig(prompt=prompt)
-        a = ConditioningShifter.extract_encoder_embeddings(pipe, device, shift_cfg)
-        return a.to(device)
+        return ConditioningShifter.extract_encoder_embeddings(pipe, device, shift_cfg).to(device)
 
-
-    def _extract_clip(self, clip, prompt: str, device: torch.device) -> torch.Tensor:
-        """
-        Tokenize + scheduled-encode via CLIP, returning [B, T_clip, D_clip].
-        """
-        tokens = clip.tokenize(prompt,
-            tokenizer_options={"padding":"max_length","max_length":77,"truncation":True}
-        )
-        raw = clip.encode_from_tokens_scheduled(tokens)  # [B,77,2048]
-        cond = raw[0][0]
-        pool = raw[0][1]
-        return cond.to(device), pool
-
-
-    def _slice_clip(self, clip_full: torch.Tensor) -> Dict[str, torch.Tensor]:
-        """
-        Hard-coded for now: split into CLIP-L (first 768 dims)
-        and CLIP-G (last 1280 dims).
-        """
-        return {
-            "clip_l": clip_full[:, :, :768],
-            "clip_g": clip_full[:, :, 768:]
-        }
-
-    def _run_path(
-            self,
-            a_raw: torch.Tensor,
-            clip_slice: torch.Tensor,
-            cfg: Dict[str, Any],
-            device: torch.device
-    ) -> torch.Tensor:
-        """
-        1) Ensure feature dimensions match between a_raw and clip_slice
-        2) Align tokens
-        3) Build and run IntegraOrchestrator
-        4) Re-tokenize back to clip token count
-        """
-        # 1) Ensure feature dims match
-        if a_raw.size(-1) != clip_slice.size(-1):
-            a_proj = match_project(
-                a_raw,
-                clip_slice,
-                mode=cfg.get("interpolation_method_in", "linear")
+    def __schedule_and_extract_conds(self, clip, prompt, device, mode):
+        clip_l_tokens = None
+        if mode == "flux":
+            tokens = clip.tokenize(
+                prompt,
+                tokenizer_options={
+                    "padding": "max_length",
+                    "truncation": True,
+                    "max_tokens": 512
+                }
             )
-        elif cfg.get("force_projection_in", False):
-            a_proj = match_project(
-                a_raw,
-                clip_slice,
-                mode=cfg.get("interpolation_method_in", "linear")
+            full_cond = clip.encode_from_tokens_scheduled(tokens, use_full=True)
+
+            # Extract known-good tensors
+            cond = full_cond.get("t5")  # ← symbolic field
+            features = full_cond.get("clip_l")  # ← clip_l token stream
+
+            # Place upstream pool in the pool dict - it's the clip_l features without the tokens
+            logger.info(f"[EncoderSampler] Using Flux mode, cond shape: {cond.shape if cond is not None else 'None'}")
+            pool = None
+        else:
+            tokens = clip.tokenize(
+                prompt,
+                tokenizer_options={"padding": "max_length", "max_tokens": 77, "truncation": True}
             )
+            raw = clip.encode_from_tokens_scheduled(tokens)
+            cond = raw[0][0]
+            pool = raw[0][1]
+            features = None #raw[0][2] if len(raw[0]) > 2 else None
+
+        return cond.to(device), {"features": features, "pool": pool}
+
+    def __slice_conds(self, clip_full, pool_dict, other=None, mode="sdxl"):
+        slices = {}
+        if mode == "sd1":
+            slices["clip_l"] = clip_full
+        elif mode == "sdxl":
+            slices["clip_l"] = clip_full[:, :, :768]
+            slices["clip_g"] = clip_full[:, :, 768:]
+        elif mode == "flux":
+            slices["t5"] = clip_full
+            slices["clip_l"] = other
+        elif mode == "hidream":
+            slices["clip_l"] = clip_full[:, :, :768]
+            slices["clip_g"] = clip_full[:, :, 768:2048]
+        return slices
+
+    def _run_path(self, a_raw, cond_name, clip_slice, cfg, device):
+        if a_raw.size(-1) != clip_slice.size(-1) or cfg.get("force_projection_in", False):
+            a_proj = match_project(a_raw, clip_slice, mode=cfg.get("interpolation_method_in", "linear"))
         else:
             a_proj = a_raw
-
-        # 2) Align sequence and feature dimensions
         a_feat = match_feature_dims(a_proj, clip_slice)
         b = match_tokens(clip_slice, a_feat.shape[1])
         delta = b - a_proj
-
-        # 3) Create the Integra orchestrator
         integra = self._build_integra(cfg)
-
-        # 4) Perform the folding walk
         try:
             raw_folded, _ = integra.walk_encoder_field(a_feat, b, delta)
         except AlucardShapeError as e:
             raise RuntimeError(f"[EncoderSampler] Shape error: {e}") from e
+        return match_tokens(raw_folded, clip_slice.shape[1]).to(device)
 
-        # 5) Resize back to original CLIP token count
-        folded = match_tokens(raw_folded, clip_slice.shape[1])
-        return folded.to(device)
-
-    def _build_integra(self, cfg: Dict[str,Any]) -> IntegraOrchestrator:
-        """Map `cfg` into your FieldWalkerConfig + ShuntStackConfig → IntegraOrchestrator."""
+    def _build_integra(self, cfg):
         walker_cfg = FieldWalkerConfig(
-            name=cfg.get("name","Alucard"),
+            name=cfg.get("name", "Alucard"),
             folding_mode=cfg["folding"],
             scheduler_mode=cfg["folding_scheduler"],
             t_steps=cfg["steps"],
@@ -589,9 +670,9 @@ class EncoderSampler:
                 "top_p": cfg["top_p"],
             },
             context_overrides={
-                "use_alpha_mask":         cfg["use_alpha_mask"],
-                "cosine_gate":            cfg["cosine_similarity_gate"],
-            }
+                "use_alpha_mask": cfg["use_alpha_mask"],
+                "cosine_gate": cfg["cosine_similarity_gate"],
+            },
         )
         stack_cfg = ShuntStackConfig(
             sliding_window_size=cfg["sliding_window_size"],
@@ -603,32 +684,151 @@ class EncoderSampler:
         )
         return IntegraOrchestrator(IntegraConfig(
             walker_config=walker_cfg,
-            stack_config= stack_cfg,
+            stack_config=stack_cfg,
             trace_folds=False,
             enforce_projection=cfg["force_projection_in"],
             enable_clip_alignment=cfg["cosine_similarity_gate"],
             use_rose_similarity=cfg["use_rose_similarity"],
         ))
 
-
-    def _pack_conditioning(
-        self,
-        folded: torch.Tensor,
-        cfg: Dict[str,Any],
-        device: torch.device
+    def _pack_conditioning_from_registry(
+            self,
+            folded_outputs: Dict[str, List[torch.Tensor]],
+            cfg: Dict[str, Any],
+            device: torch.device,
+            mode: str = "sdxl",
     ):
         """
-        Swap in CLS/EOS if needed, then
-        return [[folded.cpu(), {"pooled_output": ...}]]
+        Assemble final conditioning tensor and attach a valid pooled_output key for ComfyUI runtime.
+        Token count (dim=1) is enforced to match across parts.
         """
+        parts = []
+        if mode == "sdxl":
+            parts.extend(folded_outputs.get("clip_l", []))
+            parts.extend(folded_outputs.get("clip_g", []))
+        elif mode == "sd1":
+            parts.extend(folded_outputs.get("clip_l", []))
+        elif mode == "flux":
+            parts.extend(folded_outputs.get("t5", []))
+            #parts.extend(folded_outputs.get("clip_l", []))
+        else:
+            for k in folded_outputs:
+                parts.extend(folded_outputs[k])
+
+        if not parts:
+            raise RuntimeError("No folded parts to pack for conditioning.")
+
+        # ── Token Length Harmonization ────────────────────────────────
+        token_lengths = [p.shape[1] for p in parts]
+        if len(set(token_lengths)) > 1:
+            logger.warning(f"[EncoderSampler] Token mismatch: {[p.shape for p in parts]}")
+            target_T = min(token_lengths)
+            logger.info(f"[EncoderSampler] Truncating all tensors to token length {target_T}")
+            parts = [p[:, :target_T, :] for p in parts]
+        else:
+            target_T = token_lengths[0]
+
+        # ── Concatenate along feature dimension ───────────────────────
+        folded = torch.cat(parts, dim=-1)  # [B, T, D_total]
         B, T, D = folded.shape
-        start = torch.zeros(B,1,D, device=device)
-        end   = torch.zeros(B,1,D, device=device)
-        body  = folded[:,1:-1,:]
+
+        # ── Patch CLS/EOS Tokens ──────────────────────────────────────
+        start = torch.zeros(B, 1, D, device=device)
+        end = torch.zeros(B, 1, D, device=device)
+        body = folded[:, 1:-1, :]
         patched = torch.cat([start, body, end], dim=1)
 
-        pooled = patched[:, -1, 768:2048]  # for example
-        return [[patched.cpu(), {"pooled_output": pooled.cpu()}]]
+        # ── Pooled Output by Mode ─────────────────────────────────────
+        if mode == "flux":
+            if "clip_l" not in folded_outputs:
+                raise RuntimeError("Flux mode requires folded 'clip_l' features for pooling.")
+            pooled = patched[:, -1, :]
+        elif mode == "sdxl":
+            pooled = patched[:, -1, 768:2048]
+        elif mode == "sd1":
+            pooled = patched[:, -1, :768]
+        else:
+            pooled = patched[:, -1, :]
+
+        # ── Ensure Shape + Return ComfyUI Conditioning ────────────────
+        #if pooled.ndim == 3:
+        #    pooled = pooled.squeeze(1)
+        #assert isinstance(pooled, torch.Tensor), "pooled_output must be a tensor"
+        #assert pooled.ndim == 2, f"pooled_output must be [B, D], got {pooled.shape}"
+
+        #logger.info(f"[EncoderSampler] Final patched shape: {patched.shape}, pooled shape: {pooled.shape}")
+        return [[patched.cpu().clone(), {"pooled_output": pooled.cpu().clone()}]]
+
+    def _pool_clip_l_tokens(self, walked_clip_l: torch.Tensor, strategy: str = "last") -> torch.Tensor:
+        if strategy == "mean":
+            return walked_clip_l.mean(dim=1)
+        elif strategy == "first":
+            return walked_clip_l[:, 0, :]
+        elif strategy == "last":
+            return walked_clip_l[:, -1, :]
+        raise ValueError(f"Unknown pooling strategy: {strategy}")
+
+class ClipStacker:
+    # takes in clip pipelines and converts them into a stacked multi-clip conditioning
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "clip1": ("CLIP", {}),
+            },
+            "optional": {
+                "clip2": ("CLIP", {}),
+                "clip3": ("CLIP", {}),
+                "clip4": ("CLIP", {}),
+                "clip5": ("CLIP", {}),
+            }
+        }
+    RETURN_TYPES = ("CLIP_PIPELINE",)
+    RETURN_NAMES = ("clip_pipeline",)
+    FUNCTION = "stack_clips"
+    CATEGORY = "encoder/sampler"
+    def stack_clips(self, clip1, clip2=None, clip3=None, clip4=None, clip5=None):
+        """
+        Stack multiple CLIP pipelines into a single conditioning.
+        This is useful for combining multiple CLIP models into one conditioning.
+        """
+        clips = [clip1, clip2, clip3, clip4, clip5]
+        # filter out None values
+        clips = [clip for clip in clips if clip is not None]
+        if not clips:
+            raise ValueError("At least one CLIP pipeline must be provided.")
+
+        # create a stacked conditioning
+        return (clips,)
+
+class UnstackClip:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "clip_pipeline": ("CLIP_PIPELINE", {}),
+            }
+        }
+
+    RETURN_TYPES = ("CLIP", "CLIP", "CLIP", "CLIP", "CLIP")
+    RETURN_NAMES = ("clip1", "clip2", "clip3", "clip4", "clip5")
+    FUNCTION = "unstack_clip"
+    CATEGORY = "encoder/sampler"
+
+    def unstack_clip(self, clip_pipeline):
+        """
+        Unstack a stacked CLIP pipeline into individual CLIP models.
+        This is useful for extracting individual CLIP models from a stacked conditioning.
+        """
+        if not isinstance(clip_pipeline, list) or not all(isinstance(clip, CLIP) for clip in clip_pipeline):
+            raise ValueError("Input must be a list of CLIP models.")
+
+        # Ensure the list has exactly 5 elements, filling with None if necessary
+        while len(clip_pipeline) < 5:
+            clip_pipeline.append(None)
+
+        return tuple(clip_pipeline[:5])
+
 
 
 

@@ -60,7 +60,6 @@ from ..utils.conditioning_shifter import ConditioningShifter
 
 
 
-
 class ConditioningStackMultipleNode:
     """
     A node to stack up and organize up to 5 conditioning pipes.
@@ -1066,6 +1065,7 @@ class ABS_WAS_ConditioningBlend:
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "squash": ("BOOLEAN", {"default": False, "tooltip": "Average each input group before blending."}),
                 "amount_blended": ("INT", {"default": -1, "min": -1, "max": 1000, "step": 1}),
+                "extrapolate_pooled": ("BOOLEAN", {"default": False, "tooltip": "Extrapolate pooled outputs or avoid."}),
             },
             "optional": {
                 "conditioning_b": ("CONDITIONING", {"default": []}),
@@ -1077,7 +1077,7 @@ class ABS_WAS_ConditioningBlend:
     FUNCTION = "combine"
     CATEGORY = "conditioning"
 
-    def combine(self, conditioning_a, blending_mode, blending_strength, seed, squash=False, amount_blended=-1, conditioning_b=[]):
+    def combine(self, conditioning_a, blending_mode, blending_strength, seed, squash=False, amount_blended=-1, extrapolate_pooled=False, conditioning_b=[]):
         if seed > 0:
             torch.manual_seed(seed)
 
@@ -1109,6 +1109,7 @@ class ABS_WAS_ConditioningBlend:
             logger.info(f"a_avg shape: {a_avg.shape}")
             logger.info(f"b_avg shape: {b_avg.shape}")
 
+            logger.info(f"pooled shape: {pooled.shape}")
             b_pooleds = [
                 pooled for entry in conditioning_b
                 if (pooled := entry[1].get("pooled_output", None)) is not None
@@ -1120,8 +1121,11 @@ class ABS_WAS_ConditioningBlend:
             cond = normalize(blend_fn(a_proj, b_proj, 1 - blend_weight))
 
             pooled = None
-            if pa_avg is not None and pb_avg is not None:
+            if extrapolate_pooled and pa_avg is not None and pb_avg is not None:
                 pooled = normalize(blend_fn(pa_avg, pb_avg, 1 - blend_weight))
+            else:
+                # use the pooled output of the first conditioning
+                pooled = conditioning_a[0][1].get("pooled_output", None)
 
             return ([[cond, {"pooled_output": pooled}]],)
 
@@ -1132,12 +1136,19 @@ class ABS_WAS_ConditioningBlend:
         if not conditioning_b:
             conditioning_b = [[a.clone(), meta] for a, meta in conditioning_a]
 
+
         for i in range(num_blend):
             a, meta_a = conditioning_a[i]
-            pa = meta_a.get("pooled_output", None)
+            if extrapolate_pooled:
+                pa = meta_a.get("pooled_output", None)
+            else:
+                pa = None
 
             for b, meta_b in conditioning_b:
-                pb = meta_b.get("pooled_output", None)
+                if extrapolate_pooled:
+                    pb = meta_b.get("pooled_output", None)
+                else:
+                    pb = None
 
                 a, b = a.to(device), b.to(device)
                 if pa is not None: pa = pa.to(device).clone()
@@ -1149,7 +1160,10 @@ class ABS_WAS_ConditioningBlend:
                 pooled = None
                 if pa is not None and pb is not None:
                     pooled = normalize(blend_fn(pa, pb, 1 - blend_weight))
-
+                elif not extrapolate_pooled:
+                    pooled = meta_a.get("pooled_output", None)
+                    if pooled is None:
+                        pooled = meta_b.get("pooled_output", None)
                 result.append([cond, {"pooled_output": pooled}])
 
         return (result,)

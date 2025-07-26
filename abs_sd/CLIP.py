@@ -97,6 +97,17 @@ class CLIP:
         logging.info("CLIP/text encoder model load device: {}, offload device: {}, current: {}, dtype: {}".format(load_device, offload_device, params['device'], dtype))
         self.tokenizer_options = {}
 
+    def to(self, dtype, device=None):
+        """
+        Move the CLIP model to a specific device and change its dtype.
+        :param dtype: The target dtype for the model.
+        :param device: The target device for the model.
+        """
+        if device is None:
+            device = self.cond_stage_model.device
+        self.cond_stage_model.to(device, dtype=dtype)
+        #self.tokenizer.to(device, dtype=dtype)
+
     def clone(self):
         n = CLIP(no_init=True)
         n.patcher = self.patcher.clone()
@@ -130,17 +141,29 @@ class CLIP:
             pooled_dict["hooks"] = self.apply_hooks_to_conds
         return pooled_dict
 
-    def encode_from_tokens_scheduled(self, tokens, unprojected=False, add_dict: dict[str]={}, show_pbar=True):
+    def encode_from_tokens_scheduled(self, tokens, unprojected=False, add_dict: dict[str]={}, show_pbar=True, use_full=False):
         all_cond_pooled: list[tuple[torch.Tensor, dict[str]]] = []
         all_hooks = self.patcher.forced_hooks
         if all_hooks is None or not self.use_clip_schedule:
             # if no hooks or shouldn't use clip schedule, do unscheduled encode_from_tokens and perform add_dict
             return_pooled = "unprojected" if unprojected else True
-            pooled_dict = self.encode_from_tokens(tokens, return_pooled=return_pooled, return_dict=True)
-            cond = pooled_dict.pop("cond")
-            # add/update any keys with the provided add_dict
-            pooled_dict.update(add_dict)
-            all_cond_pooled.append([cond, pooled_dict])
+            pooled_dict = self.encode_from_tokens(tokens, return_pooled=return_pooled, return_dict=True, use_full=use_full)
+            if not use_full:
+                cond = pooled_dict.pop("cond")
+                # add/update any keys with the provided add_dict
+                pooled_dict.update(add_dict)
+                all_cond_pooled.append([cond, pooled_dict])
+            else:
+                # if using full, we have t5, t5_pooled, clip_l, clip_l_pooled
+                #t5 = pooled_dict.pop("t5")
+                #t5_pooled = pooled_dict.pop("t5_pooled")
+                #clip_l = pooled_dict.pop("clip_l")
+                #clip_l_pooled = pooled_dict.pop("clip_l_pooled")
+                ## add/update any keys with the provided add_dict
+                #pooled_dict.update(add_dict)
+                #all_cond_pooled.append([t5, {"pooled_output": t5_pooled}])
+                #all_cond_pooled.append([clip_l, {"pooled_output": clip_l_pooled}])
+                return pooled_dict
         else:
             scheduled_keyframes = all_hooks.get_hooks_for_clip_schedule()
 
@@ -188,7 +211,7 @@ class CLIP:
             all_hooks.reset()
         return all_cond_pooled
 
-    def encode_from_tokens(self, tokens, return_pooled=False, return_dict=False):
+    def encode_from_tokens(self, tokens, return_pooled=False, return_dict=False, use_full=False):
         self.cond_stage_model.reset_clip_options()
 
         if self.layer_idx is not None:
@@ -198,7 +221,12 @@ class CLIP:
             self.cond_stage_model.set_clip_options({"projected_pooled": False})
 
         self.load_model()
-        o = self.cond_stage_model.encode_token_weights(tokens)
+        if use_full:
+            o = self.cond_stage_model.encode_token_weights(tokens, use_full=use_full)
+            logger.info("Using full output from encode_from_tokens: {}".format(o.keys()))
+            return o
+        else:
+            o = self.cond_stage_model.encode_token_weights(tokens)
         cond, pooled = o[:2]
         if return_dict:
             out = {"cond": cond, "pooled_output": pooled}
@@ -215,6 +243,11 @@ class CLIP:
     def encode(self, text):
         tokens = self.tokenize(text)
         return self.encode_from_tokens(tokens)
+
+    def encode_full(self, text):
+        self.load_model()
+        tokens = self.tokenize(text)
+        return self.cond_stage_model.encode_token_weights_full(tokens)
 
     def load_sd(self, sd, full_model=False):
         if full_model:

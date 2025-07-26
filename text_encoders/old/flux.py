@@ -1,15 +1,15 @@
 """
     Direct port from COMFYUI with modifications for Flux
 """
-from comfy import (sd1_clip)
-from comfy.text_encoders import hunyuan_video
-from comfy.text_encoders import sd3_clip
-from comfy import sd1_clip
-from comfy import sdxl_clip
+from .sd1_clip import SDClipModel, SDTokenizer
+import comfy.text_encoders.hunyuan_video as hunyuan_video
+from .sd3_clip import SD3ClipModel, T5XXLTokenizer
+import sdxl_clip
 import comfy.model_management
 from transformers import T5TokenizerFast
 import torch
 import os
+
 
 from .t5 import T5
 
@@ -18,7 +18,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class T5XXLModel(sd1_clip.SDClipModel):
+class T5XXLModel(SDClipModel):
     def __init__(self, device="cpu", layer="last", layer_idx=None, dtype=None, attention_mask=True, model_options={}):
         logger.info("Initializing T5XXLModel with options: {}".format(model_options))
         if model_options.get("unchained_t5", False):
@@ -56,8 +56,8 @@ class T5XXLModel(sd1_clip.SDClipModel):
 
 class FluxTokenizer:
     def __init__(self, embedding_directory=None, tokenizer_data={}):
-        self.clip_l = sd1_clip.SDTokenizer(embedding_directory=embedding_directory, tokenizer_data=tokenizer_data)
-        self.t5xxl = sd3_clip.T5XXLTokenizer(embedding_directory=embedding_directory, tokenizer_data=tokenizer_data)
+        self.clip_l = SDTokenizer(embedding_directory=embedding_directory, tokenizer_data=tokenizer_data)
+        self.t5xxl = T5XXLTokenizer(embedding_directory=embedding_directory, tokenizer_data=tokenizer_data)
 
     def tokenize_with_weights(self, text:str, return_word_ids=False, **kwargs):
         out = {}
@@ -78,7 +78,7 @@ class FluxClipModel(torch.nn.Module):
         dtype_t5 = comfy.model_management.pick_weight_dtype(dtype_t5, dtype, device)
         logger.info("Initializing FluxClipModel with options: {}".format(model_options))
         logger.info("First clip_l")
-        self.clip_l = sd1_clip.SDClipModel(device=device, dtype=dtype, return_projected_pooled=False, model_options=model_options)
+        self.clip_l = SDClipModel(device=device, dtype=dtype, return_projected_pooled=False, model_options=model_options)
         logger.info("Then t5xxl")
         self.t5xxl = T5XXLModel(device=device, dtype=dtype_t5, model_options=model_options)
         self.dtypes = set([dtype, dtype_t5])
@@ -91,13 +91,23 @@ class FluxClipModel(torch.nn.Module):
         self.clip_l.reset_clip_options()
         self.t5xxl.reset_clip_options()
 
-    def encode_token_weights(self, token_weight_pairs):
+    def encode_token_weights(self, token_weight_pairs, use_full=False):
         token_weight_pairs_l = token_weight_pairs["l"]
         token_weight_pairs_t5 = token_weight_pairs["t5xxl"]
 
         t5_out, t5_pooled = self.t5xxl.encode_token_weights(token_weight_pairs_t5)
         l_out, l_pooled = self.clip_l.encode_token_weights(token_weight_pairs_l)
+        if use_full:
+            logger.info("Returning full output for FluxClipModel")
+            return {
+                "t5": t5_out,
+                "t5_pooled": t5_pooled,
+                "clip_l": l_out,
+                "clip_l_pooled": l_pooled
+            }
+        # If not using full output, return only the last layer output and pooled output
         return t5_out, l_pooled
+
 
     def load_sd(self, sd):
         if "text_model.encoder.layers.1.mlp.fc1.weight" in sd:

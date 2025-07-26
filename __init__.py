@@ -68,6 +68,7 @@ from .node.clip_nodes import (
     ADualCLIPLoader,
     ATripleCLIPLoader,
     AQuadrupleCLIPLoader,
+    ClipSetDtypeNode
 )
 
 from .node.general_nodes import (
@@ -190,6 +191,7 @@ NODE_CLASS_MAPPINGS = {
     "AbsClipSplitter": AbsClipSplitter,         # added v0.4.0
 
     # New Clip-based nodes
+    "ClipSetDtypeNode": ClipSetDtypeNode,     # Sets the dtype for CLIP models
     #"ABS_ModelSelector": ABS_ModelSelector,   # Model selector for choosing between different CLIP models
 
     # HuggingFace nodes for additional functionality
@@ -302,7 +304,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "AbsClipSplitter": "🔗 Abs Clip Splitter",
 
     # New Clip-based nodes
-    "ABS_ModelSelector": "🔍 ABS Model Selector",  # Model selector for choosing between different CLIP models
+    "ClipSetDtypeNode": "🎛️ Set CLIP Dtype",  # Sets the dtype for CLIP models
+    #"ABS_ModelSelector": "🔍 ABS Model Selector",  # Model selector for choosing between different CLIP models
 
     # HuggingFace nodes for additional functionality
     "SetHuggingfaceToken": "🔑 Set Hugging Face Token",  # Sets the Hugging Face token for private model access
