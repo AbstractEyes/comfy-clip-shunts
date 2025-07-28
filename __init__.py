@@ -40,7 +40,8 @@ from .node.encoder_nodes import (
     EncoderSamplerConfig,
     # Clip-based swap and handling nodes
     EncoderSampler,
-    RemoveSpecialTokens
+    RemoveSpecialTokens,
+    EncoderStackerNode
 )
 
 
@@ -63,12 +64,15 @@ from .node.shunt_nodes import (
 )
 
 from .node.clip_nodes import (
-    AbsClipSplitter,
+    ClipEncoderLoader,
     ACLIPLoader,
     ADualCLIPLoader,
     ATripleCLIPLoader,
     AQuadrupleCLIPLoader,
-    ClipSetDtypeNode
+    ClipSetDtypeNode,
+    EmptyClipLatent,
+
+    #CLIPPipelineToConditionPipeNode
 )
 
 from .node.general_nodes import (
@@ -76,6 +80,7 @@ from .node.general_nodes import (
     ABS_ConcatPrompts,
     ABS_DebugNode
 )
+
 
 from .node.huggingface_nodes import (
     # Importing HuggingFace nodes for additional functionality
@@ -134,6 +139,7 @@ from .node.conditioning_nodes import (
     ConditioningSetDeviceNode,           # untested
     ConditioningSetDtypeNode,            # untested
     ABS_WAS_ConditioningBlend,           # semi-ready ported from WAS
+    RoseSimilarityConditioning,          # untested, but should be ready
 )
 
 NODE_CLASS_MAPPINGS = {
@@ -183,12 +189,15 @@ NODE_CLASS_MAPPINGS = {
     "AConditioningSetDeviceNode": ConditioningSetDeviceNode,  # Sets the device for conditioning nodes
     "AConditioningSetDtypeNode": ConditioningSetDtypeNode,  # Sets the dtype for conditioning nodes
 
+    # Clip to Encoder nodes
+    "ClipEncoderLoader": ClipEncoderLoader,  # Loads a CLIP encoder model
+    "StackEncoderNode": EncoderStackerNode,  # Stacks multiple encoder nodes for complex configurations
+
     # OLD Clip-based nodes
     "ACLIPLoader": ACLIPLoader,               # Loads a dual CLIP model (clip-l, clip-g)
     "ADualCLIPLoader": ADualCLIPLoader,       # Loads a dual CLIP model (clip-l, clip-g)
     "ATripleCLIPLoader": ATripleCLIPLoader,   # Loads a triple CLIP model (clip-l, clip-g, t5)
     "AQuadrupleCLIPLoader": AQuadrupleCLIPLoader, # Loads a quadruple CLIP model (clip-l, clip-g, t5, llama)
-    "AbsClipSplitter": AbsClipSplitter,         # added v0.4.0
 
     # New Clip-based nodes
     "ClipSetDtypeNode": ClipSetDtypeNode,     # Sets the dtype for CLIP models
@@ -250,6 +259,7 @@ NODE_CLASS_MAPPINGS = {
 
     # Imported and extended conditioning nodes
     "ABS_WAS_ConditioningBlend": ABS_WAS_ConditioningBlend,  # Semi-ready ported from WAS, blends conditioning inputs over steps
+    "RoseSimilarityConditioning": RoseSimilarityConditioning,  # Unused, but ready for future use
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -346,6 +356,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ANormalizeConditioningToMasksNode": "🔄 Normalize Conditioning To Masks",  # Normalizes conditioning inputs to masks
 
     "ABS_WAS_ConditioningBlend": "🔄 WAS Conditioning Blend",  # Semi-ready ported from WAS, blends conditioning inputs over steps
+    "RoseSimilarityConditioning": "🌹 Rose Similarity Conditioning",  # Unused, but ready for future use
 
 }
 

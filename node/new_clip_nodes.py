@@ -6,7 +6,6 @@ import logging
 import comfy
 
 from comfy.sd import CLIP
-from ..utils.clip_converter import translate_comfy_clip_to_multiclip, reconstruct_comfy_clip_from_multiclip
 from ..model.model_manager import get_model_manager
 from ..abs_sd.CLIP import load_clip, CLIPType
 
@@ -93,10 +92,8 @@ class ClipTarget:
         return (config, )
 
 
-from ..abs_sd.multi_clip_registry import MultiClipRegistry
 from ..abs_sd.CLIP import load_clip, CLIPType
 from ..model.model_manager import get_model_manager
-from ..utils.clip_converter import translate_comfy_clip_to_multiclip
 import torch
 import folder_paths
 
@@ -105,14 +102,8 @@ from typing import Optional, Dict, Any
 import torch
 import folder_paths
 from ..abs_sd.CLIP import load_clip, CLIPType
-from ..abs_sd.model_manager_wrapper import get_extended_model_manager
-from ..abs_sd.multi_clip_registry import MultiClipRegistry
 
-
-from ..abs_sd.CLIP import load_clip, CLIPType
-from ..abs_sd.multi_clip_registry import MultiClipRegistry
 #from ..abs_sd.model_manager_wrapper import resolve_clip_allocation
-from ..utils.clip_converter import translate_comfy_clip_to_multiclip
 
 import folder_paths
 

@@ -79,6 +79,7 @@ class FoldingPoolingTypes:
     TRIANGULAR = "triangular_overlap"  # Triangular pooling, where we pool embeddings in a triangular fashion
     BILINEAR = "bilinear"  # Bilinear pooling, where we pool embeddings in a bilinear fashion
     NEAREST = "nearest"  # Nearest pooling, where we pool embeddings in a nearest neighbor fashion
+    SIMILARITY_TREE = "similarity_tree" #
     SIMILARITY_O = "similarity_o"  # Similarity pooling, where we pool embeddings orderly based on similarity
     SIMILARITY_X = "similarity_x"  # Similarity pooling, where we pool embeddings in a cross similarity fashion
     SIMILARITY_MASK = "similarity_mask"  # Similarity pooling, where we pool embeddings based on mask similarity
@@ -98,6 +99,7 @@ class FoldingPoolingTypes:
         Returns a list of all available pooling types.
         """
         return [
+            "similarity_tree",
             "triangular_overlap", "bilinear", "nearest", "similarity_o", "similarity_x",
             "similarity_mask", "conv2", "conv3", "conv4", "flood", "slerp",
             "average", "max", "sum", "none"

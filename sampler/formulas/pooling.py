@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 from .modes import FoldingPaddingTypes, FoldingPoolingTypes
 # --------------------------------------------------------------------- #
 
+from scipy.cluster.hierarchy import linkage, leaves_list
 
 class WindowPoolingConfig:
     """
@@ -140,6 +141,28 @@ class WindowPooling:
             for i in range(steps):
                 flood[:, :, i] = stack[:, :, :i+1].mean(dim=2)
             return flood
+        elif self.pooling_mode == FoldingPoolingTypes.SIMILARITY_TREE:
+            """
+            Tree-based pooling: reorders segments via pairwise cosine similarity
+            and pools them in dendrogram-leaf order.
+            """
+            steps, B, T, D = stack.shape
 
+            # Pool each segment
+            pooled = stack.mean(dim=2)  # [steps, B, D]
+
+            out = []
+            for b in range(B):
+                vectors = pooled[:, b]  # [steps, D]
+                sim_matrix = F.cosine_similarity(vectors.unsqueeze(1), vectors.unsqueeze(0), dim=-1)
+                dist = 1.0 - sim_matrix.cpu().numpy()
+                linkage_matrix = linkage(dist, method='centroid', optimal_ordering=True)
+                order = leaves_list(linkage_matrix)
+
+                ordered_stack = stack[order, b]  # [steps, T, D]
+                pooled_b = ordered_stack.mean(dim=0)  # [T, D]
+                out.append(pooled_b)
+
+            return torch.stack(out, dim=0)  # [B, T, D]
         else:
             return torch.cat(embeddings, dim=1)  # fallback

@@ -5,7 +5,6 @@ import logging
 import comfy
 
 from comfy.sd import CLIP
-from ..utils.clip_converter import translate_comfy_clip_to_multiclip, reconstruct_comfy_clip_from_multiclip
 from ..model.model_manager import get_model_manager
 from ..abs_sd.CLIP import load_clip, CLIPType
 
@@ -52,6 +51,148 @@ class EmptyClipLatent:
         return (empty_conditioning,)
 
 
+import torch
+from .pipes import ConditionPipe, ConditionEmbeddingNode
+from ..utils.conditioning_shifter import ConditioningShifter, ShiftConfig
+
+class CLIPPipelineToEncoderPipe:
+    """
+    Converts a CLIP_PIPELINE into one or more ENCODER_PIPE entries.
+    Useful for routing into standard LoRA or conditioning systems.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "clip_pipeline": ("CLIP_PIPELINE", {}),
+                "max_length": ("INT", {"default": 77, "min": 1, "max": 8192}),
+                "padding": (["max_length", "longest", "do_not_pad"], {"default": "max_length"}),
+                "device": (["cpu", "cuda", "mps"], {"default": "cuda" if torch.cuda.is_available() else "cpu"}),
+            }
+        }
+
+    RETURN_TYPES = ("ENCODER_PIPE",)
+    RETURN_NAMES = ("encoder_pipe",)
+    FUNCTION = "convert"
+    CATEGORY = "encoder/bridge"
+
+    def convert(self, clip_pipeline, max_length, padding, device):
+        device = torch.device(device)
+        registry = clip_pipeline.get("registry", [])
+        if not registry:
+            raise ValueError("CLIP_PIPELINE has no valid registry entries.")
+
+        encoder_pipes = []
+        for idx, entry in enumerate(registry):
+            model = entry.get("model")
+            tokenizer = entry.get("tokenizer")
+            name = entry.get("name", f"clip_{idx}")
+            model_type = entry.get("type", "clip")
+
+            if model is None or tokenizer is None:
+                continue
+
+            config_dict = {
+                "model_id": f"{model_type}_{name}",
+                "model_type": model_type,
+                "model_name": name,
+                "source": "clip_pipeline",
+                "device": str(device),
+                "trust_remote_code": False,
+                "config": {
+                    "max_length": max_length,
+                    "padding": padding
+                }
+            }
+
+            encoder_pipe_entry = {
+                "model": model,
+                "tokenizer": tokenizer,
+                "config": config_dict
+            }
+            encoder_pipes.append(encoder_pipe_entry)
+
+        return (encoder_pipes,)
+
+
+
+def make_clip_pipeline(clip, model_type: str = "unknown") -> dict:
+    """
+    Constructs a symbolic CLIP_PIPELINE wrapper from a legacy CLIP object.
+    This does NOT use MultiClipRegistry. It manually builds a minimal pipeline interface.
+    """
+
+    return {
+        "source_model": clip,
+        "model_type": model_type
+    }
+
+
+
+from ..abs_sd.CLIP import CLIPType, load_clip
+
+class ClipEncoderLoader:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "clip_name": (
+                    folder_paths.get_filename_list("text_encoders"),
+                ),
+                "model_type": (
+                    [
+                        "stable_diffusion", "novelai_v2", "stable_cascade", "sd3",
+                        "stable_audio", "mochi", "ltxv", "pixart", "cosmos",
+                        "lumina2", "wan", "hidream", "chroma", "ace", "omnigen2"
+                    ],
+                    {"default": "stable_diffusion", "tooltip": "Which model format this CLIP file was trained for"}
+                ),
+                "encoder_type": (
+                    [
+                        "clip_l", "clip_g", "clip_h",
+                        "t5", "t5_unchained", "llama", "vision"
+                    ],
+                    {"default": "clip_l", "tooltip": "Symbolic encoder role for this CLIP (used for downstream interpretation)"}
+                ),
+            },
+            "optional": {
+                "device": (
+                    ["default", "cpu", "cuda"],
+                    {"default": "default", "advanced": True}
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("CLIP", "ENCODER_PIPE")
+    RETURN_NAMES = ("clip", "encoder_pipe")
+    FUNCTION = "load_clip_internal"
+    CATEGORY = "advanced/loaders"
+    DESCRIPTION = "[ABS] Loads a single CLIP and returns both CLIP and ENCODER_PIPE for symbolic pipeline use."
+
+    def load_clip_internal(self, clip_name, model_type, encoder_type, device="default"):
+        clip_type = getattr(CLIPType, model_type.upper(), CLIPType.STABLE_DIFFUSION)
+
+        model_options = {}
+        if device == "cpu":
+            model_options["load_device"] = model_options["offload_device"] = torch.device("cpu")
+
+        clip_path = folder_paths.get_full_path_or_raise("text_encoders", clip_name)
+        clip = load_clip(
+            ckpt_paths=[clip_path],
+            embedding_directory=folder_paths.get_folder_paths("embeddings"),
+            clip_type=clip_type,
+            model_options=model_options
+        )
+
+        encoder_pipe = [{
+            "clip": clip,
+            "type": encoder_type,
+        }]
+
+        return clip, encoder_pipe
+
+
 
 class ACLIPLoader:
     @classmethod
@@ -83,21 +224,26 @@ class ACLIPLoader:
 class ADualCLIPLoader:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "clip_name1": (folder_paths.get_filename_list("text_encoders"), ),
-                              "clip_name2": (folder_paths.get_filename_list("text_encoders"), ),
-                              "type": (["sdxl", "sd3", "flux", "hunyuan_video", "hidream"], ),
-                              },
-                "optional": {
-                              "device": (["default", "cpu"], {"advanced": True}),
-                             }}
-    RETURN_TYPES = ("CLIP",)
-    FUNCTION = "load_clip_internal"
+        return {
+            "required": {
+                "clip_name1": (folder_paths.get_filename_list("text_encoders"), ),
+                "clip_name2": (folder_paths.get_filename_list("text_encoders"), ),
+                "type": (["sdxl", "sd3", "flux", "hunyuan_video", "hidream"], {
+                    "default": "sdxl",
+                    "tooltip": "Type of the CLIP model to load."
+                }),
+            },
+            "optional": {
+                "device": (["default", "cpu", "cuda"], {"advanced": True}),
+            }
+        }
 
+    RETURN_TYPES = ("CLIP", )
+    RETURN_NAMES = ("clip", )
+    FUNCTION = "load_clip_internal"
     CATEGORY = "advanced/loaders"
 
-    DESCRIPTION = "[Recipes]\n\nsdxl: clip-l, clip-g\nsd3: clip-l, clip-g / clip-l, t5 / clip-g, t5\nflux: clip-l, t5\nhidream: at least one of t5 or llama, recommended t5 and llama"
-
-    def load_clip_internal(self, clip_name1, clip_name2, type, device="default"):
+    def load_clip_internal(self, clip_name1, clip_name2, type="sdxl", device="default"):
         clip_type = getattr(CLIPType, type.upper(), CLIPType.STABLE_DIFFUSION)
 
         clip_path1 = folder_paths.get_full_path_or_raise("text_encoders", clip_name1)
@@ -107,222 +253,104 @@ class ADualCLIPLoader:
         if device == "cpu":
             model_options["load_device"] = model_options["offload_device"] = torch.device("cpu")
 
-        clip = load_clip(ckpt_paths=[clip_path1, clip_path2], embedding_directory=folder_paths.get_folder_paths("embeddings"), clip_type=clip_type, model_options=model_options)
+        clip = load_clip(
+            ckpt_paths=[clip_path1, clip_path2],
+            embedding_directory=folder_paths.get_folder_paths("embeddings"),
+            clip_type=clip_type,
+            model_options=model_options
+        )
+
         return (clip,)
 
 
 class ATripleCLIPLoader:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {
-                    "clip_name1": (folder_paths.get_filename_list("text_encoders"), ),
-                    "clip_name2": (folder_paths.get_filename_list("text_encoders"), ),
-                    "clip_name3": (folder_paths.get_filename_list("text_encoders"), )
-                }}
-    RETURN_TYPES = ("CLIP",)
-    FUNCTION = "load_clip_internal"
+        return {
+            "required": {
+                "clip_name1": (folder_paths.get_filename_list("text_encoders"), ),
+                "clip_name2": (folder_paths.get_filename_list("text_encoders"), ),
+                "clip_name3": (folder_paths.get_filename_list("text_encoders"), )
+            },
+            "optional": {
+                "model_type": (["sd3"], {"default": "sd3", "tooltip": "Type of the CLIP model to load."}),
+                "device": (["default", "cpu", "cuda"], {"advanced": True}),
+            }
+        }
 
+    RETURN_TYPES = ("CLIP",)
+    RETURN_NAMES = ("clip",)
+    FUNCTION = "load_clip_internal"
     CATEGORY = "advanced/loaders"
 
-    DESCRIPTION = "[Recipes]\n\nsd3: clip-l, clip-g, t5"
+    def load_clip_internal(self, clip_name1, clip_name2, clip_name3, model_type="sd3", device="default"):
+        clip_type = getattr(CLIPType, model_type.upper(), CLIPType.SD3)
 
-    def load_clip_internal(self, clip_name1, clip_name2, clip_name3):
         clip_path1 = folder_paths.get_full_path_or_raise("text_encoders", clip_name1)
         clip_path2 = folder_paths.get_full_path_or_raise("text_encoders", clip_name2)
         clip_path3 = folder_paths.get_full_path_or_raise("text_encoders", clip_name3)
-        clip = load_clip(ckpt_paths=[clip_path1, clip_path2, clip_path3], embedding_directory=folder_paths.get_folder_paths("embeddings"))
+
+        model_options = {}
+        if device == "cpu":
+            model_options["load_device"] = model_options["offload_device"] = torch.device("cpu")
+
+        clip = load_clip(
+            ckpt_paths=[clip_path1, clip_path2, clip_path3],
+            embedding_directory=folder_paths.get_folder_paths("embeddings"),
+            clip_type=clip_type,
+            model_options=model_options
+        )
+
         return (clip,)
 
 
 class AQuadrupleCLIPLoader:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {
-                              "clip_name1": (folder_paths.get_filename_list("text_encoders"), ),
-                              "clip_name2": (folder_paths.get_filename_list("text_encoders"), ),
-                              "clip_name3": (folder_paths.get_filename_list("text_encoders"), ),
-                              "clip_name4": (folder_paths.get_filename_list("text_encoders"), )
-                            }}
-    RETURN_TYPES = ("CLIP",)
-    FUNCTION = "load_clip_internal"
+        return {
+            "required": {
+                "clip_name1": (folder_paths.get_filename_list("text_encoders"), ),
+                "clip_name2": (folder_paths.get_filename_list("text_encoders"), ),
+                "clip_name3": (folder_paths.get_filename_list("text_encoders"), ),
+                "clip_name4": (folder_paths.get_filename_list("text_encoders"), )
+            },
+            "optional": {
+                "model_type": (["hidream"], {"default": "hidream", "tooltip": "Type of the CLIP model to load."}),
+                "device": (["default", "cpu", "cuda"], {"advanced": True}),
+            }
+        }
 
+    RETURN_TYPES = ("CLIP", "CLIP_PIPELINE")
+    RETURN_NAMES = ("clip", "clip_pipeline")
+    FUNCTION = "load_clip_internal"
     CATEGORY = "advanced/loaders"
 
-    DESCRIPTION = "[Recipes]\n\nhidream: long clip-l, long clip-g, t5xxl, llama_8b_3.1_instruct"
+    def load_clip_internal(self, clip_name1, clip_name2, clip_name3, clip_name4, model_type="hidream", device="default"):
+        clip_type = getattr(CLIPType, model_type.upper(), CLIPType.HIDREAM)
 
-    def load_clip_internal(self, clip_name1, clip_name2, clip_name3, clip_name4):
         clip_path1 = folder_paths.get_full_path_or_raise("text_encoders", clip_name1)
         clip_path2 = folder_paths.get_full_path_or_raise("text_encoders", clip_name2)
         clip_path3 = folder_paths.get_full_path_or_raise("text_encoders", clip_name3)
         clip_path4 = folder_paths.get_full_path_or_raise("text_encoders", clip_name4)
-        clip = load_clip(ckpt_paths=[clip_path1, clip_path2, clip_path3, clip_path4], embedding_directory=folder_paths.get_folder_paths("embeddings"))
+
+        model_options = {}
+        if device == "cpu":
+            model_options["load_device"] = model_options["offload_device"] = torch.device("cpu")
+
+        clip = load_clip(
+            ckpt_paths=[clip_path1, clip_path2, clip_path3, clip_path4],
+            embedding_directory=folder_paths.get_folder_paths("embeddings"),
+            clip_type=clip_type,
+            model_options=model_options
+        )
+
         return (clip,)
 
-
-
-# This is a placeholder for the EncodeConditioning class.
-class EncoderEncodeConditioning:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "clip": ("CLIP",),
-                "clip_pipeline": ("CLIP_PIPELINE", {"default": None}),
-            }
-        }
-    RETURN_TYPES = ("CONDITIONING", "CONDITIONING_PIPELINE")
-    RETURN_NAMES = ("conditioning", "conditioning_pipeline")
-    FUNCTION = "encode_conditioning"
-
-    CATEGORY = "clip-suite/conditioning"
-    def encode_conditioning(self, clip, clip_pipeline=None):
-        """
-        Encodes the conditioning from the provided CLIP model and pipeline.
-        """
-        if not isinstance(clip, CLIP):
-            raise ValueError(f"{self.__class__.__name__}: Provided clip is not a valid CLIP instance.")
-
-        # Convert the comfy CLIP to a MultiClip dictionary
-        multiclip_dict = translate_comfy_clip_to_multiclip(clip)
-
-        # Reconstruct the comfy CLIP from the MultiClip dictionary
-        reconstructed_clip = reconstruct_comfy_clip_from_multiclip(multiclip_dict)
-
-        # If a clip_pipeline is provided, use it; otherwise, return None
-        conditioning_pipeline = clip_pipeline if clip_pipeline else None
-
-        return (reconstructed_clip.conditioning, conditioning_pipeline)
-
-
-
-class AbsClipSplitter:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "clip": ("CLIP",),
-            },
-            "optional": {
-                "clip_pipeline": ("CLIP_PIPELINE", {"default": None}),
-            }
-        }
-
-    RETURN_TYPES = (
-        "ABS_CLIP_L",
-        "ABS_CLIP_G",
-        "ABS_CLIP_H",
-        "ABS_CLIP_VISION",
-        "ABS_T5",
-        "ABS_LLM",
-        "ABS_UNKNOWN_SD",
-    )
-    RETURN_NAMES = (
-        "clip_l",
-        "clip_g",
-        "clip_h",
-        "clip_vision",
-        "t5",
-        "llm",
-        "unknown",
-    )
-
-    FUNCTION = "split"
-    CATEGORY = "clip/custom_pipeline"
-
-    def split(self, clip):
-        # Step 1: Translate comfy CLIP to MultiClip dictionary
-        translated = translate_comfy_clip_to_multiclip(clip)
-
-        # Step 2: Prepare clean assignment dictionary
-        output = {
-            "clip_l": None,
-            "clip_g": None,
-            "clip_h": None,
-            "clip_vision": None,
-            "t5": None,
-            "llm": None,
-            "unknown": {},
-        }
-
-        # Step 3: Distribute parts properly
-        for subclip_name, subclip_data in translated.items():
-            lowered = subclip_name.lower()
-            if "clip_l" in lowered:
-                output["clip_l"] = subclip_data
-            elif "clip_g" in lowered:
-                output["clip_g"] = subclip_data
-            elif "clip_h" in lowered:
-                output["clip_h"] = subclip_data
-            elif "vision" in lowered:
-                output["clip_vision"] = subclip_data
-            elif "t5" in lowered:
-                output["t5"] = subclip_data
-            elif "bert" in lowered:
-                output["bert"] = subclip_data
-            elif "llama" in lowered:
-                output["llama"] = subclip_data
-            elif "llm" in lowered:
-                output["llm"] = subclip_data
-            else:
-                output["unknown"][subclip_name] = subclip_data
-
-        # Step 4: Return ordered tuple
-        return (
-            output["clip_l"],
-            output["clip_g"],
-            output["clip_h"],
-            output["clip_vision"],
-            output["t5"],
-            output["llm"],
-            output["unknown"] if output["unknown"] else None,
-        )
 
 
 
 from typing import Tuple
 
-from ..abs_sd.multi_clip_registry import MultiClipRegistry
-
-class CLIPPipelineTranslatorNode:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "clip": ("CLIP",),
-                "model_type": (["SDXL", "NoobXL", "HiDream", "PixArt", "Flux", "Custom"],),
-            }
-        }
-
-    RETURN_TYPES = ("CLIP_PIPELINE", "CLIP_ROUTER", "MULTICLIP_REGISTRY", "DICT")
-    RETURN_NAMES = ("pipeline", "clip_router", "multi_clip_dict", "meta")
-    FUNCTION = "translate"
-    CATEGORY = "ABS/CLIP"
-
-    def translate(self, clip, model_type: str) -> Tuple:
-        # Extract structured entries
-        raw_entries = MultiClipRegistry.extract_from_comfy(clip)
-        registry = MultiClipRegistry()
-        for entry in raw_entries.values():
-            registry.add_entry(entry)
-
-        # Build symbolic router dictionary
-        router = registry.to_cliprouter_dict()
-
-        # Placeholder pipeline (attach orchestration class here later)
-        pipeline = {
-            "registry": registry,
-            "router": router,
-            "source_model": clip,
-            "model_type": model_type
-        }
-
-        meta = {
-            "model_type": model_type,
-            "router_keys": list(router.keys()),
-            "entry_count": len(registry.entries)
-        }
-
-        return (pipeline, router, registry.entries, meta)
 
 
 class ClipSetDtypeNode:
@@ -332,6 +360,7 @@ class ClipSetDtypeNode:
             "required": {
                 "clip": ("CLIP",),
                 "dtype": (["float32", "float16", "bfloat16"], {"default": "float32"}),
+                "device": (["default", "cpu", "cuda"], {"default": "default", "advanced": True}),
             }
         }
 
@@ -340,7 +369,7 @@ class ClipSetDtypeNode:
     FUNCTION = "set_dtype"
     CATEGORY = "ABS/CLIP"
 
-    def set_dtype(self, clip, dtype: str) -> Tuple:
+    def set_dtype(self, clip, dtype: str, device: str) -> Tuple:
         """
         Sets the dtype of the provided CLIP model.
         """
@@ -350,5 +379,13 @@ class ClipSetDtypeNode:
             clip.to(torch.float16)
         elif dtype == "bfloat16":
             clip.to(torch.bfloat16)
+
+        if device == "cuda":
+            if torch.cuda.is_available():
+                clip.to("cuda")
+            else:
+                raise RuntimeError("CUDA is not available on this system.")
+        else:
+            clip.to("cpu")
 
         return (clip,)

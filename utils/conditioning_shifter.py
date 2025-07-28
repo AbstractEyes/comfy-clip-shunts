@@ -84,10 +84,17 @@ class ConditioningShifter:
             prompt,
             return_tensors="pt",
             padding=cfg.get("padding","max_length"),
-            truncation=True,
+            truncation=False,
             max_length=cfg.get("max_tokens",cfg.get("max_length", 512)),
         )
-        input_ids      = tokens["input_ids"].to(device)
+
+        if "bert" in encoder_pipe.get("name", ""):
+            # BERT tokenizers use special tokens like [CLS] and [SEP]
+            input_ids = ConditioningShifter.apply_gap_spacer(tokens["input_ids"], tokenizer, interval=77)
+        else:
+            input_ids = tokens["input_ids"]
+
+        input_ids = input_ids.to(device)
         attention_mask = tokens["attention_mask"].to(device)
 
         with torch.no_grad():
@@ -114,6 +121,37 @@ class ConditioningShifter:
             )
 
         return embeddings.to(device)
+
+
+    @staticmethod
+    def apply_gap_spacer(input_ids: torch.Tensor, tokenizer, interval: int = 77) -> torch.Tensor:
+        """
+        Replaces [PAD] tokens with [MASK], and inserts [SEP] every `interval` tokens.
+        This operation is destructive: it overwrites tokens at those exact positions.
+        """
+        input_ids = input_ids.clone()
+
+        pad_id = tokenizer.pad_token_id
+        mask_id = tokenizer.mask_token_id
+        sep_id = tokenizer.sep_token_id
+        cls_id = tokenizer.cls_token_id
+
+        # set the 0th token to [CLS]
+        input_ids[..., 0] = cls_id
+
+        # Replace [PAD] with [MASK] every other pad token
+        # we skip and leave one token, then apply mask to the next, and then check for pad
+        for idx in range(1, input_ids.shape[-1]):
+            if input_ids[..., idx] == pad_id:
+                if (idx % 2) == 0:
+                    input_ids[..., idx] = mask_id
+
+        # Insert [SEP] tokens every `interval` step
+        seq_len = input_ids.shape[-1]
+        for idx in range(0, seq_len, interval):
+            input_ids[..., idx] = sep_id
+
+        return input_ids
 
 
     @staticmethod
@@ -406,6 +444,20 @@ class ConditioningShifter:
                 kwarg_dict["pooled_outputs"] = pooled
 
             c.append([base_tensor, kwarg_dict])
+        return c
 
+    # [[ cond_tensor, { "pooled_outputs": pooled_tensor, ... } ], ...]
+    def clone_conditionings(self, conditioning: List[List]):
+        """
+        Clone the conditioning list to avoid modifying the original.
+        """
+        conditioning = conditioning.copy()
+        # [[ cond_tensor, { "pooled_outputs": pooled_tensor, ... } ], ...]
+        for (cond, key) in conditioning:
+            # Deep clone the internal tensors
+            cond[0] = cond[0].clone()
+            cond[1]["pooled_outputs"] = cond[1].get("pooled_outputs", None).clone() if cond[1] is not None else None
+
+        return conditioning
 
 

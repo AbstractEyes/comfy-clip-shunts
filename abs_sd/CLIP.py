@@ -105,7 +105,7 @@ class CLIP:
         """
         if device is None:
             device = self.cond_stage_model.device
-        self.cond_stage_model.to(device, dtype=dtype)
+        self.cond_stage_model.to(device)
         #self.tokenizer.to(device, dtype=dtype)
 
     def clone(self):
@@ -458,7 +458,11 @@ def load_text_encoder_state_dicts(state_dicts=[], embedding_directory=None, clip
                 clip_target.clip = pixart_t5.pixart_te(**t5xxl_detect(clip_data))
                 clip_target.tokenizer = pixart_t5.PixArtTokenizer
             elif clip_type == CLIPType.WAN:
-                clip_target.clip = wan.te(**t5xxl_detect(clip_data))
+                detections = t5xxl_detect(clip_data)
+                # remove distilled_t5 and unchained_t5 from detections
+                detections.pop("distilled_t5", None)
+                detections.pop("unchained_t5", None)
+                clip_target.clip = wan.te(**detections)
                 clip_target.tokenizer = wan.WanT5Tokenizer
                 tokenizer_data["spiece_model"] = clip_data[0].get("spiece_model", None)
             elif clip_type == CLIPType.HIDREAM:

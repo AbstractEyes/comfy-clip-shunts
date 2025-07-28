@@ -73,7 +73,9 @@ class IntegraOrchestrator:
 
             folds = []
             starts = self._compute_window_starts(T, a.squeeze(0))
-            pbar = ProgressBar(len(starts))
+            # get alucard's t_steps
+            steps = self.config.walker_config.t_steps
+            pbar = ProgressBar(len(starts * steps))
             for i, start in enumerate(starts):
                 model_management.throw_exception_if_processing_interrupted()
                 end = start + self.window_size
@@ -94,14 +96,14 @@ class IntegraOrchestrator:
                 #    d_win[:, 0, :] = -100.0
                 #    d_win[:, -1, :] = -100.0
 
-                logger.info(f"Window slice [{start}:{end}] a_win shape: {a_win.shape}")
-                folded = self.walker.walk(a_win, b_win, d_win)
-                logger.info(f"Folded shape: {folded.shape}")
-                pbar.update(i + 1)
+                #logger.info(f"Window slice [{start}:{end}] a_win shape: {a_win.shape}")
+                folded = self.walker.walk(a_win, b_win, d_win, pbar=pbar)
+                #logger.info(f"Folded shape: {folded.shape}")
+                pbar.update(1)
                 folds.append((start, end, folded))
 
             # Aggregate windowed output
-            logger.info(f"Aggregating {len(folds)} folds with total tokens: {T_full}")
+            #logger.info(f"Aggregating {len(folds)} folds with total tokens: {T_full}")
             aggregated = self.aggregate(folds, T)
 
             return aggregated, {

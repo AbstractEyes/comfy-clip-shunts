@@ -26,6 +26,7 @@ import torch
 from torch import nn
 
 from comfy import model_management
+from comfy.utils import ProgressBar
 from .formulas.schedules import FormulaScheduler   # Ensure schedules.py is in same directory or adjust import
 from .formulas.folding import FoldingKernel, get_folding_kernel  # Ensure folding.py is in same directory or adjust import
 from .formulas.padding import FoldingModifier  # Ensure padding.py is in same directory or adjust import
@@ -63,7 +64,8 @@ class SamplerCore(nn.Module):
             padding: FoldingModifier,  # padding/pooling control
             pooling: WindowPooling,  # pooling strategy, may implement again later
             pad_mask: Optional[torch.Tensor] = None,  # [B, T] bool
-            context: Optional[dict] = None  # extra runtime info
+            context: Optional[dict] = None,  # extra runtime info
+            pbar: Optional[ProgressBar] = None  # progress bar for tracking
     ) -> torch.Tensor:
         """
         Performs a folding schedule from embedding A to B using the scheduler & kernel logic.
@@ -97,6 +99,8 @@ class SamplerCore(nn.Module):
                     folded = padding.apply_padding(a, folded, pad_mask)
 
                 folds.append(folded)
+                if pbar is not None:
+                    pbar.update(1)
 
             # -- Step 4: Aggregate via Pooling
             #result = pooling.apply(self, folds)
@@ -118,9 +122,10 @@ class FieldWalker:
         self.core = SamplerCore()
 
     def walk(self, a: torch.Tensor, b: torch.Tensor, pad_mask: Optional[torch.Tensor] = None,
-             d: Optional[torch.Tensor] = None) -> torch.Tensor:
-        logger.info(
-            f"[Alucard] Walking: a {a.shape}, b {b.shape}, d {d.shape if d is not None else 'computed'}, t_steps={self.config.t_steps}")
+             d: Optional[torch.Tensor] = None,
+             pbar: Optional[ProgressBar] = None) -> torch.Tensor:
+        #logger.info(
+        #    f"[Alucard] Walking: a {a.shape}, b {b.shape}, d {d.shape if d is not None else 'computed'}, t_steps={self.config.t_steps}")
 
         d = d if d is not None else (b - a)
         context = self.config.context_overrides or {}
@@ -132,5 +137,6 @@ class FieldWalker:
             pooling=self.pooling,
             padding=self.padding,
             pad_mask=pad_mask,
-            context=context
+            context=context,
+            pbar=pbar
         )

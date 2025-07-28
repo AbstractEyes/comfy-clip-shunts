@@ -57,6 +57,44 @@ logger = logging.getLogger(__name__)
 
 
 from ..utils.conditioning_shifter import ConditioningShifter
+from ..utils.rose_util import rose_score
+
+import torch
+from ..utils.rose_util import rose_score
+
+class ApplyRoseScoreNode:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "encodings": ("MODULATION_CONDITIONING", {}),
+                "trajectory": ("CONDITIONING", {}),
+                "similarity": ("CONDITIONING", {}),
+                "conditionings": ("CONDITIONING", {}),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0}),
+            }
+        }
+
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION = "apply_rose_score"
+    CATEGORY = "utils/conditioning"
+
+    def apply_rose_score(self, encodings, trajectory, similarity, conditionings, strength):
+        output = []
+
+        # Extract shared vectors from input
+        need     = trajectory[0][0][0, 0]                        # (D,)
+        relation = similarity[0][0][0, 0]                        # (D,)
+        purpose  = encodings[0]["tensors"]["modulation"][0]     # (D,)
+
+        for combined, info in conditionings:
+            rose = rose_score(combined, need, relation, purpose).unsqueeze(-1).unsqueeze(-1)  # (B,T,1)
+            aligned = (1 - strength) * combined + strength * (combined * rose)
+            output.append([aligned, info])
+
+        return (output,)
+
 
 
 
@@ -1108,8 +1146,8 @@ class ABS_WAS_ConditioningBlend:
             b_avg = self.project_to_dominant_length(b_seqs, device)
             logger.info(f"a_avg shape: {a_avg.shape}")
             logger.info(f"b_avg shape: {b_avg.shape}")
-
-            logger.info(f"pooled shape: {pooled.shape}")
+            if pooled is not None:
+                logger.info(f"pooled shape: {pooled.shape}")
             b_pooleds = [
                 pooled for entry in conditioning_b
                 if (pooled := entry[1].get("pooled_output", None)) is not None
@@ -1200,3 +1238,72 @@ class ABS_WAS_ConditioningBlend:
                 return torch.cat([t, pad], dim=1)
 
         return pad_to(a.to(device)), pad_to(b.to(device))
+
+
+# ─────────────────────────────────────────────────────────────────────
+# ComfyUI Node
+# ─────────────────────────────────────────────────────────────────────
+class RoseSimilarityConditioning:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "x_input":   ("CONDITIONING",),
+                "need":      ("CONDITIONING",),
+                "relation":  ("CONDITIONING",),
+                "purpose":   ("CONDITIONING",),
+                "normalize_result": ("BOOLEAN", {"default": True}),
+                "pooled_output_source": (
+                    ["x_input", "need", "relation", "purpose", "none"],
+                    {"default": "x_input"}
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("rose_resonated",)
+    FUNCTION = "resonate"
+    CATEGORY = "conditioning/rose"
+
+    def resonate(self, x_input, need, relation, purpose, normalize_result=True, pooled_output_source="x_input"):
+        result = []
+
+        # Determine pooled output source
+        pooled = {
+            "x_input":  x_input[0][1].get("pooled_output", None),
+            "need":     need[0][1].get("pooled_output", None),
+            "relation": relation[0][1].get("pooled_output", None),
+            "purpose":  purpose[0][1].get("pooled_output", None),
+            "none":     None
+        }.get(pooled_output_source, None)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # move all to the correct device
+        x_input = [[x.clone().to(device), meta] for x, meta in x_input]
+        need = [[n.clone().to(device), meta] for n, meta in need]
+        relation = [[r.clone().to(device), meta] for r, meta in relation]
+        purpose = [[p.clone().to(device), meta] for p, meta in purpose]
+        for i, (x, meta) in enumerate(x_input):
+            n = need[i % len(need)][0]
+            r = relation[i % len(relation)][0]
+            p = purpose[i % len(purpose)][0]
+
+            # Align lengths
+            T = max(x.shape[1], n.shape[1], r.shape[1], p.shape[1])
+            def align(t): return F.pad(t, (0, 0, 0, T - t.shape[1])) if t.shape[1] < T else t[:, :T]
+            x, n, r, p = [align(t) for t in [x, n, r, p]]
+            rose_vals = rose_score(x, n, r, p).unsqueeze(-1)
+
+            modes = []
+            modes.append(x * rose_vals)
+            modes.append(x + rose_vals * (n - x))
+            modes.append((1 - rose_vals) * x + rose_vals * n)
+            modes.append(x + rose_vals * ((n + r) - p))
+            modes.extend([n, r, p])
+
+            averaged = torch.stack([normalize(m) for m in modes]).mean(dim=0)
+            if normalize_result:
+                averaged = normalize(averaged)
+
+            result.append([averaged, {"pooled_output": pooled}])
+
+        return (result,)

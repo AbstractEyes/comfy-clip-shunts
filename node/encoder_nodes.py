@@ -16,6 +16,109 @@ from ..sampler.formulas.folding import FoldingKernels
 from ..sampler.formulas.schedules import SchedulerModes
 
 
+class EncoderStackerNode:
+    """
+    Collects multiple encoder objects into a list stack.
+    Ensures all entries are flat encoder dicts, not nested lists.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "encoder1": ("ENCODER_PIPE", {}),
+            },
+            "optional": {
+                "encoder2": ("ENCODER_PIPE", {}),
+                "encoder3": ("ENCODER_PIPE", {}),
+                "encoder4": ("ENCODER_PIPE", {}),
+                "encoder5": ("ENCODER_PIPE", {}),
+            }
+        }
+
+    RETURN_TYPES = ("ENCODER_PIPE",)
+    RETURN_NAMES = ("encoders",)
+    FUNCTION = "stack"
+    CATEGORY = "encoder/core"
+
+    def stack(self, encoder1, encoder2=None, encoder3=None, encoder4=None, encoder5=None):
+        raw_inputs = [encoder1, encoder2, encoder3, encoder4, encoder5]
+        encoders = []
+
+        for entry in raw_inputs:
+            if entry is None:
+                continue
+            if isinstance(entry, list):
+                encoders.extend(entry)
+            else:
+                encoders.append(entry)
+
+        return (encoders,)
+
+
+
+
+from ..utils.conditioning_shifter import ConditioningShifter, ShiftConfig
+from .pipes import ConditionPipe, ConditionEmbeddingNode
+
+class EncodingGeneratorNode:
+    """
+    Processes a stacked list of encoders and generates a ConditionPipe.
+    Each encoder is sampled using ConditioningShifter and wrapped as a ConditionEmbeddingNode.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "encoder_stack": ("ENCODER_STACK", {}),
+                "prompt": ("STRING", {"default": "a photo of a robot.", "multiline": True}),
+                "device": (["cpu", "cuda", "mps"], {"default": "cuda" if torch.cuda.is_available() else "cpu"}),
+            }
+        }
+
+    RETURN_TYPES = ("CONDITION_PIPE",)
+    RETURN_NAMES = ("condition_pipe",)
+    FUNCTION = "generate"
+    CATEGORY = "encoder/core"
+
+    def generate(self, encoder_stack, prompt, device):
+        device = torch.device(device)
+        shift_cfg = ShiftConfig(prompt=prompt)
+
+        pipe = ConditionPipe()
+
+        for idx, encoder_entry in enumerate(encoder_stack):
+            model = encoder_entry.get("model")
+            tokenizer = encoder_entry.get("tokenizer")
+            config = encoder_entry.get("config", {})
+            encoder_id = config.get("model_name", f"encoder_{idx}")
+
+            # Extract tensor [B,T,D]
+            tensor = ConditioningShifter.extract_encoder_embeddings(encoder_entry, device, shift_cfg)
+
+            # Generate placeholder masks (can be enhanced)
+            B, T, D = tensor.shape
+            default_mask = torch.ones((B, T), device=device)
+            symbolic = torch.mean(tensor, dim=1)  # pooled
+            symbolic_mask = torch.ones_like(symbolic)
+
+            # Wrap
+            node = ConditionEmbeddingNode(
+                name=f"{encoder_id}_cond",
+                embedding=tensor,
+                embedding_mask=default_mask,
+                trajectory=tensor.clone(),  # use same for now
+                trajectory_mask=default_mask,
+                symbolic=symbolic,
+                symbolic_mask=symbolic_mask,
+                config={"encoder_id": encoder_id, "role": "conditioning"}
+            )
+            pipe.add(node)
+
+        return (pipe,)
+
+
 class EncoderEmbeddings:
     # a representative class for any reusable encoder embeddings created.
     # meant to be passed down the pipeline and used by any shunt-suite shaping nodes
@@ -203,7 +306,7 @@ class EncoderSamplerConfig:
                     "multiline": True
                 }), # the downstream respects the override flag, and if downstream has no prompt it uses the default
                 # a core fundamental trait of alucard
-                "steps": ("INT", {"default": 250, "min": 1, "max": 100000}),
+                "steps": ("INT", {"default": 100, "min": 1, "max": 100000}),
 
                 # Completely unimplemented, likely to never be used
                 "cfg_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0}),
@@ -213,12 +316,12 @@ class EncoderSamplerConfig:
                 "folding": (FoldingKernels.to_list(), {"default": FoldingKernels.shiva, "tooltip": "Folding mode to use for the encoder."}),
 
                 # implemented for testing, some schedulers fail and require edge cases to be handled
-                "folding_scheduler": (SchedulerModes.to_list(), {"default": SchedulerModes.COSINE, "tooltip": "Folding scheduler to use for the encoder."}),
+                "folding_scheduler": (SchedulerModes.to_list(), {"default": SchedulerModes.TAU, "tooltip": "Folding scheduler to use for the encoder."}),
 
                 # implemented for testing, disabled for debugging
                 "padding_mode": (FoldingPaddingTypes.to_list(), {"default": FoldingPaddingTypes.SPARSE, "tooltip": "Padding mode to use for the encoder."}),
                 # implemented for testing, works splendidly
-                "pooling_mode": (FoldingPoolingTypes.to_list(),{"default": FoldingPoolingTypes.SIMILARITY_MASK, "tooltip": "Pooling mode to use for the encoder."}),
+                "pooling_mode": (FoldingPoolingTypes.to_list(),{"default": FoldingPoolingTypes.BILINEAR, "tooltip": "Pooling mode to use for the encoder."}),
                 # predominantly ignored, but used in some places
                 "use_alpha_mask": ("BOOLEAN", {"default": True}),
                 # todo - flag implemented not respected, is implemented elsewhere
@@ -233,14 +336,14 @@ class EncoderSamplerConfig:
                 # connected, but not implemented everywhere
                 "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0}),
                 # connected, but only on some code paths
-                "temperature": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0}),
+                "temperature": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 50.0}),
                 # not connected
-                "tau": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0}),
+                "tau": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 50.0}),
                 #not connected, requires cache
                 "beams": ("INT", {"default": 4, "min": 1, "max": 32}),
 
                 #works
-                "max_windows": ("INT", {"default": 32, "min": 1, "max": 2048}),
+                "max_windows": ("INT", {"default": 64, "min": 1, "max": 2048}),
                 "context_window_size": ("INT", {"default": 2048, "min": 77, "max": 8192}),
                 "sliding_window_size": ("INT", {"default": 77, "min": 1, "max": 8192}),
                 "sliding_window_stride": ("INT", {"default": 77, "min": 1, "max": 2048}),
@@ -248,14 +351,15 @@ class EncoderSamplerConfig:
                 # projection in works, projection out is not implemented for model specifics yet but will work.
                 "force_projection_in": ("BOOLEAN", {"default": False, "tooltip": "Force projection of context window to model's max length."}),
                 "projection_dims_in": ("INT", {"default": 768, "min": 1, "max": 8192}),
-                "interpolation_method_in": (["linear", "slerp", "cosine", "sine", "mixed"], {"default": "linear", "tooltip": "Method to use for interpolating projections."}),
+                "interpolation_method_in": (["linear"], {"default": "linear", "tooltip": "Method to use for interpolating projections."}),
                 "force_projection_out": ("BOOLEAN", {"default": False, "tooltip": "Force projection of model output to context window size."}),
                 "projection_dims_out": ("INT", {"default": 768, "min": 1, "max": 8192}),
-                "interpolation_method_out": (["linear", "slerp", "cosine", "sine", "mixed"], {"default": "linear", "tooltip": "Method to use for interpolating model output projections."}),
+                "interpolation_method_out": (["linear"], {"default": "linear", "tooltip": "Method to use for interpolating model output projections."}),
                 "use_rose_similarity": ("BOOLEAN", {
                     "default": False,
                     "tooltip": "Use ROSE-based symbolic similarity instead of cosine similarity for resonance evaluation."
                 }),
+                "device": (["cpu", "cuda", "mps"], {"default": "cuda" if torch.cuda.is_available() else "cpu", "tooltip": "Device to run the encoder on."}),
             }
         }
 
@@ -293,7 +397,8 @@ class EncoderSamplerConfig:
                     force_projection_out,
                     projection_dims_out,
                     interpolation_method_out,
-                    use_rose_similarity):
+                    use_rose_similarity,
+                    device):
         """Prepare the configuration dict with the provided parameters."""
         return ({
             "override_context_window": override_context_window,
@@ -325,6 +430,7 @@ class EncoderSamplerConfig:
             "projection_dims_out": projection_dims_out,
             "interpolation_method_out": interpolation_method_out,
             "use_rose_similarity": use_rose_similarity,
+            "device": device,
         },)
 
 from ..sampler.alucard import FieldWalker, FieldWalkerConfig
@@ -349,6 +455,7 @@ import torch.nn.functional as F
 
 from ..utils.alignment import match_feature_dims, match_tokens
 from ..sampler.alucard_exceptions import AlucardShapeError
+
 
 
 BEATRIX_SPECIAL_TOKENS_AND_SHUNTS = [
@@ -377,6 +484,20 @@ BEATRIX_SPECIAL_TOKENS_AND_SHUNTS = [
     "<mask>", "<pad>", "<cls>", "<sep>", "<|startofaudio|>", "<|endofaudio|>",
 ]
 
+
+def remove_special_tokens(prompt):
+    """
+    Removes known special tokens from the prompt.
+    This is useful for cleaning up prompts before processing.
+    """
+    # find the array of tokens within the prompt to replace
+    for token in BEATRIX_SPECIAL_TOKENS_AND_SHUNTS:
+        if token in prompt:
+            # remove the prompt
+            prompt = prompt.replace(token, "")
+    return (prompt,)
+
+
 class RemoveSpecialTokens:
     @classmethod
     def INPUT_TYPES(cls):
@@ -388,9 +509,9 @@ class RemoveSpecialTokens:
 
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("cleaned_prompt",)
-    FUNCTION = "remove_special_tokens"
+    FUNCTION = "rremove_special_tokens"
     CATEGORY = "encoder/special_tokens"
-    def remove_special_tokens(self, prompt):
+    def rremove_special_tokens(self, prompt):
         """
         Removes known special tokens from the prompt.
         This is useful for cleaning up prompts before processing.
@@ -413,6 +534,7 @@ from ..utils.conditioning_shifter import ConditioningShifter, ShiftConfig
 from ..utils.alignment import match_project, match_feature_dims, match_tokens
 from ..sampler.formulas.schedules import FormulaScheduler
 from ..sampler.alucard_exceptions import AlucardShapeError
+
 
 
 logger = logging.getLogger(__name__)
@@ -510,6 +632,16 @@ class RecklessEncoderConfig:
 
 
 
+ENCODER_SUPPORTED_CLIP_TYPES = [
+    "clip_l", "clip_g", "clip_h", "clip_vision", "t5", "llama",
+    # these are the main supported types for the internal CLIP structure, there will be more.
+]
+
+ENCODER_SUPPORTED_MODEL_TYPES = [
+    "sdxl", "sd1", "flux", "hidream", "full_no_pool", "full_pool",
+    # currently only supports these four modes, but WILL be extended in the future.
+]
+
 class EncoderSampler:
     MODES = ["sdxl", "sd1", "flux", "hidream"]
 
@@ -520,17 +652,25 @@ class EncoderSampler:
                 "encoders": ("ENCODER_PIPE", {}),
                 "clip": ("CLIP", {}),
                 "config": ("ENCODER_SAMPLER_CONFIG", {}),
-                "mode": (EncoderSampler.MODES, {"default": "sdxl"}),
+                "mode": (ENCODER_SUPPORTED_MODEL_TYPES, {"default": "sdxl"}),
             },
             "optional": {
+                "negative_config": ("ENCODER_SAMPLER_CONFIG", {}),
                 "prompt_in": ("STRING", {"default": None, "multiline": True}),
                 "reckless_config": ("RECKLESS_ENCODER_CONFIG", {"default": {}}),
                 "clip_gate_config": ("ENCODER_GATE_CONFIG", {"default": {}}),
+                "negative_prompt_in": ("STRING", {"default": None, "multiline": True}),
             }
         }
 
-    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "DICT")
-    RETURN_NAMES = ("sampled_conditioning", "raw_conditioning", "debug_report")
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "DICT", "CONDITIONING", "CONDITIONING", "DICT")
+    RETURN_NAMES = (
+        "pos_sampled_conditioning",
+        "pos_raw_conditioning",
+        "pos_debug",
+        "neg_sampled_conditioning",
+        "neg_raw_conditioning",
+        "neg_debug")
     FUNCTION = "sample"
     CATEGORY = "encoder/sampler"
 
@@ -540,21 +680,46 @@ class EncoderSampler:
         clip,
         config,
         mode="sdxl",
+        negative_config=None,
         prompt_in=None,
         reckless_config=None,
         clip_gate_config=None,
+        negative_prompt_in=None,
     ):
-        prompt = prompt_in or config.get("context_window", "a photo of a robot.")
-        device = torch.device(config.get("device", "cpu"))
+        device = config.get("device", "cpu")
+        positive_prompt = prompt_in or (config.get("context_window", None) and config.get("override_context_window", False))
+        negative_prompt = negative_prompt_in or (negative_config and negative_config.get("context_window", None) and negative_config.get("override_context_window", False))
 
-        a_raws = [self.__extract_symbolic(pipe, prompt, device) for pipe in encoders]
+        pos_sampled_conditioning, pos_raw_conditioning, pos_debug = self.__prepare_conditioning(
+            positive_prompt, encoders, clip, device, mode, config=config, reckless_config=reckless_config, clip_gate_config=clip_gate_config
+        )
+        neg_sampled_conditioning, neg_raw_conditioning, neg_debug = self.__prepare_conditioning(
+            negative_prompt, encoders, clip, device, mode, config=(negative_config or config), reckless_config=reckless_config,
+            clip_gate_config=clip_gate_config
+        )
 
+        return (pos_sampled_conditioning, pos_raw_conditioning, pos_debug, neg_sampled_conditioning, neg_raw_conditioning, neg_debug)
+
+
+
+    def __prepare_conditioning(self, prompt, encoders, clip, device, mode, config=None, reckless_config=None, clip_gate_config=None):
+        #negative_prompt = negative_prompt_in or config.get("negative_prompt", None)
+
+        logger.info(f"[EncoderSampler] Sampling with mode: {mode} on device {device}")#, prompt: {prompt}, encoders: {encoders}")
+
+        a_raws = [self.__extract_symbolic(encoder, prompt, device) for encoder in encoders]
+
+        logger.info(f"[EncoderSampler] Pre-removal prompt {prompt}.")
+        prompt = remove_special_tokens(prompt)[0] if prompt else None
+        logger.info(f"[EncoderSampler] Cleaned prompt: {prompt}")
         cond, data = self.__schedule_and_extract_conds(clip, prompt, device, mode=mode)
         orig_clip_full = cond.clone()
-        orig_pool_dict_full = data.get("pool", None)
         orig_features_full = data.get("features", None)
-        orig_pool_full = orig_pool_dict_full.get("pooled_output").clone()
         orig_features_full = orig_features_full.clone() if orig_features_full is not None else None
+
+        pooled_output = data.get("pooled_output", None)
+        orig_pool_full = pooled_output.clone() if pooled_output is not None else None
+
         clip_slices = self.__slice_conds(cond.clone(), orig_pool_full, orig_features_full, mode=mode)
 
         folded_outputs: Dict[str, List[torch.Tensor]] = {}
@@ -575,24 +740,43 @@ class EncoderSampler:
         )
 
         pooled = conditioning[0][1].get("pooled_output", None)
-        if mode == "flux":
-            orig_pool_ready = {
-                "pooled_output": orig_pool_full.clone() if orig_pool_full is not None else None
-            }
-        else:
-            orig_pool_ready = {
-                "pooled_output": orig_pool_full.clone()# if pooled is not None else None
-            }
+        orig_pool_ready = {
+            "pooled_output": (orig_pool_full.clone() if orig_pool_full is not None else None)
+        }
         raw_conditioning = [[orig_clip_full, orig_pool_ready]]
         # log the conds and the pools of both outputs
 
         return conditioning, raw_conditioning, {}
 
+
     def __extract_symbolic(self, pipe, prompt, device):
-        if "model" in pipe:
-            pipe["model"].to(device)
-        shift_cfg = ShiftConfig(prompt=prompt)
-        return ConditioningShifter.extract_encoder_embeddings(pipe, device, shift_cfg).to(device)
+        encoder_type = pipe.get("type", "unknown").lower()
+        clip_like = encoder_type in ENCODER_SUPPORTED_CLIP_TYPES
+        # a small set of tests to run, so far showing promise
+
+        if clip_like:
+            clip_model = pipe["clip"]
+            #clip_model.load_model()
+            tokens = clip_model.tokenize(prompt, tokenizer_options={
+                "padding": "max_length",
+                "truncation": True,
+                "max_tokens": 77
+            })
+
+
+            with torch.no_grad():
+                full_cond = clip_model.encode_from_tokens_scheduled(tokens)
+                cond = full_cond[0][0]  # Extract the first element which is the condition tensor
+                if cond is None:
+                    raise ValueError("Could not extract CLIP condition from scheduled encoding.")
+            return cond.to(device)
+
+
+        else:
+            if "model" in pipe:
+                pipe["model"].to(device)
+            shift_cfg = ShiftConfig(prompt=prompt)
+            return ConditioningShifter.extract_encoder_embeddings(pipe, device, shift_cfg).to(device)
 
     def __schedule_and_extract_conds(self, clip, prompt, device, mode):
         clip_l_tokens = None
@@ -614,6 +798,15 @@ class EncoderSampler:
             # Place upstream pool in the pool dict - it's the clip_l features without the tokens
             logger.info(f"[EncoderSampler] Using Flux mode, cond shape: {cond.shape if cond is not None else 'None'}")
             pool = None
+        elif mode == "full_no_pool": # many models use this mode, so we can assume it is a full model without pooling
+            # extract from the clip and return a pool with "pool": None
+            # assume the tokenizer already knows the max length and whatever else
+            tokens = clip.tokenize(prompt)
+            raw = clip.encode_from_tokens_scheduled(tokens)
+            cond = raw[0][0]
+            # no features either, we don't need them
+            return cond.to(device), { "pooled_output": None }
+
         else:
             tokens = clip.tokenize(
                 prompt,
@@ -624,7 +817,7 @@ class EncoderSampler:
             pool = raw[0][1]
             features = None #raw[0][2] if len(raw[0]) > 2 else None
 
-        return cond.to(device), {"features": features, "pool": pool}
+        return cond.to(device), {"features": features, "pooled_output": pool}
 
     def __slice_conds(self, clip_full, pool_dict, other=None, mode="sdxl"):
         slices = {}
@@ -639,6 +832,8 @@ class EncoderSampler:
         elif mode == "hidream":
             slices["clip_l"] = clip_full[:, :, :768]
             slices["clip_g"] = clip_full[:, :, 768:2048]
+        elif mode == "full_no_pool":
+            slices["clip_l"] = clip_full # we'll assume this as a similar to sd1 mode
         return slices
 
     def _run_path(self, a_raw, cond_name, clip_slice, cfg, device):
@@ -692,72 +887,68 @@ class EncoderSampler:
         ))
 
     def _pack_conditioning_from_registry(
-            self,
-            folded_outputs: Dict[str, List[torch.Tensor]],
-            cfg: Dict[str, Any],
-            device: torch.device,
-            mode: str = "sdxl",
+        self,
+        folded_outputs: Dict[str, List[torch.Tensor]],
+        cfg: Dict[str, Any],
+        device: torch.device,
+        mode: str = "sdxl",
     ):
         """
-        Assemble final conditioning tensor and attach a valid pooled_output key for ComfyUI runtime.
-        Token count (dim=1) is enforced to match across parts.
+        Assemble conditioning tensors per encoder, preserving alignment per source.
+        Output shape: List of [B,T,D] folded embeddings, one per encoder.
         """
-        parts = []
-        if mode == "sdxl":
-            parts.extend(folded_outputs.get("clip_l", []))
-            parts.extend(folded_outputs.get("clip_g", []))
-        elif mode == "sd1":
-            parts.extend(folded_outputs.get("clip_l", []))
-        elif mode == "flux":
-            parts.extend(folded_outputs.get("t5", []))
-            #parts.extend(folded_outputs.get("clip_l", []))
-        else:
-            for k in folded_outputs:
-                parts.extend(folded_outputs[k])
+        # Validate input
+        if not folded_outputs:
+            raise RuntimeError("No folded outputs to assemble.")
 
-        if not parts:
-            raise RuntimeError("No folded parts to pack for conditioning.")
+        # Determine slice keys used
+        keys = {
+            "sdxl": ["clip_l", "clip_g"],
+            "sd1": ["clip_l"],
+            "flux": ["t5"],
+        }.get(mode, list(folded_outputs.keys()))
 
-        # ── Token Length Harmonization ────────────────────────────────
-        token_lengths = [p.shape[1] for p in parts]
-        if len(set(token_lengths)) > 1:
-            logger.warning(f"[EncoderSampler] Token mismatch: {[p.shape for p in parts]}")
+        # Infer encoder count
+        encoder_count = max(len(folded_outputs.get(k, [])) for k in keys)
+
+        conditioning = []
+        for i in range(encoder_count):
+            parts = []
+            for key in keys:
+                if i < len(folded_outputs.get(key, [])):
+                    parts.append(folded_outputs[key][i])
+
+            if not parts:
+                continue
+
+            # Align token count
+            token_lengths = [p.shape[1] for p in parts]
             target_T = min(token_lengths)
-            logger.info(f"[EncoderSampler] Truncating all tensors to token length {target_T}")
             parts = [p[:, :target_T, :] for p in parts]
-        else:
-            target_T = token_lengths[0]
 
-        # ── Concatenate along feature dimension ───────────────────────
-        folded = torch.cat(parts, dim=-1)  # [B, T, D_total]
-        B, T, D = folded.shape
+            # Concatenate
+            folded = torch.cat(parts, dim=-1)
+            B, T, D = folded.shape
 
-        # ── Patch CLS/EOS Tokens ──────────────────────────────────────
-        start = torch.zeros(B, 1, D, device=device)
-        end = torch.zeros(B, 1, D, device=device)
-        body = folded[:, 1:-1, :]
-        patched = torch.cat([start, body, end], dim=1)
+            # Patch CLS/END
+            start = torch.zeros(B, 1, D, device=device)
+            end = torch.zeros(B, 1, D, device=device)
+            body = folded[:, 1:-1, :]
+            patched = torch.cat([start, body, end], dim=1)
 
-        # ── Pooled Output by Mode ─────────────────────────────────────
-        if mode == "flux":
-            if "clip_l" not in folded_outputs:
-                raise RuntimeError("Flux mode requires folded 'clip_l' features for pooling.")
-            pooled = patched[:, -1, :]
-        elif mode == "sdxl":
-            pooled = patched[:, -1, 768:2048]
-        elif mode == "sd1":
-            pooled = patched[:, -1, :768]
-        else:
-            pooled = patched[:, -1, :]
+            # Pooled strategy
+            if mode == "sdxl":
+                pooled = patched[:, -1, 768:2048]
+            elif mode == "sd1":
+                pooled = patched[:, -1, :768]
+            elif mode == "flux":
+                pooled = patched[:, -1, :]
+            else:
+                pooled = patched[:, -1, :]
 
-        # ── Ensure Shape + Return ComfyUI Conditioning ────────────────
-        #if pooled.ndim == 3:
-        #    pooled = pooled.squeeze(1)
-        #assert isinstance(pooled, torch.Tensor), "pooled_output must be a tensor"
-        #assert pooled.ndim == 2, f"pooled_output must be [B, D], got {pooled.shape}"
+            conditioning.append([patched.cpu().clone(), {"pooled_output": pooled.cpu().clone()}])
 
-        #logger.info(f"[EncoderSampler] Final patched shape: {patched.shape}, pooled shape: {pooled.shape}")
-        return [[patched.cpu().clone(), {"pooled_output": pooled.cpu().clone()}]]
+        return conditioning
 
     def _pool_clip_l_tokens(self, walked_clip_l: torch.Tensor, strategy: str = "last") -> torch.Tensor:
         if strategy == "mean":

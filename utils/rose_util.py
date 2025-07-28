@@ -9,6 +9,7 @@ def cosine_similarity(a: torch.Tensor, b: torch.Tensor, eps: float = 1e-8) -> to
     b_norm = normalize(b, eps)
     return (a_norm * b_norm).sum(dim=-1)
 
+
 def rose_score(x: torch.Tensor, need: torch.Tensor, relation: torch.Tensor, purpose: torch.Tensor) -> torch.Tensor:
     x = normalize(x)
     need = normalize(need)
