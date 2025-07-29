@@ -65,6 +65,8 @@ class CLIP:
         params = target.params.copy()
         clip = target.clip
         tokenizer = target.tokenizer
+        # remove dtype from model_options if it exists
+        model_options.pop("dtype", None)
 
         load_device = model_options.get("load_device", model_management.text_encoder_device())
         offload_device = model_options.get("offload_device", model_management.text_encoder_offload_device())
@@ -97,7 +99,7 @@ class CLIP:
         logging.info("CLIP/text encoder model load device: {}, offload device: {}, current: {}, dtype: {}".format(load_device, offload_device, params['device'], dtype))
         self.tokenizer_options = {}
 
-    def to(self, dtype, device=None):
+    def to(self, dtype=None, device=None):
         """
         Move the CLIP model to a specific device and change its dtype.
         :param dtype: The target dtype for the model.
@@ -470,9 +472,20 @@ def load_text_encoder_state_dicts(state_dicts=[], embedding_directory=None, clip
                 clip_target.clip = hidream.hidream_clip(**t5xxl_detect(clip_data),
                                                                         clip_l=False, clip_g=False, t5=True, llama=False, dtype_llama=None, llama_scaled_fp8=None)
                 clip_target.tokenizer = hidream.HiDreamTokenizer
-            else: #CLIPType.MOCHI
+            elif clip_type == CLIPType.MOCHI:
                 clip_target.clip = genmo.mochi_te(**t5xxl_detect(clip_data))
                 clip_target.tokenizer = genmo.MochiT5Tokenizer
+            else:
+                if model_options.get("distilled_t5", False):
+                    logger.info("Using Distilled T5-XXL text encoder")
+                    # remove dtype arg from the model_options for compatibility
+                    model_options.pop("dtype", None)
+                    clip_target.clip = sd3_clip.sd3_clip(clip_l=False, clip_g=False, t5=True, **t5xxl_detect(clip_data))
+                    clip_target.tokenizer = sd3_clip.T5XXLTokenizer
+                else:
+                    logger.info("Using T5-XXL text encoder - unchained, hijacking sd3_clip")
+                    clip_target.clip = sd3_clip.sd3_clip(clip_l=False, clip_g=False, t5=True, **t5xxl_detect(clip_data))
+                    clip_target.tokenizer = sd3_clip.T5XXLTokenizer
         elif te_model == TEModel.T5_XXL_OLD:
             clip_target.clip = cosmos.te(**t5xxl_detect(clip_data))
             clip_target.tokenizer = cosmos.CosmosT5Tokenizer

@@ -633,7 +633,7 @@ class RecklessEncoderConfig:
 
 
 ENCODER_SUPPORTED_CLIP_TYPES = [
-    "clip_l", "clip_g", "clip_h", "clip_vision", "t5", "llama",
+    "clip_l", "clip_g", "clip_h", "clip_vision", "t5", "llama", "t5_unchained"
     # these are the main supported types for the internal CLIP structure, there will be more.
 ]
 
@@ -756,11 +756,15 @@ class EncoderSampler:
 
         if clip_like:
             clip_model = pipe["clip"]
+            if encoder_type == "t5":
+                max_tokens = 512
+            else:
+                max_tokens = 77
             #clip_model.load_model()
             tokens = clip_model.tokenize(prompt, tokenizer_options={
                 "padding": "max_length",
                 "truncation": True,
-                "max_tokens": 77
+                "max_tokens": max_tokens
             })
 
 
@@ -806,18 +810,18 @@ class EncoderSampler:
             cond = raw[0][0]
             # no features either, we don't need them
             return cond.to(device), { "pooled_output": None }
-
         else:
             tokens = clip.tokenize(
                 prompt,
-                tokenizer_options={"padding": "max_length", "max_tokens": 77, "truncation": True}
+                tokenizer_options={"padding": "max_length", "min_length": 512, "max_length": 512, "max_tokens": 512, "truncation": True}
             )
+
             raw = clip.encode_from_tokens_scheduled(tokens)
             cond = raw[0][0]
             pool = raw[0][1]
             features = None #raw[0][2] if len(raw[0]) > 2 else None
 
-        return cond.to(device), {"features": features, "pooled_output": pool}
+        return cond.to(device), {"features": features, "pooled_output": pool.get("pooled_output", None) if pool else None}
 
     def __slice_conds(self, clip_full, pool_dict, other=None, mode="sdxl"):
         slices = {}
@@ -835,6 +839,7 @@ class EncoderSampler:
         elif mode == "full_no_pool":
             slices["clip_l"] = clip_full # we'll assume this as a similar to sd1 mode
         return slices
+
 
     def _run_path(self, a_raw, cond_name, clip_slice, cfg, device):
         if a_raw.size(-1) != clip_slice.size(-1) or cfg.get("force_projection_in", False):
@@ -1038,7 +1043,6 @@ class LegacyEncoderSampler:
     RETURN_NAMES = ("conditioning", "debug_report")
     FUNCTION = "sample"
     CATEGORY = "encoder/sampler"
-
 
     # ------------------------------------------------------------------ #
 

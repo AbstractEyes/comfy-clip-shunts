@@ -1,7 +1,7 @@
 """
     Direct port from COMFYUI with modifications for SD3
 """
-from comfy import sd1_clip
+from .sd1_clip import SDClipModel, SDTokenizer
 from comfy import sdxl_clip
 from transformers import T5TokenizerFast
 from .t5 import T5 as t5a
@@ -12,7 +12,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class T5XXLModel(sd1_clip.SDClipModel):
+class T5XXLModel(SDClipModel):
     def __init__(self, device="cpu", layer="last", layer_idx=None, dtype=None, attention_mask=False, model_options={}):
         logger.info("Initializing T5XXLModel with options: {}".format(model_options))
         if model_options.get("unchained_t5", False):
@@ -36,6 +36,7 @@ class T5XXLModel(sd1_clip.SDClipModel):
 
         model_options = {**model_options, "model_name": name}
         super().__init__(device=device,
+                         max_length=512,
                          layer=layer,
                          layer_idx=layer_idx,
                          textmodel_json_config=textmodel_json_config,
@@ -59,7 +60,7 @@ def t5_xxl_detect(state_dict, prefix=""):
 
     return out
 
-class T5XXLTokenizer(sd1_clip.SDTokenizer):
+class T5XXLTokenizer(SDTokenizer):
     def __init__(self, embedding_directory=None, tokenizer_data={}, min_length=77, max_length=99999999):
         tokenizer_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "t5_tokenizer")
         super().__init__(tokenizer_path, embedding_directory=embedding_directory, pad_with_end=False, embedding_size=4096, embedding_key='t5xxl', tokenizer_class=T5TokenizerFast, has_start_token=False, pad_to_max_length=False, max_length=max_length, min_length=min_length, tokenizer_data=tokenizer_data)
@@ -67,7 +68,7 @@ class T5XXLTokenizer(sd1_clip.SDTokenizer):
 
 class SD3Tokenizer:
     def __init__(self, embedding_directory=None, tokenizer_data={}):
-        self.clip_l = sd1_clip.SDTokenizer(embedding_directory=embedding_directory, tokenizer_data=tokenizer_data)
+        self.clip_l = SDTokenizer(embedding_directory=embedding_directory, tokenizer_data=tokenizer_data)
         self.clip_g = sdxl_clip.SDXLClipGTokenizer(embedding_directory=embedding_directory, tokenizer_data=tokenizer_data)
         self.t5xxl = T5XXLTokenizer(embedding_directory=embedding_directory, tokenizer_data=tokenizer_data)
 
@@ -89,7 +90,7 @@ class SD3ClipModel(torch.nn.Module):
         super().__init__()
         self.dtypes = set()
         if clip_l:
-            self.clip_l = sd1_clip.SDClipModel(layer="hidden", layer_idx=-2, device=device, dtype=dtype, layer_norm_hidden_state=False, return_projected_pooled=False, model_options=model_options)
+            self.clip_l = SDClipModel(layer="hidden", layer_idx=-2, device=device, dtype=dtype, layer_norm_hidden_state=False, return_projected_pooled=False, model_options=model_options)
             self.dtypes.add(dtype)
         else:
             self.clip_l = None
@@ -169,6 +170,7 @@ class SD3ClipModel(torch.nn.Module):
                 out = t5_out
 
         if out is None:
+            logger.warning("No text encoder output generated, returning empty tensors.")
             out = torch.zeros((1, 77, 4096), device=comfy.model_management.intermediate_device())
 
         if pooled is None:
@@ -186,7 +188,7 @@ class SD3ClipModel(torch.nn.Module):
 
 def sd3_clip(clip_l=True, clip_g=True, t5=True, dtype_t5=None, t5xxl_scaled_fp8=None, t5_attention_mask=False, unchained_t5=False, distilled_t5=False, device="cpu", dtype=None, model_options={}):
     class SD3ClipModel_(SD3ClipModel):
-        def __init__(self, device="cpu", dtype=None, model_options={}, unchained_t5=unchained_t5, distilled_t5=distilled_t5):
+        def __init__(self, device="cpu", dtype=None, model_options={}, unchained_t5=unchained_t5 or True, distilled_t5=distilled_t5 or False):
             if t5xxl_scaled_fp8 is not None and "t5xxl_scaled_fp8" not in model_options:
                 model_options = model_options.copy()
                 model_options["t5xxl_scaled_fp8"] = t5xxl_scaled_fp8

@@ -64,11 +64,29 @@ class CollapseFolding(FoldingKernel):
         return b * collapse.unsqueeze(-1)
 
 
+import torch.nn as nn
+
 class ConcatFlattenFolding(FoldingKernel):
-    def apply(self, a, b, t, alpha=None, context=None):
-        concat = torch.cat([a, b], dim=-1)
-        proj = torch.nn.Linear(concat.size(-1), a.size(-1)).to(a.device)
-        return proj(concat)
+    def __init__(self):
+        super().__init__()
+        self.proj = None
+        self.last_dim = None
+
+    def apply(self, a: torch.Tensor, b: torch.Tensor, t=None, alpha=None, context=None):
+        if a.ndim != 3 or b.ndim != 3:
+            raise ValueError(f"[ConcatFlattenFolding] Expected [B,T,D] tensors, got {a.shape} and {b.shape}")
+
+        B, T, D = a.shape
+        key_dim = D
+
+        if self.proj is None or self.last_dim != key_dim:
+            self.last_dim = key_dim
+            self.proj = nn.Linear(D * 2, D).to(a.device)
+
+        concat = torch.cat([a, b], dim=-1)          # [B, T, 2D]
+        flat = concat.view(B * T, -1)               # [B*T, 2D]
+        out = self.proj(flat)                       # [B*T, D]
+        return out.view(B, T, D)                    # [B, T, D]
 
 
 class ZeusFolding(FoldingKernel):

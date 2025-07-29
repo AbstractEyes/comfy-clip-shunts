@@ -1154,6 +1154,7 @@ class ABS_WAS_ConditioningBlend:
             ]
             pb_avg = torch.stack(b_pooleds).mean(dim=0) if b_pooleds else None
 
+
             # Apply blend
             a_proj, b_proj = self.align_pair_length(a_avg, b_avg, device)
             cond = normalize(blend_fn(a_proj, b_proj, 1 - blend_weight))

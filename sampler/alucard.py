@@ -121,6 +121,7 @@ class FieldWalker:
         self.pooling = WindowPooling({"pooling_mode": config.pooling_mode})
         self.core = SamplerCore()
 
+
     def walk(self, a: torch.Tensor, b: torch.Tensor, pad_mask: Optional[torch.Tensor] = None,
              d: Optional[torch.Tensor] = None,
              pbar: Optional[ProgressBar] = None) -> torch.Tensor:

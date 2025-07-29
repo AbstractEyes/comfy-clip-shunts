@@ -144,9 +144,10 @@ class ClipEncoderLoader:
                     [
                         "stable_diffusion", "novelai_v2", "stable_cascade", "sd3",
                         "stable_audio", "mochi", "ltxv", "pixart", "cosmos",
-                        "lumina2", "wan", "hidream", "chroma", "ace", "omnigen2"
+                        "lumina2", "wan", "hidream", "chroma", "ace", "omnigen2",
+                        "flux", "undefined"
                     ],
-                    {"default": "stable_diffusion", "tooltip": "Which model format this CLIP file was trained for"}
+                    {"default": "undefined", "tooltip": "Which model format this CLIP file was trained for"}
                 ),
                 "encoder_type": (
                     [
@@ -188,6 +189,7 @@ class ClipEncoderLoader:
         encoder_pipe = [{
             "clip": clip,
             "type": encoder_type,
+            "tokenizer": clip.tokenizer,
         }]
 
         return clip, encoder_pipe
