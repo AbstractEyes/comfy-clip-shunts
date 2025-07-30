@@ -3,6 +3,8 @@ import numpy as np
 import logging
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
+import torch
+import torch.nn.functional as F
 
 from ..model.dual_stream_adapter_model import ConditionModulationShuntAdapter, reshape_for_shunt
 
@@ -35,6 +37,11 @@ class ShiftConfig:
     vram_capacity: float = 0.1  # Percentage of VRAM to use
     eager_offloading: bool = True  # Whether to offload tensors to CPU after processing, or cache to disc if overwhelmed
     squash_similarity: bool = True  #
+
+    enable_rope_spiral: bool = False
+    rope_phase_offsets: List[int] = (1, 2, 4, 8, 16)
+    rope_anchor_mode: str = "pooled"  # or "first", "mean", or "custom"
+    spiral_probe_token: Optional[str] = None  # inject special token if needed
 
     # The models are very small, but the entire structure around calculating the embeddings is quite large;
     # This requires that we need to be careful with memory usage.
@@ -97,9 +104,16 @@ class ConditioningShifter:
         input_ids = input_ids.to(device)
         attention_mask = tokens["attention_mask"].to(device)
 
+
         with torch.no_grad():
             model.to(device)
             mtype = encoder_pipe["config"].get("model_type","")
+            # --- Auto-enable RoPE spiral if RoPE-aware encoder is used ---
+            name = encoder_pipe.get("name", "").lower()
+            if "bert-beatrix" in name or "nomic-bert" in name:
+                shift_config.enable_rope_spiral = True
+                shift_config.rope_phase_offsets = [1, 2, 4, 8, 16]
+                shift_config.rope_anchor_mode = "pooled"
             if "t5" in mtype:
                 embeddings = model.encoder(input_ids=input_ids,
                                            attention_mask=attention_mask
@@ -461,3 +475,119 @@ class ConditioningShifter:
         return conditioning
 
 
+    @staticmethod
+    def get_rope_resonance(
+            embedding: torch.Tensor,
+            attention_mask: torch.Tensor,
+            offsets: List[int],
+            anchor: Optional[torch.Tensor] = None,
+            anchor_mode: str = "pooled"
+    ) -> Dict[str, float]:
+        """
+        Computes RoPE-aware resonance statistics from token embeddings:
+        - spiral_sim: average phase alignment across offsets
+        - harmonic_trace: phase stability (std dev)
+        - anchor_similarity: comparison with anchor vector
+        """
+        B, T, D = embedding.shape
+        if B != 1:
+            raise ValueError("Only batch size 1 supported for resonance")
+
+        em = embedding[0][attention_mask[0].bool()]  # [T_active, D]
+        T_active = em.shape[0]
+        if T_active < 2:
+            return {"spiral_sim": 0.0, "harmonic_trace": 0.0, "anchor_similarity": 0.0}
+
+        sims = []
+        for offset in offsets:
+            if offset >= T_active:
+                continue
+            sims.append(torch.cosine_similarity(em[:-offset], em[offset:], dim=-1).mean())
+
+        if not sims:
+            return {"spiral_sim": 0.0, "harmonic_trace": 0.0, "anchor_similarity": 0.0}
+
+        sim_tensor = torch.stack(sims)
+        spiral_sim = sim_tensor.mean().item()
+        harmonic_trace = sim_tensor.std().item()
+
+        anchor_similarity = 0.0
+        if anchor is not None:
+            pooled = ConditioningShifter._select_anchor_vector(em.unsqueeze(0), anchor_mode=anchor_mode)[0]
+            anchor_similarity = F.cosine_similarity(anchor.to(pooled.device).unsqueeze(0), pooled.unsqueeze(0),
+                                                    dim=-1).item()
+
+        return {
+            "spiral_sim": spiral_sim,
+            "harmonic_trace": harmonic_trace,
+            "anchor_similarity": anchor_similarity
+        }
+
+    @staticmethod
+    def _select_anchor_vector(
+            embedding: torch.Tensor,
+            anchor_mode: str = "pooled"
+    ) -> torch.Tensor:
+        """
+        Chooses a vector to represent the prompt for anchor comparison.
+        """
+        if embedding.dim() == 2:
+            embedding = embedding.unsqueeze(0)
+
+        if anchor_mode in {"pooled", "mean"}:
+            return embedding.mean(dim=1)
+        elif anchor_mode == "first":
+            return embedding[:, 0, :]
+        elif anchor_mode == "last":
+            return embedding[:, -1, :]
+        else:
+            raise ValueError(f"Unknown anchor_mode: {anchor_mode}")
+
+    @staticmethod
+    def compute_resonance_potential(
+        embedding: torch.Tensor,
+        attention_mask: torch.Tensor,
+        offsets: List[int],
+        mode: str = "spiral_gate"
+    ) -> torch.Tensor:
+        """
+        Returns a [B, T, 1] potential mask for folding modulation.
+        Modes:
+            - "spiral_gate": mean cosine similarity across offsets
+            - "harmonic_std": inverse stddev of similarity across offsets
+        """
+        B, T, D = embedding.shape
+        if B != 1:
+            raise ValueError("Only batch size 1 is supported for resonance potential.")
+        em = embedding[0][attention_mask[0].bool()]  # [T_active, D]
+        T_active = em.shape[0]
+
+        # Initialize scalar potentials per token
+        potentials = torch.ones(T_active, device=embedding.device)
+
+        if T_active < 2:
+            return potentials.view(1, T_active, 1)
+
+        sim_matrix = []
+        for offset in offsets:
+            if offset >= T_active:
+                continue
+            sim = F.cosine_similarity(em[:-offset], em[offset:], dim=-1)  # [T_active - offset]
+            padded = F.pad(sim, (offset, 0), value=1.0)  # pad left with identity
+            sim_matrix.append(padded)
+
+        if not sim_matrix:
+            return potentials.view(1, T_active, 1)
+
+        sim_stack = torch.stack(sim_matrix)  # [len(offsets), T_active]
+
+        if mode == "spiral_gate":
+            potentials = sim_stack.mean(dim=0)  # [T]
+        elif mode == "harmonic_std":
+            potentials = 1.0 / (1.0 + sim_stack.std(dim=0))  # [T]
+        else:
+            raise ValueError(f"Unknown resonance mode: {mode}")
+
+        # Clamp and reshape for broadcast
+        potentials = potentials.clamp(min=0.0, max=1.0).view(1, -1, 1)  # [1, T, 1]
+        return F.pad(potentials, (0, 0, 0, T - T_active), value=1.0)  # pad back to full T

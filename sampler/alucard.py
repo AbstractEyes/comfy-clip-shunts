@@ -38,6 +38,7 @@ from .alucard_exceptions import validate_shapes  # Ensure alucard_error.py is in
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class FieldWalkerConfig:
     name: str = ""
@@ -50,7 +51,21 @@ class FieldWalkerConfig:
     context_overrides: Optional[dict] = None
     window_managed_externally: bool = True
 
+    def __copy__(self):
+        # Create a shallow copy of the dataclass
+        return FieldWalkerConfig(
+            name=self.name,
+            folding_mode=self.folding_mode,
+            scheduler_mode=self.scheduler_mode,
+            t_steps=self.t_steps,
+            padding_mode=self.padding_mode,
+            pooling_mode=self.pooling_mode,
+            scheduler_config=self.scheduler_config.copy() if self.scheduler_config else None,
+            context_overrides=self.context_overrides.copy() if self.context_overrides else None,
+            window_managed_externally=self.window_managed_externally
+        )
 
+we_running_it = True  # Flag to control whether the walker is running
 class SamplerCore(nn.Module):
 
     def sample(
@@ -72,12 +87,20 @@ class SamplerCore(nn.Module):
         Delta field `d` allows guided interpolation from base → target.
         Returns either stacked, pooled, or concatenated embeddings.
         """
+        global we_running_it
         with torch.autocast(device_type=a.device.type, enabled=a.device.type != 'cpu'):
             validate_shapes(a, b)
             #they're ready, lets clone them.
             a = a.clone()
             b = b.clone()
             d = d.clone() if d is not None else (b - a).clone()
+            potential = context.get("resonance_potential", None)
+            if potential is not None:
+                if we_running_it:
+                    logger.info(f"[Alucard] Using potential: {potential}")
+                    we_running_it = False # only show once.
+                d = d * potential  # [B, T, D] or [B, T, 1]
+
             B, T, D = a.shape
             folds = []
             context = context or {}
@@ -122,7 +145,10 @@ class FieldWalker:
         self.core = SamplerCore()
 
 
-    def walk(self, a: torch.Tensor, b: torch.Tensor, pad_mask: Optional[torch.Tensor] = None,
+    def walk(self,
+             a: torch.Tensor,
+             b: torch.Tensor,
+             pad_mask: Optional[torch.Tensor] = None,
              d: Optional[torch.Tensor] = None,
              pbar: Optional[ProgressBar] = None) -> torch.Tensor:
         #logger.info(

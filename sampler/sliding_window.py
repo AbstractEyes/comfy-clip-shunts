@@ -38,6 +38,23 @@ class ShuntStackConfig:
     padding: str = "max_length"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
+    def __copy__(self):
+        return ShuntStackConfig(
+            context_window=self.context_window,
+            override_context_window=self.override_context_window,
+            fold_steps=self.fold_steps,
+            padding_mode=self.padding_mode,
+            padding_fill_mode=self.padding_fill_mode,
+            context_window_size=self.context_window_size,
+            sliding_window_size=self.sliding_window_size,
+            sliding_window_stride=self.sliding_window_stride,
+            max_length=self.max_length,
+            max_windows=self.max_windows,
+            folding=self.folding,
+            padding=self.padding,
+            device=self.device
+        )
+
 
 class SlidingWindowBuilder:
     # calculate how many sliding window strides must occur to reach the context window size.

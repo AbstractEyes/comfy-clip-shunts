@@ -41,9 +41,18 @@ from .node.encoder_nodes import (
     # Clip-based swap and handling nodes
     EncoderSampler,
     RemoveSpecialTokens,
-    EncoderStackerNode
+    EncoderStackerNode,
+
 )
 
+from .node.embedding_nodes import (
+    ABS_LoadEmbedding,
+    ABS_SaveEmbedding,
+    ABS_ShaperEmbedding,
+    SymbolicPromptRouter,
+    BertPromptSimilarityFlood
+
+)
 
 from .node.shunt_nodes import (
     ShuntConditioning,
@@ -157,6 +166,13 @@ NODE_CLASS_MAPPINGS = {
     "EncoderLoader": EncoderLoader, # advanced loader for shunt adapters with many more options
     "LoadShuntSimple": LoadShuntSimple, # Loads a simple adapter shunt model to translate embeddings
     "LoadAdapterShunt": LoadAdapterShunt, # Loads a complex adapter model with advanced options
+
+    # Conditioning Embeddings and Reshaping Nodes
+    "ABS_ShaperEmbedding": ABS_ShaperEmbedding,  # Node to reshape embeddings for the ABS Shunt Adapters
+    "ABS_SaveConditioning": ABS_SaveEmbedding,  # Saves embeddings to the embedding folder
+    "ABS_LoadConditioning": ABS_LoadEmbedding,  # Loads embeddings from the embedding folder
+    "SymbolicPromptRouter": SymbolicPromptRouter,  # Routes symbolic prompts to appropriate embeddings
+    "BertPromptSimilarityFlood": BertPromptSimilarityFlood,  # Floods prompts with BERT similarity embeddings
 
     # Multi-shunt management nodes
     "StackShuntAdapters": StackShuntAdapters,
@@ -277,11 +293,21 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LoadShuntSimple": "🔄 Load Shunt Adapter Simple",
     "LoadAdapterShunt": "⚡ Load Shunt Adapter",
 
+    # Embedding Nodes
+    "ABS_ShaperEmbedding": "🔧 Shaper Embedding",  # Node to reshape embeddings for the ABS Shunt Adapters
+    "ABS_SaveEmbedding": "💾 Save Embedding",  # Saves embeddings to the embedding folder
+    "ABS_LoadEmbedding": "📂 Load Embedding",  # Loads embeddings from the embedding folder
+
+    # Bert similarity nodes
+    "SymbolicPromptRouter": "🔄 Symbolic Prompt Router",  # Routes symbolic prompts to appropriate embeddings
+    "BertPromptSimilarityFlood": "🌊 BERT Prompt Similarity Flood",  # Floods prompts with BERT similarity embeddings
+
     # Multi-shunt management nodes
     "StackShuntAdapters": "📚 Stack Shunt Adapters",
     "MergeShunts": "🔀 Merge Shunt Adapters",
     "ShuntScheduler": "📊 Shunt Scheduler",
     "UnloadShuntModels": "🗑️ Unload Shunt Models",
+
 
     # Shunt specific Conditioning and passthrough nodes
     "ShuntConditioning": "🔌 Shunt Conditioning",
@@ -366,7 +392,7 @@ logger.info("""
 ╔══════════════════════════════════════════╗
 ║        🚀 ABS SHUNT SUITE 🚀            ║
 ║    Dev Advanced Bridging System Adapters ║
-║         ⚡ Version 0.9.6 ⚡                ║
+║         ⚡ Version 0.9.7 ⚡                ║
 ╚══════════════════════════════════════════╝
 """)
 

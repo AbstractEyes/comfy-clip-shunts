@@ -484,19 +484,23 @@ BEATRIX_SPECIAL_TOKENS_AND_SHUNTS = [
     "<mask>", "<pad>", "<cls>", "<sep>", "<|startofaudio|>", "<|endofaudio|>",
 ]
 
+CLIP_ONLY_TOKENS = [ # tokens we only want clip to see.
+    "</w>", "<w>"
+]
 
-def remove_special_tokens(prompt):
+
+def remove_special_tokens(prompt, remove_clip=False):
     """
     Removes known special tokens from the prompt.
     This is useful for cleaning up prompts before processing.
     """
+    tokens = BEATRIX_SPECIAL_TOKENS_AND_SHUNTS.copy() if not remove_clip else CLIP_ONLY_TOKENS
     # find the array of tokens within the prompt to replace
-    for token in BEATRIX_SPECIAL_TOKENS_AND_SHUNTS:
+    for token in tokens:
         if token in prompt:
             # remove the prompt
             prompt = prompt.replace(token, "")
     return (prompt,)
-
 
 class RemoveSpecialTokens:
     @classmethod
@@ -693,10 +697,17 @@ class EncoderSampler:
         pos_sampled_conditioning, pos_raw_conditioning, pos_debug = self.__prepare_conditioning(
             positive_prompt, encoders, clip, device, mode, config=config, reckless_config=reckless_config, clip_gate_config=clip_gate_config
         )
-        neg_sampled_conditioning, neg_raw_conditioning, neg_debug = self.__prepare_conditioning(
-            negative_prompt, encoders, clip, device, mode, config=(negative_config or config), reckless_config=reckless_config,
-            clip_gate_config=clip_gate_config
-        )
+
+        if not negative_prompt:
+            # if no negative prompt is provided, we can just ignore it. negative is optional and we don't need to run it.
+            neg_sampled_conditioning = []
+            neg_raw_conditioning = []
+            neg_debug = {}
+        else:
+            neg_sampled_conditioning, neg_raw_conditioning, neg_debug = self.__prepare_conditioning(
+                negative_prompt, encoders, clip, device, mode, config=(negative_config or config), reckless_config=reckless_config,
+                clip_gate_config=clip_gate_config
+            )
 
         return (pos_sampled_conditioning, pos_raw_conditioning, pos_debug, neg_sampled_conditioning, neg_raw_conditioning, neg_debug)
 
@@ -706,13 +717,12 @@ class EncoderSampler:
         #negative_prompt = negative_prompt_in or config.get("negative_prompt", None)
 
         logger.info(f"[EncoderSampler] Sampling with mode: {mode} on device {device}")#, prompt: {prompt}, encoders: {encoders}")
-
         a_raws = [self.__extract_symbolic(encoder, prompt, device) for encoder in encoders]
 
         logger.info(f"[EncoderSampler] Pre-removal prompt {prompt}.")
-        prompt = remove_special_tokens(prompt)[0] if prompt else None
-        logger.info(f"[EncoderSampler] Cleaned prompt: {prompt}")
-        cond, data = self.__schedule_and_extract_conds(clip, prompt, device, mode=mode)
+        encoder_prompt = remove_special_tokens(prompt, remove_clip=True)[0] if prompt else None
+        logger.info(f"[EncoderSampler] Cleaned prompt: {encoder_prompt}")
+        cond, data = self.__schedule_and_extract_conds(clip, encoder_prompt, device, mode=mode)
         orig_clip_full = cond.clone()
         orig_features_full = data.get("features", None)
         orig_features_full = orig_features_full.clone() if orig_features_full is not None else None
@@ -731,6 +741,8 @@ class EncoderSampler:
 
         if not folded_outputs:
             raise RuntimeError("No encoder-condition slices folded successfully.")
+        else:
+            logger.info(f"[EncoderSampler] Folded outputs: {list(folded_outputs.keys())}")
 
         conditioning = self._pack_conditioning_from_registry(
             folded_outputs=folded_outputs,
@@ -738,7 +750,6 @@ class EncoderSampler:
             device=device,
             mode=mode,
         )
-
         pooled = conditioning[0][1].get("pooled_output", None)
         orig_pool_ready = {
             "pooled_output": (orig_pool_full.clone() if orig_pool_full is not None else None)
@@ -755,13 +766,14 @@ class EncoderSampler:
         # a small set of tests to run, so far showing promise
 
         if clip_like:
+            prepared_prompt = remove_special_tokens(prompt, remove_clip=False)[0] if prompt else None
             clip_model = pipe["clip"]
             if encoder_type == "t5":
                 max_tokens = 512
             else:
                 max_tokens = 77
             #clip_model.load_model()
-            tokens = clip_model.tokenize(prompt, tokenizer_options={
+            tokens = clip_model.tokenize(prepared_prompt, tokenizer_options={
                 "padding": "max_length",
                 "truncation": True,
                 "max_tokens": max_tokens
@@ -777,8 +789,10 @@ class EncoderSampler:
 
 
         else:
+            # model isn't clip like, we need to extract special tokens leaving the rest to the model
             if "model" in pipe:
                 pipe["model"].to(device)
+            #prepared_prompt = remove_special_tokens(prompt, remove_clip=True)[0] if prompt else None
             shift_cfg = ShiftConfig(prompt=prompt)
             return ConditioningShifter.extract_encoder_embeddings(pipe, device, shift_cfg).to(device)
 
@@ -846,14 +860,31 @@ class EncoderSampler:
             a_proj = match_project(a_raw, clip_slice, mode=cfg.get("interpolation_method_in", "linear"))
         else:
             a_proj = a_raw
+
         a_feat = match_feature_dims(a_proj, clip_slice)
         b = match_tokens(clip_slice, a_feat.shape[1])
         delta = b - a_proj
+
+
+        # -- Inject resonance potential --
+        context = {}
+        if cfg.get("enable_rope_spiral", False):
+            potential = ConditioningShifter.compute_resonance_potential(
+                embedding=a_feat,
+                attention_mask=torch.ones(a_feat.shape[:2], dtype=torch.bool, device=a_feat.device),
+                offsets=cfg.get("rope_phase_offsets", [1, 2, 4, 8, 16]),
+                mode=cfg.get("rope_potential_mode", "spiral_gate")
+            )
+            context["resonance_potential"] = potential  # [B, T, 1] — used inside IntegraOrchestrator
+
         integra = self._build_integra(cfg)
         try:
-            raw_folded, _ = integra.walk_encoder_field(a_feat, b, delta)
+            raw_folded, _ = integra.walk_encoder_field(
+                a_feat, b, delta, context=context
+            )
         except AlucardShapeError as e:
             raise RuntimeError(f"[EncoderSampler] Shape error: {e}") from e
+
         return match_tokens(raw_folded, clip_slice.shape[1]).to(device)
 
     def _build_integra(self, cfg):
@@ -912,6 +943,7 @@ class EncoderSampler:
             "sd1": ["clip_l"],
             "flux": ["t5"],
         }.get(mode, list(folded_outputs.keys()))
+
 
         # Infer encoder count
         encoder_count = max(len(folded_outputs.get(k, [])) for k in keys)
@@ -1309,6 +1341,7 @@ class EncoderLoader:
             "float16": torch.float16,
             "bfloat16": torch.bfloat16
         }[dtype]
+
 
         # Load model/tokenizer
         result = model_manager.load_encoder_model(

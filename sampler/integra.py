@@ -32,6 +32,16 @@ class IntegraConfig:
     enable_clip_alignment: bool = True  # Optional: perform scheduler-aware comparison to CLIP
     use_rose_similarity: bool = False  # Optional: use Rose similarity for window selection
 
+    def __copy__(self):
+        return IntegraConfig(
+            walker_config=self.walker_config.__copy__(),
+            stack_config=self.stack_config.__copy__(),
+            trace_folds=self.trace_folds,
+            enforce_projection=self.enforce_projection,
+            enable_clip_alignment=self.enable_clip_alignment,
+            use_rose_similarity=self.use_rose_similarity
+        )
+
 
 class IntegraOrchestrator:
     def __init__(self, config: IntegraConfig):
@@ -45,13 +55,15 @@ class IntegraOrchestrator:
         self.window_size = stack.sliding_window_size
         self.stride = stack.sliding_window_stride
         self.max_length = stack.max_length
-        self.override_context = stack.override_context_window
+        self.override_context_window = stack.override_context_window
         self.context_window_size = stack.context_window_size
+
 
     def walk_encoder_field(self,
                            a: torch.Tensor,
                            b: torch.Tensor,
-                           d: torch.Tensor) -> Tuple[torch.Tensor, Dict]:
+                           d: torch.Tensor,
+                           context: dict=None) -> Tuple[torch.Tensor, Dict]:
         """
         Walks a full symbolic encoder field via sliding windows, governed by Integra.
         Returns recombined tensor and orchestration report.
@@ -61,9 +73,13 @@ class IntegraOrchestrator:
         with torch.autocast(device_type=a.device.type, enabled=a.device.type != 'cpu'):
             a, b, d = upscale_trio(a, b, d)  # Ensure all tensors are in the same dtype
             B, T_full, D = a.shape
-            limit = self.context_window_size if self.override_context else T_full
+            limit = self.context_window_size if self.override_context_window else T_full
             limit = min(limit, self.max_length)
             T = min(limit, T_full)
+            if self.walker:
+                self.walker.config = self.config.walker_config.__copy__()
+                self.walker.config.context_overrides.update(context.items()) or {}
+
 
 
             # Slice the initial context window (if override is active)
@@ -112,7 +128,7 @@ class IntegraOrchestrator:
                 "folds": len(folds),
                 "stride": self.stride,
                 "window_size": self.window_size,
-                "override_context": self.override_context
+                "override_context_window": self.override_context_window
             }
 
     def aggregate(self, folds, _) -> torch.Tensor:
@@ -136,7 +152,7 @@ class IntegraOrchestrator:
         if eof_pos is not None and eof_pos < ids_len:
             mask[:, eof_pos] = True
         # when override_context, silent-drop first/last token
-        if self.override_context:
+        if self.override_context_window:
             mask[:, 0] = False
             mask[:, -1] = False
         return mask

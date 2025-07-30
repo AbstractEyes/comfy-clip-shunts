@@ -1308,3 +1308,5 @@ class RoseSimilarityConditioning:
             result.append([averaged, {"pooled_output": pooled}])
 
         return (result,)
+
+
