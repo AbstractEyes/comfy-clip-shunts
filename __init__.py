@@ -205,6 +205,7 @@ NODE_CLASS_MAPPINGS = {
     "AConditioningSetDeviceNode": ConditioningSetDeviceNode,  # Sets the device for conditioning nodes
     "AConditioningSetDtypeNode": ConditioningSetDtypeNode,  # Sets the dtype for conditioning nodes
 
+
     # Clip to Encoder nodes
     "ClipEncoderLoader": ClipEncoderLoader,  # Loads a CLIP encoder model
     "StackEncoderNode": EncoderStackerNode,  # Stacks multiple encoder nodes for complex configurations

@@ -1,3 +1,4 @@
+import comfy
 import torch
 import numpy as np
 import logging
@@ -38,13 +39,18 @@ class ShiftConfig:
     eager_offloading: bool = True  # Whether to offload tensors to CPU after processing, or cache to disc if overwhelmed
     squash_similarity: bool = True  #
 
-    enable_rope_spiral: bool = False
-    rope_phase_offsets: List[int] = (1, 2, 4, 8, 16)
-    rope_anchor_mode: str = "pooled"  # or "first", "mean", or "custom"
-    spiral_probe_token: Optional[str] = None  # inject special token if needed
 
     # The models are very small, but the entire structure around calculating the embeddings is quite large;
     # This requires that we need to be careful with memory usage.
+
+    def join_dict(self, dict_in):
+        # any key in dict_in that is not in this config will be ignored
+        for key, value in dict_in.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+            else:
+                logger.warning(f"ShiftConfig: Ignoring unknown key {key!r} in join_dict")
+
 
 
 @dataclass
@@ -82,6 +88,7 @@ class ConditioningShifter:
         raw_prompt = shift_config.prompt
         prompt = raw_prompt#RemoveSpecialTokens.remove_special_tokens(raw_prompt)
 
+
         # 2) tokenize & encode
         tokenizer = encoder_pipe["tokenizer"]
         model     = encoder_pipe["model"]
@@ -108,17 +115,14 @@ class ConditioningShifter:
         with torch.no_grad():
             model.to(device)
             mtype = encoder_pipe["config"].get("model_type","")
-            # --- Auto-enable RoPE spiral if RoPE-aware encoder is used ---
             name = encoder_pipe.get("name", "").lower()
-            if "bert-beatrix" in name or "nomic-bert" in name:
-                shift_config.enable_rope_spiral = True
-                shift_config.rope_phase_offsets = [1, 2, 4, 8, 16]
-                shift_config.rope_anchor_mode = "pooled"
             if "t5" in mtype:
                 embeddings = model.encoder(input_ids=input_ids,
                                            attention_mask=attention_mask
                 ).last_hidden_state
             elif mtype in ("bert","nomic_bert"):
+                # --- Auto-enable RoPE spiral if RoPE-aware encoder is used ---
+
                 embeddings = model(input_ids=input_ids,
                                    attention_mask=attention_mask,
                                    return_dict=True
@@ -461,18 +465,39 @@ class ConditioningShifter:
         return c
 
     # [[ cond_tensor, { "pooled_outputs": pooled_tensor, ... } ], ...]
-    def clone_conditionings(self, conditioning: List[List]):
+    @staticmethod
+    def clone_conditionings(conditioning: List[List], device: str = torch.device("cpu")) -> List[List]:
         """
         Clone the conditioning list to avoid modifying the original.
+        Standard format: [[ cond_tensor, { "pooled_output": pooled_tensor, ... } ], ...]
+        Hidream format: [[ cond_tensor, { "pooled_output": pooled_tensor, ... }, hidream_extra_tensor, { hidream_metadata } ], ...]
         """
-        conditioning = conditioning.copy()
-        # [[ cond_tensor, { "pooled_outputs": pooled_tensor, ... } ], ...]
-        for (cond, key) in conditioning:
-            # Deep clone the internal tensors
-            cond[0] = cond[0].clone()
-            cond[1]["pooled_outputs"] = cond[1].get("pooled_outputs", None).clone() if cond[1] is not None else None
-
-        return conditioning
+        if conditioning:
+            for i in range(len(conditioning)):
+                temp_cond = conditioning[i].copy()
+                temp_cond[0] = temp_cond[0].clone().to(device)
+                if len(temp_cond) > 1:
+                    # check for dict
+                    if isinstance(temp_cond[1], dict):
+                        # if dict iterate and clone all tensors
+                        cloned_dict = {k: v.clone().to(device) if isinstance(v, torch.Tensor) else v for k, v in temp_cond[1].items()}
+                        temp_cond[1] = cloned_dict
+                    elif isinstance(temp_cond[1], torch.Tensor):
+                        # if tensor, clone it
+                        temp_cond[1] = temp_cond[1].clone().to(device)
+                if len(temp_cond) > 2:
+                    # check for hidream extra tensor
+                    if isinstance(temp_cond[2], torch.Tensor):
+                        temp_cond[2] = temp_cond[2].clone().to(device)
+                    elif isinstance(temp_cond[2], dict):
+                        # if dict iterate and clone all tensors
+                        cloned_dict = {k: v.clone().to(device) if isinstance(v, torch.Tensor) else v for k, v in temp_cond[2].items()}
+                        temp_cond[2] = cloned_dict
+                cloned = temp_cond
+                conditioning[i] = cloned
+            return conditioning
+        else:
+            raise ValueError("Conditioning list is empty, cannot clone.")
 
 
     @staticmethod
@@ -545,49 +570,154 @@ class ConditioningShifter:
 
     @staticmethod
     def compute_resonance_potential(
-        embedding: torch.Tensor,
-        attention_mask: torch.Tensor,
-        offsets: List[int],
-        mode: str = "spiral_gate"
+            embedding: torch.Tensor,
+            attention_mask: torch.Tensor,
+            offsets: Optional[List[int]] = None,
+            mode: str = "harmonic_std"
     ) -> torch.Tensor:
         """
         Returns a [B, T, 1] potential mask for folding modulation.
         Modes:
             - "spiral_gate": mean cosine similarity across offsets
             - "harmonic_std": inverse stddev of similarity across offsets
+
+        Args:
+            embedding: Input embeddings [B, T, D]
+            attention_mask: Attention mask [B, T]
+            offsets: Position offsets for similarity computation. If None, uses adaptive defaults.
+            mode: Computation mode for potential calculation
+
+        Returns:
+            Potential mask [B, T, 1] for modulation
         """
+
+        # Input validation
+        if embedding is None:
+            raise ValueError("embedding cannot be None")
+        if attention_mask is None:
+            raise ValueError("attention_mask cannot be None")
+
         B, T, D = embedding.shape
         if B != 1:
             raise ValueError("Only batch size 1 is supported for resonance potential.")
-        em = embedding[0][attention_mask[0].bool()]  # [T_active, D]
+
+        # Validate attention_mask shape
+        if attention_mask.shape != (B, T):
+            raise ValueError(
+                f"attention_mask shape {attention_mask.shape} doesn't match embedding batch/seq dims ({B}, {T})")
+
+        # Set adaptive offsets if None - optimized for nomic-bert-2048 RoPE patterns
+        if offsets is None:
+            active_count = attention_mask[0].sum().item()
+            if active_count <= 8:
+                offsets = [1, 2, 3]
+            elif active_count <= 16:
+                offsets = [1, 2, 3, 5]
+            elif active_count <= 32:
+                offsets = [1, 2, 3, 5, 8]
+            elif active_count <= 64:
+                offsets = [1, 2, 3, 5, 8, 13]
+            else:
+                # For longer sequences, add more sophisticated patterns
+                offsets = [1, 2, 3, 5, 8, 13, 21, 34]
+
+        if not isinstance(offsets, list) or len(offsets) == 0:
+            raise ValueError("offsets must be a non-empty list")
+
+        # Extract active tokens with safety checks
+        mask_bool = attention_mask[0].bool()
+        active_count = mask_bool.sum().item()
+
+        if active_count == 0:
+            # No active tokens - return all ones
+            logger.warning("No active tokens found in attention_mask, returning default potentials")
+            return torch.ones(1, T, 1, device=embedding.device, dtype=embedding.dtype)
+
+        em = embedding[0][mask_bool]  # [T_active, D]
         T_active = em.shape[0]
 
-        # Initialize scalar potentials per token
-        potentials = torch.ones(T_active, device=embedding.device)
-
+        # Early return for insufficient tokens
         if T_active < 2:
-            return potentials.view(1, T_active, 1)
+            result = torch.ones(1, T_active, 1, device=embedding.device, dtype=embedding.dtype)
+            if T_active < T:
+                result = F.pad(result, (0, 0, 0, T - T_active), value=1.0)
+            return result
 
+        # Filter valid offsets
+        valid_offsets = [offset for offset in offsets if 0 < offset < T_active]
+
+        if not valid_offsets:
+            logger.warning(f"No valid offsets found. T_active={T_active}, offsets={offsets}")
+            result = torch.ones(1, T_active, 1, device=embedding.device, dtype=embedding.dtype)
+            if T_active < T:
+                result = F.pad(result, (0, 0, 0, T - T_active), value=1.0)
+            return result
+
+        # Compute similarities for valid offsets
         sim_matrix = []
-        for offset in offsets:
-            if offset >= T_active:
+        for offset in valid_offsets:
+            try:
+                # Calculate similarity between shifted sequences
+                sim = F.cosine_similarity(em[:-offset], em[offset:], dim=-1)  # [T_active - offset]
+
+                # Pad to full T_active length
+                padded = F.pad(sim, (offset, 0), value=1.0)  # [T_active]
+                sim_matrix.append(padded)
+
+            except Exception as e:
+                logger.error(f"Error computing similarity for offset {offset}: {e}")
                 continue
-            sim = F.cosine_similarity(em[:-offset], em[offset:], dim=-1)  # [T_active - offset]
-            padded = F.pad(sim, (offset, 0), value=1.0)  # pad left with identity
-            sim_matrix.append(padded)
 
         if not sim_matrix:
-            return potentials.view(1, T_active, 1)
+            logger.error("Failed to compute any similarities, returning default potentials")
+            result = torch.ones(1, T_active, 1, device=embedding.device, dtype=embedding.dtype)
+            if T_active < T:
+                result = F.pad(result, (0, 0, 0, T - T_active), value=1.0)
+            return result
 
-        sim_stack = torch.stack(sim_matrix)  # [len(offsets), T_active]
 
-        if mode == "spiral_gate":
-            potentials = sim_stack.mean(dim=0)  # [T]
-        elif mode == "harmonic_std":
-            potentials = 1.0 / (1.0 + sim_stack.std(dim=0))  # [T]
-        else:
-            raise ValueError(f"Unknown resonance mode: {mode}")
+        # Stack and compute potentials
+        try:
+            sim_stack = torch.stack(sim_matrix)  # [len(valid_offsets), T_active]
 
-        # Clamp and reshape for broadcast
-        potentials = potentials.clamp(min=0.0, max=1.0).view(1, -1, 1)  # [1, T, 1]
-        return F.pad(potentials, (0, 0, 0, T - T_active), value=1.0)  # pad back to full T
+            if mode == "spiral_gate":
+                potentials = sim_stack.mean(dim=0)  # [T_active]
+            elif mode == "harmonic_std":
+                std_vals = sim_stack.std(dim=0)  # [T_active]
+                # Add small epsilon to prevent division by zero
+                potentials = 1.0 / (1.0 + std_vals + 1e-8)  # [T_active]
+            else:
+                raise ValueError(f"Unknown resonance mode: {mode}")
+
+            # Ensure valid range and reshape
+            potentials = potentials.clamp(min=0.0, max=1.0).view(1, T_active, 1)
+
+            # Pad back to original sequence length if needed
+            if T_active < T:
+                potentials = F.pad(potentials, (0, 0, 0, T - T_active), value=1.0)
+
+            return potentials
+
+        except Exception as e:
+            logger.error(f"Error in final potential computation: {e}")
+            # Fallback to default
+            return torch.ones(1, T, 1, device=embedding.device, dtype=embedding.dtype)
+
+    @staticmethod
+    def set_device_conds(conditioning: list, device: Optional[str] = None):
+        """
+        Set the device for all conditioning tensors.
+        This is useful for ensuring that the conditioning tensors are on the correct device.
+        """
+        out = []
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        for combined, info in conditioning:
+            combined = combined.to(device)
+            for k, v in info.items():
+                if isinstance(v, torch.Tensor):
+                    info[k] = v.to(device)
+                if k == "device":
+                    info[k] = device
+            out.append([combined, info])
+        return (out,)

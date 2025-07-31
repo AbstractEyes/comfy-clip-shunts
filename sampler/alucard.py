@@ -38,6 +38,8 @@ from .alucard_exceptions import validate_shapes  # Ensure alucard_error.py is in
 
 logger = logging.getLogger(__name__)
 
+from ..utils.conditioning_shifter import ConditioningShifter
+
 
 @dataclass
 class FieldWalkerConfig:
@@ -80,7 +82,8 @@ class SamplerCore(nn.Module):
             pooling: WindowPooling,  # pooling strategy, may implement again later
             pad_mask: Optional[torch.Tensor] = None,  # [B, T] bool
             context: Optional[dict] = None,  # extra runtime info
-            pbar: Optional[ProgressBar] = None  # progress bar for tracking
+            config: Optional[FieldWalkerConfig] = None,  # configuration for the sampler
+            pbar: Optional[ProgressBar] = None,  # progress bar for tracking
     ) -> torch.Tensor:
         """
         Performs a folding schedule from embedding A to B using the scheduler & kernel logic.
@@ -94,16 +97,31 @@ class SamplerCore(nn.Module):
             a = a.clone()
             b = b.clone()
             d = d.clone() if d is not None else (b - a).clone()
-            potential = context.get("resonance_potential", None)
-            if potential is not None:
-                if we_running_it:
-                    logger.info(f"[Alucard] Using potential: {potential}")
-                    we_running_it = False # only show once.
-                d = d * potential  # [B, T, D] or [B, T, 1]
+            # -- Inject resonance potential --
+
+            context = {} if context is None else context
+            #logger.info(f"[EncoderSampler] Sampling with context: {config}")
+            if config.context_overrides.get("enable_rope_spiral", False):
+                #logger.info("[EncoderSampler] Computing resonance potential...")
+
+                potential = ConditioningShifter.compute_resonance_potential(
+                    embedding=a,
+                    attention_mask=torch.ones(a.shape[:2], dtype=torch.bool, device=a.device),
+                    offsets=config.context_overrides.get("rope_phase_offsets", None),
+                    mode=config.context_overrides.get("rope_potential_mode", "harmonic_std")
+                )
+                context["resonance_potential"] = potential  # [B, T, 1] — used inside IntegraOrchestrator
+                #logger.info(f"[EncoderSampler] Resonance potential computed with shape: {potential}")
+                if config.context_overrides.get("rope_potential_mode", "harmonic_std"):
+                    d = d * potential.unsqueeze(-1)  # Apply potential to delta
+                elif config.context_overrides.get("rope_potential_mode", "spiral_gate"):
+                    # Spiral gate mode, apply potential as a gating mechanism
+                    d = d * potential.unsqueeze(-1)
+                else:
+                    d = d # No potential applied, just use delta as is
 
             B, T, D = a.shape
             folds = []
-            context = context or {}
             context["delta"] = d  # Inject delta into shared execution context
 
             for step in range(t_steps):
@@ -134,9 +152,10 @@ class SamplerCore(nn.Module):
             return torch.stack(folds)
 
 
+
 class FieldWalker:
     def __init__(self, config: FieldWalkerConfig):
-        self.config = config
+        self.config: FieldWalkerConfig = config
         self.name = config.name or "Alucard"
         self.scheduler = FormulaScheduler(config.scheduler_mode, config.scheduler_config or {})
         self.kernel = get_folding_kernel(config.folding_mode)
@@ -145,12 +164,14 @@ class FieldWalker:
         self.core = SamplerCore()
 
 
+
     def walk(self,
              a: torch.Tensor,
              b: torch.Tensor,
              pad_mask: Optional[torch.Tensor] = None,
              d: Optional[torch.Tensor] = None,
-             pbar: Optional[ProgressBar] = None) -> torch.Tensor:
+             pbar: Optional[ProgressBar] = None,
+             context: dict = None) -> torch.Tensor:
         #logger.info(
         #    f"[Alucard] Walking: a {a.shape}, b {b.shape}, d {d.shape if d is not None else 'computed'}, t_steps={self.config.t_steps}")
 
@@ -165,5 +186,6 @@ class FieldWalker:
             padding=self.padding,
             pad_mask=pad_mask,
             context=context,
-            pbar=pbar
+            pbar=pbar,
+            config=self.config
         )

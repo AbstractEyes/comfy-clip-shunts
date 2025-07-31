@@ -226,12 +226,16 @@ class SymbolicPromptRouter:
 
     OUTPUT_NODE = True
 
+
+
     def run(self, prompt, encoder_pipe, pad_first, slice_length, max_length, each_mode, top_k):
 
         encoder = encoder_pipe[0]
         if encoder is None:
             raise ValueError("No encoder pipeline provided")
         else:
+
+
             if "bert" not in encoder.get("config", {}).get("model_type", "").lower():
                 logger.warning(f"[SymbolicPromptRouter] Encoder pipeline type '{encoder}' is not 'bert'.")
                 logger.warning(f"[SymbolicPromptRouter] Config type: {encoder.get('config', {})} {encoder.get('config', {}).get('model_type', '')}")
@@ -239,7 +243,9 @@ class SymbolicPromptRouter:
             model = encoder.get("model", None)
             tokenizer = encoder.get("tokenizer", None)
 
+
         pbar = ProgressBar(total=52)
+
 
         logic = SymbolicLogicManager(
             base_prompt=prompt,
@@ -252,6 +258,7 @@ class SymbolicPromptRouter:
             pbar=pbar
         )
         logger.info(f"[SymbolicPromptRouter] Running symbolic logic with prompt: {prompt}")
+
 
         matches = logic.extract_alpha_similarities(
             embedding_manager=get_bank(),
@@ -272,6 +279,8 @@ class SymbolicPromptRouter:
                         #f"and prompt: {match.get('prompt_text', '<no prompt>')[:64]}…")
 
         return (matches,)
+
+
 
 
 import random

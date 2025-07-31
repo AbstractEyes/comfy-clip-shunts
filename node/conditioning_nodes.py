@@ -1107,6 +1107,7 @@ class ABS_WAS_ConditioningBlend:
             },
             "optional": {
                 "conditioning_b": ("CONDITIONING", {"default": []}),
+                "device": (["cpu", "cuda", "mps"], {"default": "cpu", "tooltip": "Device to run the blending on."}),
             }
         }
 
@@ -1115,7 +1116,7 @@ class ABS_WAS_ConditioningBlend:
     FUNCTION = "combine"
     CATEGORY = "conditioning"
 
-    def combine(self, conditioning_a, blending_mode, blending_strength, seed, squash=False, amount_blended=-1, extrapolate_pooled=False, conditioning_b=[]):
+    def combine(self, conditioning_a, blending_mode, blending_strength, seed, squash=False, amount_blended=-1, extrapolate_pooled=False, conditioning_b=[], device="cpu"):
         if seed > 0:
             torch.manual_seed(seed)
 
@@ -1124,7 +1125,11 @@ class ABS_WAS_ConditioningBlend:
         if not conditioning_b:
             return (conditioning_a,)
 
-        device = conditioning_a[0][0].device
+        conditioning_a = ConditioningShifter.clone_conditionings(conditioning_a, device)
+        conditioning_b = ConditioningShifter.clone_conditionings(conditioning_b, device)
+        #conditioning_a = ConditioningShifter.set_device_conds(conditioning_a, device)
+        #conditioning_b = ConditioningShifter.set_device_conds(conditioning_b, device)
+
         blend_fn = blending_modes[blending_mode]
         blend_weight = torch.tensor(blending_strength, device=device)
 
@@ -1153,7 +1158,6 @@ class ABS_WAS_ConditioningBlend:
                 if (pooled := entry[1].get("pooled_output", None)) is not None
             ]
             pb_avg = torch.stack(b_pooleds).mean(dim=0) if b_pooleds else None
-
 
             # Apply blend
             a_proj, b_proj = self.align_pair_length(a_avg, b_avg, device)

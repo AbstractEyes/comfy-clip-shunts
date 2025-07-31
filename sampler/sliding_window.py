@@ -21,6 +21,7 @@ from .formulas.modes import (
     FoldingPoolingTypes
 )
 
+
 @dataclass
 class ShuntStackConfig:
     # capitalize

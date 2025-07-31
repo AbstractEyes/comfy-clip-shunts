@@ -179,6 +179,7 @@ class EmbeddingManager:
         return results[:top_k]
 
 
+
 # ---------- singleton accessor -----------------------------------------
 import builtins as _bi
 

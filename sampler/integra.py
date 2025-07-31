@@ -43,6 +43,7 @@ class IntegraConfig:
         )
 
 
+
 class IntegraOrchestrator:
     def __init__(self, config: IntegraConfig):
         self.config = config
@@ -59,11 +60,11 @@ class IntegraOrchestrator:
         self.context_window_size = stack.context_window_size
 
 
+
     def walk_encoder_field(self,
                            a: torch.Tensor,
                            b: torch.Tensor,
-                           d: torch.Tensor,
-                           context: dict=None) -> Tuple[torch.Tensor, Dict]:
+                           d: torch.Tensor) -> Tuple[torch.Tensor, Dict]:
         """
         Walks a full symbolic encoder field via sliding windows, governed by Integra.
         Returns recombined tensor and orchestration report.
@@ -76,11 +77,6 @@ class IntegraOrchestrator:
             limit = self.context_window_size if self.override_context_window else T_full
             limit = min(limit, self.max_length)
             T = min(limit, T_full)
-            if self.walker:
-                self.walker.config = self.config.walker_config.__copy__()
-                self.walker.config.context_overrides.update(context.items()) or {}
-
-
 
             # Slice the initial context window (if override is active)
             a = a[:, :T, :]
@@ -121,6 +117,7 @@ class IntegraOrchestrator:
             # Aggregate windowed output
             #logger.info(f"Aggregating {len(folds)} folds with total tokens: {T_full}")
             aggregated = self.aggregate(folds, T)
+
 
             return aggregated, {
                 "tokens_processed": T,

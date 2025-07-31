@@ -313,7 +313,7 @@ class EncoderSamplerConfig:
                 "guidance_scale": ("FLOAT", {"default": 5, "min": 0.0, "max": 100.0}),
 
                 # Absolutely fantastic set of formulas.
-                "folding": (FoldingKernels.to_list(), {"default": FoldingKernels.shiva, "tooltip": "Folding mode to use for the encoder."}),
+                "folding_formula": (FoldingKernels.to_list(), {"default": FoldingKernels.shiva, "tooltip": "Folding mode to use for the encoder."}),
 
                 # implemented for testing, some schedulers fail and require edge cases to be handled
                 "folding_scheduler": (SchedulerModes.to_list(), {"default": SchedulerModes.TAU, "tooltip": "Folding scheduler to use for the encoder."}),
@@ -326,7 +326,8 @@ class EncoderSamplerConfig:
                 "use_alpha_mask": ("BOOLEAN", {"default": True}),
                 # todo - flag implemented not respected, is implemented elsewhere
                 "cosine_similarity_gate": ("BOOLEAN", {"default": False}),
-
+                "use_rose_similarity": ("BOOLEAN", {"default": False, "tooltip": "Use ROSE-based symbolic similarity instead of cosine similarity for resonance evaluation." }),
+                "use_rope_resonance": ("BOOLEAN", { "default": False, "tooltip": "Use ROPE-based resonance evaluation for symbolic similarity, if available."}),
                 # todo - not implemented yet
                 "pos_embedding": (["none", "cos", "sine", "cosine"], {"default": "none"}),
                 "normalization_anchor": (["none", "l2", "l1", "heun", "surge", "sigma", "delta", "gate", "bong"], {"default": "none"}),
@@ -355,10 +356,7 @@ class EncoderSamplerConfig:
                 "force_projection_out": ("BOOLEAN", {"default": False, "tooltip": "Force projection of model output to context window size."}),
                 "projection_dims_out": ("INT", {"default": 768, "min": 1, "max": 8192}),
                 "interpolation_method_out": (["linear"], {"default": "linear", "tooltip": "Method to use for interpolating model output projections."}),
-                "use_rose_similarity": ("BOOLEAN", {
-                    "default": False,
-                    "tooltip": "Use ROSE-based symbolic similarity instead of cosine similarity for resonance evaluation."
-                }),
+
                 "device": (["cpu", "cuda", "mps"], {"default": "cuda" if torch.cuda.is_available() else "cpu", "tooltip": "Device to run the encoder on."}),
             }
         }
@@ -374,12 +372,14 @@ class EncoderSamplerConfig:
                     steps,
                     cfg_scale,
                     guidance_scale,
-                    folding,
+                    folding_formula,
                     folding_scheduler,
                     padding_mode,
                     pooling_mode,
                     use_alpha_mask,
                     cosine_similarity_gate,
+                    use_rose_similarity,
+                    use_rope_resonance,
                     pos_embedding,
                     normalization_anchor,
                     top_k,
@@ -397,7 +397,6 @@ class EncoderSamplerConfig:
                     force_projection_out,
                     projection_dims_out,
                     interpolation_method_out,
-                    use_rose_similarity,
                     device):
         """Prepare the configuration dict with the provided parameters."""
         return ({
@@ -406,7 +405,7 @@ class EncoderSamplerConfig:
             "steps": steps,
             "cfg_scale": cfg_scale,
             "guidance_scale": guidance_scale,
-            "folding": folding,
+            "folding": folding_formula,
             "folding_scheduler": folding_scheduler,
             "padding_mode": padding_mode,
             "pooling_mode": pooling_mode,
@@ -431,6 +430,7 @@ class EncoderSamplerConfig:
             "interpolation_method_out": interpolation_method_out,
             "use_rose_similarity": use_rose_similarity,
             "device": device,
+            "use_rope_resonance": use_rope_resonance,
         },)
 
 from ..sampler.alucard import FieldWalker, FieldWalkerConfig
@@ -715,9 +715,13 @@ class EncoderSampler:
 
     def __prepare_conditioning(self, prompt, encoders, clip, device, mode, config=None, reckless_config=None, clip_gate_config=None):
         #negative_prompt = negative_prompt_in or config.get("negative_prompt", None)
-
         logger.info(f"[EncoderSampler] Sampling with mode: {mode} on device {device}")#, prompt: {prompt}, encoders: {encoders}")
-        a_raws = [self.__extract_symbolic(encoder, prompt, device) for encoder in encoders]
+
+        # we aren't setting the rope accessor correctly, we need to do it manually
+        # if bert enable rope
+        a_raws = []
+        for encoder in encoders:
+            a_raws.append([encoder, self.__extract_symbolic(encoder, prompt, device, config)])
 
         logger.info(f"[EncoderSampler] Pre-removal prompt {prompt}.")
         encoder_prompt = remove_special_tokens(prompt, remove_clip=True)[0] if prompt else None
@@ -734,9 +738,9 @@ class EncoderSampler:
 
         folded_outputs: Dict[str, List[torch.Tensor]] = {}
 
-        for a_raw in a_raws:
+        for encoder, a_raw in a_raws:
             for cond_name, slice in clip_slices.items():
-                folded = self._run_path(a_raw, cond_name, slice, config, device)
+                folded = self._run_path(a_raw, cond_name, slice, config, device, encoder)
                 folded_outputs.setdefault(cond_name, []).append(folded)
 
         if not folded_outputs:
@@ -760,7 +764,7 @@ class EncoderSampler:
         return conditioning, raw_conditioning, {}
 
 
-    def __extract_symbolic(self, pipe, prompt, device):
+    def __extract_symbolic(self, pipe, prompt, device, config=None):
         encoder_type = pipe.get("type", "unknown").lower()
         clip_like = encoder_type in ENCODER_SUPPORTED_CLIP_TYPES
         # a small set of tests to run, so far showing promise
@@ -793,7 +797,7 @@ class EncoderSampler:
             if "model" in pipe:
                 pipe["model"].to(device)
             #prepared_prompt = remove_special_tokens(prompt, remove_clip=True)[0] if prompt else None
-            shift_cfg = ShiftConfig(prompt=prompt)
+            shift_cfg = ShiftConfig(prompt=prompt, **config if config is dict else {})
             return ConditioningShifter.extract_encoder_embeddings(pipe, device, shift_cfg).to(device)
 
     def __schedule_and_extract_conds(self, clip, prompt, device, mode):
@@ -855,7 +859,7 @@ class EncoderSampler:
         return slices
 
 
-    def _run_path(self, a_raw, cond_name, clip_slice, cfg, device):
+    def _run_path(self, a_raw, cond_name, clip_slice, cfg, device, encoder):
         if a_raw.size(-1) != clip_slice.size(-1) or cfg.get("force_projection_in", False):
             a_proj = match_project(a_raw, clip_slice, mode=cfg.get("interpolation_method_in", "linear"))
         else:
@@ -866,28 +870,21 @@ class EncoderSampler:
         delta = b - a_proj
 
 
-        # -- Inject resonance potential --
-        context = {}
-        if cfg.get("enable_rope_spiral", False):
-            potential = ConditioningShifter.compute_resonance_potential(
-                embedding=a_feat,
-                attention_mask=torch.ones(a_feat.shape[:2], dtype=torch.bool, device=a_feat.device),
-                offsets=cfg.get("rope_phase_offsets", [1, 2, 4, 8, 16]),
-                mode=cfg.get("rope_potential_mode", "spiral_gate")
-            )
-            context["resonance_potential"] = potential  # [B, T, 1] — used inside IntegraOrchestrator
-
-        integra = self._build_integra(cfg)
+        integra = self._build_integra(encoder, cfg)
         try:
             raw_folded, _ = integra.walk_encoder_field(
-                a_feat, b, delta, context=context
+                a_feat, b, delta,
             )
         except AlucardShapeError as e:
             raise RuntimeError(f"[EncoderSampler] Shape error: {e}") from e
 
         return match_tokens(raw_folded, clip_slice.shape[1]).to(device)
 
-    def _build_integra(self, cfg):
+
+
+    def _build_integra(self, encoder, cfg):
+        #logger.info(f"[EncoderSampler] Building Integra with config: {cfg}")
+        #logger.info(f"[EncoderSampler] Encoder type: {encoder.get("config", {}).keys()}")
         walker_cfg = FieldWalkerConfig(
             name=cfg.get("name", "Alucard"),
             folding_mode=cfg["folding"],
@@ -900,11 +897,20 @@ class EncoderSampler:
                 "top_k": cfg["top_k"],
                 "top_p": cfg["top_p"],
             },
+
             context_overrides={
-                "use_alpha_mask": cfg["use_alpha_mask"],
-                "cosine_gate": cfg["cosine_similarity_gate"],
+                "encoder_name": encoder.get("config", {}).get("model_name", "unknown").lower(),
+                "encoder_type": encoder.get("config", {}).get("model_type", "unknown").lower(),
+                "use_alpha_mask": cfg.get("use_alpha_mask", True),
+                "cosine_gate": cfg.get("cosine_similarity_gate", False),
+                "use_rose_similarity": cfg.get("use_rose_similarity", True),
+
+                "enable_rope_spiral": cfg.get("rope_phase_offsets", False),
+                "rope_phase_offsets": cfg.get("rope_phase_offsets", None),
+                "spiral_probe_token": cfg.get("spiral_probe_token", None),
             },
         )
+
         stack_cfg = ShuntStackConfig(
             sliding_window_size=cfg["sliding_window_size"],
             sliding_window_stride=cfg["sliding_window_stride"],
@@ -921,6 +927,7 @@ class EncoderSampler:
             enable_clip_alignment=cfg["cosine_similarity_gate"],
             use_rose_similarity=cfg["use_rose_similarity"],
         ))
+
 
     def _pack_conditioning_from_registry(
         self,
@@ -1060,186 +1067,192 @@ class UnstackClip:
 
 
 
-class LegacyEncoderSampler:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "encoder_pipe": ("ENCODER_PIPE", {}),
-                "clip": ("CLIP", {}),
-                "config": ("ENCODER_SAMPLER_CONFIG", {}),
-            }
-        }
-
-    RETURN_TYPES = ("CONDITIONING", "DICT")
-    RETURN_NAMES = ("conditioning", "debug_report")
-    FUNCTION = "sample"
-    CATEGORY = "encoder/sampler"
-
-    # ------------------------------------------------------------------ #
-
-    def sample(self, encoder_pipe, clip, config):
-        # ---------- sanity ----------
-        if not encoder_pipe or not clip:
-            raise ValueError("Both encoder_pipe and clip must be provided.")
-        device = torch.device(encoder_pipe["config"]["device"])
-        encoder_pipe = dict(encoder_pipe)
-        clip = clip.clone()
-        cfg = config#.get("config", {})
-        prompt = config.get("context_window", "a photo of a robot.")
-
-        # ------------------------------------------------------------------ #
-        # 1 · Symbolic encoder field (anchor A)
-        # ------------------------------------------------------------------ #
-        shift_cfg = ShiftConfig(prompt=prompt)
-        a_raw = ConditioningShifter.extract_encoder_embeddings(encoder_pipe, device, shift_cfg)  # [B,T_enc,768]
-
-        force_projection_in_dims = cfg.get("projection_dims_in", 2048)
-        force_projection_in = cfg.get("force_projection_in", True)
-        force_projection_out_dims = cfg.get("projection_dims_out", 1280)
-        force_projection_out = cfg.get("force_projection_out", False)
-        #logger.info(f"[EncoderSampler] A raw shape after projection: {a_raw.shape}")
-        logger.info(f"[ForceProjection] Force projection in: {force_projection_in}, dims: {force_projection_in_dims}")
-        # ------------------------------------------------------------------ #
-        # 2 · CLIP perspective slices
-        # ------------------------------------------------------------------ #
-        clip_tokens = clip.tokenize(prompt, tokenizer_options={
-            "padding": "max_length", "max_length": 77, "truncation": True
-        })
-        clip_cond = clip.encode_from_tokens_scheduled(clip_tokens)
-        logger.info(f"[EncoderSampler] CLIP pooled_output shape: {clip_cond[0][1].get('pooled_output').shape}")  # [B,2048]
-        logger.info(f"[EncoderSampler] CLIP condition shape: {clip_cond[0][0].shape}")  # [B,77,2048]
-        clip_full = clip_cond[0][0]  # [B,77,2048]
-
-        clip_l_slice = clip_full[:, :, :768]  # CLIP‑L 768‑D
-        clip_g_slice = clip_full[:, :, 768:]  # CLIP‑G 1280‑D
-        if force_projection_in:
-            # just flat upscale the raw_a's third dimension to the defined size given in the config
-            base_a = a_raw.clone()
-            logger.info(f"[EncoderSampler] Projection dims: {force_projection_in_dims}, force_projection_in: {force_projection_in}")
-            reference = torch.zeros(base_a.shape[0], base_a.shape[1], force_projection_in_dims, device=device)
-            logger.info(f"[EncoderSampler] A raw shape before input projection: {a_raw.shape}")
-            a_raw = match_project(base_a, reference, mode=cfg.get("interpolation_method_in", "linear"))
-            logger.info(f"[EncoderSampler] A raw shape after input projection: {a_raw.shape}")
-            base_a.detach()  # detach the base_a to avoid memory leaks
-
-        # ------------------------------------------------------------------ #
-        # 3 · Path L  (works entirely in 768‑D)
-        # ------------------------------------------------------------------ #
-        a_up_l = match_feature_dims(a_raw, clip_l_slice).to(device)  # feature align (no change)
-        b_l = match_tokens(a_up_l, a_raw.shape[1]).to(device)  # token align → [B,T_enc,768]
-        d_l = b_l - a_raw  # delta_L
-
-        # ------------------------------------------------------------------ #
-        # 4 · Path G  (encoder up‑scaled to 1280‑D)
-        # ------------------------------------------------------------------ #
-        a_up_g = match_feature_dims(a_raw, clip_g_slice).to(device)  # 768 → 1280
-        b_g = match_tokens(clip_g_slice, a_up_g.shape[1]).to(device)  # [B,T_enc,1280]
-        d_g = b_g - a_up_g  # delta_G
-
-        # ---------------- device transfer --------------------------------- #
-        to_dev = lambda x: x.to(device) if device.type == "cuda" else x.cpu()
-        a_raw, a_up_g = map(to_dev, (a_raw, a_up_g))
-        b_l, b_g = map(to_dev, (b_l, b_g))
-        d_l, d_g = map(to_dev, (d_l, d_g))
-        clip_l_slice, clip_g_slice = map(to_dev, (clip_l_slice, clip_g_slice))
-
-        # ------------------------------------------------------------------ #
-        # 5 · Walker & Stack configs (unchanged)
-        # ------------------------------------------------------------------ #
-        walker_cfg = FieldWalkerConfig(
-            name="Alucard",
-            folding_mode=cfg.get("folding", "surge-fold"),
-            scheduler_mode=cfg.get("folding_scheduler", "tau"),
-            t_steps=cfg.get("steps", 4),
-            padding_mode=cfg.get("padding_mode", "none"),
-            pooling_mode=cfg.get("pooling_mode", "average"),
-            scheduler_config={
-                "tau": cfg.get("tau", 1.0),
-                "top_k": cfg.get("top_k", 50.0),
-                "top_p": cfg.get("top_p", 0.9),
-            },
-            context_overrides={
-                "use_alpha_mask": cfg.get("use_alpha_mask", True),
-                "cosine_gate": cfg.get("cosine_similarity_gate", False),
-            }
-        )
-
-        stack_cfg = ShuntStackConfig(
-            sliding_window_size=cfg.get("sliding_window_size", 77),
-            sliding_window_stride=cfg.get("sliding_window_stride", 33),
-            context_window_size=cfg.get("context_window_size", 2048),
-            override_context_window=cfg.get("override_context_window", True),
-            context_window=prompt,
-            max_windows=cfg.get("max_windows", 8),
-        )
-
-        integra = IntegraOrchestrator(
-            IntegraConfig(
-                walker_config=walker_cfg,
-                stack_config=stack_cfg,
-                trace_folds=False,
-                enforce_projection=cfg.get("force_projection_in", False),
-                enable_clip_alignment=cfg.get("cosine_similarity_gate", False),
-            )
-        )
-
-        # ------------------------------------------------------------------ #
-        # 6 · Walk each path separately
-        # ------------------------------------------------------------------ #
-        try:
-            raw_folded_l, meta_l = integra.walk_encoder_field(a_raw, b_l, d_l)
-            raw_folded_g, meta_g = integra.walk_encoder_field(a_up_g, b_g, d_g)
-        except AlucardShapeError as e:
-            raise RuntimeError(str(e))
-
-        # resize token count back to 77, feature dims already correct
-        folded_l = match_tokens(raw_folded_l, clip_l_slice.shape[1])  # [B,77,768]
-        folded_g = match_tokens(raw_folded_g, clip_g_slice.shape[1])  # [B,77,1280]
-
-        # ------------------------------------------------------------------ #
-        # 7 · Optional cosine diagnostics
-        # ------------------------------------------------------------------ #
-        def cosine_track(f_proj, c_ref, delta):
-            sched = FormulaScheduler(walker_cfg.scheduler_mode, walker_cfg.scheduler_config)
-            f_n = torch.nn.functional.normalize(f_proj, dim=-1)
-            c_n = torch.nn.functional.normalize(c_ref, dim=-1)
-            sims, alphas = [], []
-            for step in range(walker_cfg.t_steps):
-                t = torch.full_like(f_proj[..., 0], step / (walker_cfg.t_steps - 1))
-                alpha = sched.compute_alpha(t, f_proj, c_ref, context={"delta": delta})
-                sims.append((f_n * c_n).sum(dim=-1).mean().item())
-                alphas.append(alpha.mean().item())
-            return {"sim": sims, "alpha": alphas}
-        report = {"meta_l": meta_l, "meta_g": meta_g}
-        if cfg.get("cosine_similarity_gate", False):
-            report["clip_l"] = cosine_track(folded_l, clip_l_slice, d_l)
-            report["clip_g"] = cosine_track(folded_g, clip_g_slice, d_g)
-        # ------------------------------------------------------------------ #
-        # 8 · Pack final conditioning
-        # ------------------------------------------------------------------ #
-        folded_full = torch.cat([folded_l, folded_g], dim=-1)  # [B,77,2048]
-        logger.info(f"[EncoderSampler] Folded full shape: {folded_full.shape}")
-
-        # Assume 77 tokens, swap in canonical START and END tokens
-        B, T, D = folded_full.shape
-        start_token = torch.zeros((B, 1, D), device=folded_full.device)  # [CLS]-like vector (zeros)
-        end_token = torch.zeros((B, 1, D), device=folded_full.device)  # [EOS]-like vector (zeros)
-
-        # Snip interior (e.g., tokens 1 to T-2), then prepend/append swapped tokens
-        snipped = folded_full[:, 1:-1, :]  # [B, T-2, D]
-        folded_patched = torch.cat([start_token, snipped, end_token], dim=1)  # [B, T, D]
-
-        # Sanity check
-        assert folded_patched.shape == folded_full.shape, f"Shape mismatch: {folded_patched.shape} vs {folded_full.shape}"
-
-        # Extract pooled output from EOS (position 76)
-        pooled_output = folded_patched[:, -1, 768:2048]  # [B, 1280]
-
-        conditioning = [[folded_patched.double().cpu(), {"pooled_output": pooled_output.double().cpu()}]]
-        logger.info(f"[EncoderSampler] Final conditioning shape: {raw_folded_g.shape} {raw_folded_g.get_device()}")
-        logger.info(f"[EncoderSampler] Pooled output shape: {pooled_output.shape} {pooled_output.get_device()}")
-        return conditioning, None#report
+#class LegacyEncoderSampler:
+#    @classmethod
+#    def INPUT_TYPES(cls):
+#        return {
+#            "required": {
+#                "encoder_pipe": ("ENCODER_PIPE", {}),
+#                "clip": ("CLIP", {}),
+#                "config": ("ENCODER_SAMPLER_CONFIG", {}),
+#            }
+#        }
+#
+#    RETURN_TYPES = ("CONDITIONING", "DICT")
+#    RETURN_NAMES = ("conditioning", "debug_report")
+#    FUNCTION = "sample"
+#    CATEGORY = "encoder/sampler"
+#
+#    # ------------------------------------------------------------------ #
+#
+#    def sample(self, encoder_pipe, clip, config):
+#        # ---------- sanity ----------
+#        if not encoder_pipe or not clip:
+#            raise ValueError("Both encoder_pipe and clip must be provided.")
+#        device = torch.device(encoder_pipe["config"]["device"])
+#        encoder_pipe = dict(encoder_pipe)
+#        clip = clip.clone()
+#        cfg = config#.get("config", {})
+#        prompt = config.get("context_window", "a photo of a robot.")
+#
+#        # ------------------------------------------------------------------ #
+#        # 1 · Symbolic encoder field (anchor A)
+#        # ------------------------------------------------------------------ #
+#        shift_cfg = ShiftConfig(prompt=prompt)
+#        a_raw = ConditioningShifter.extract_encoder_embeddings(encoder_pipe, device, shift_cfg)  # [B,T_enc,768]
+#
+#        force_projection_in_dims = cfg.get("projection_dims_in", 2048)
+#        force_projection_in = cfg.get("force_projection_in", True)
+#        force_projection_out_dims = cfg.get("projection_dims_out", 1280)
+#        force_projection_out = cfg.get("force_projection_out", False)
+#        #logger.info(f"[EncoderSampler] A raw shape after projection: {a_raw.shape}")
+#        logger.info(f"[ForceProjection] Force projection in: {force_projection_in}, dims: {force_projection_in_dims}")
+#        # ------------------------------------------------------------------ #
+#        # 2 · CLIP perspective slices
+#        # ------------------------------------------------------------------ #
+#        clip_tokens = clip.tokenize(prompt, tokenizer_options={
+#            "padding": "max_length", "max_length": 77, "truncation": True
+#        })
+#        clip_cond = clip.encode_from_tokens_scheduled(clip_tokens)
+#        logger.info(f"[EncoderSampler] CLIP pooled_output shape: {clip_cond[0][1].get('pooled_output').shape}")  # [B,2048]
+#        logger.info(f"[EncoderSampler] CLIP condition shape: {clip_cond[0][0].shape}")  # [B,77,2048]
+#        clip_full = clip_cond[0][0]  # [B,77,2048]
+#
+#        clip_l_slice = clip_full[:, :, :768]  # CLIP‑L 768‑D
+#        clip_g_slice = clip_full[:, :, 768:]  # CLIP‑G 1280‑D
+#        if force_projection_in:
+#            # just flat upscale the raw_a's third dimension to the defined size given in the config
+#            base_a = a_raw.clone()
+#            logger.info(f"[EncoderSampler] Projection dims: {force_projection_in_dims}, force_projection_in: {force_projection_in}")
+#            reference = torch.zeros(base_a.shape[0], base_a.shape[1], force_projection_in_dims, device=device)
+#            logger.info(f"[EncoderSampler] A raw shape before input projection: {a_raw.shape}")
+#            a_raw = match_project(base_a, reference, mode=cfg.get("interpolation_method_in", "linear"))
+#            logger.info(f"[EncoderSampler] A raw shape after input projection: {a_raw.shape}")
+#            base_a.detach()  # detach the base_a to avoid memory leaks
+#
+#        # ------------------------------------------------------------------ #
+#        # 3 · Path L  (works entirely in 768‑D)
+#        # ------------------------------------------------------------------ #
+#        a_up_l = match_feature_dims(a_raw, clip_l_slice).to(device)  # feature align (no change)
+#        b_l = match_tokens(a_up_l, a_raw.shape[1]).to(device)  # token align → [B,T_enc,768]
+#        d_l = b_l - a_raw  # delta_L
+#
+#        # ------------------------------------------------------------------ #
+#        # 4 · Path G  (encoder up‑scaled to 1280‑D)
+#        # ------------------------------------------------------------------ #
+#        a_up_g = match_feature_dims(a_raw, clip_g_slice).to(device)  # 768 → 1280
+#        b_g = match_tokens(clip_g_slice, a_up_g.shape[1]).to(device)  # [B,T_enc,1280]
+#        d_g = b_g - a_up_g  # delta_G
+#
+#        # ---------------- device transfer --------------------------------- #
+#        to_dev = lambda x: x.to(device) if device.type == "cuda" else x.cpu()
+#        a_raw, a_up_g = map(to_dev, (a_raw, a_up_g))
+#        b_l, b_g = map(to_dev, (b_l, b_g))
+#        d_l, d_g = map(to_dev, (d_l, d_g))
+#        clip_l_slice, clip_g_slice = map(to_dev, (clip_l_slice, clip_g_slice))
+#
+#        # ------------------------------------------------------------------ #
+#        # 5 · Walker & Stack configs (unchanged)
+#        # ------------------------------------------------------------------ #
+#        walker_cfg = FieldWalkerConfig(
+#            name="Alucard",
+#            folding_mode=cfg.get("folding", "surge-fold"),
+#            scheduler_mode=cfg.get("folding_scheduler", "tau"),
+#            t_steps=cfg.get("steps", 4),
+#            padding_mode=cfg.get("padding_mode", "none"),
+#            pooling_mode=cfg.get("pooling_mode", "average"),
+#            scheduler_config={
+#                "tau": cfg.get("tau", 1.0),
+#                "top_k": cfg.get("top_k", 50.0),
+#                "top_p": cfg.get("top_p", 0.9),
+#            },
+#            context_overrides={
+#                "model_used": cfg.get("model_used", "unknown").lower(),
+#                "use_alpha_mask": cfg.get("use_alpha_mask", True),
+#                "cosine_gate": cfg.get("cosine_similarity_gate", False),
+#                "use_rose_similarity": cfg.get("use_rose_similarity", False),
+#
+#                "enable_rope_spiral": cfg.get("rope_phase_offsets", [1, 2, 4, 8, 16]),
+#                "rope_phase_offsets": cfg.get("rope_phase_offsets", None),
+#                "spiral_probe_token": cfg.get("spiral_probe_token", None),
+#            }
+#        )
+#
+#        stack_cfg = ShuntStackConfig(
+#            sliding_window_size=cfg.get("sliding_window_size", 77),
+#            sliding_window_stride=cfg.get("sliding_window_stride", 33),
+#            context_window_size=cfg.get("context_window_size", 2048),
+#            override_context_window=cfg.get("override_context_window", True),
+#            context_window=prompt,
+#            max_windows=cfg.get("max_windows", 8),
+#        )
+#
+#        integra = IntegraOrchestrator(
+#            IntegraConfig(
+#                walker_config=walker_cfg,
+#                stack_config=stack_cfg,
+#                trace_folds=False,
+#                enforce_projection=cfg.get("force_projection_in", False),
+#                enable_clip_alignment=cfg.get("cosine_similarity_gate", False),
+#            )
+#        )
+#
+#        # ------------------------------------------------------------------ #
+#        # 6 · Walk each path separately
+#        # ------------------------------------------------------------------ #
+#        try:
+#            raw_folded_l, meta_l = integra.walk_encoder_field(a_raw, b_l, d_l)
+#            raw_folded_g, meta_g = integra.walk_encoder_field(a_up_g, b_g, d_g)
+#        except AlucardShapeError as e:
+#            raise RuntimeError(str(e))
+#
+#        # resize token count back to 77, feature dims already correct
+#        folded_l = match_tokens(raw_folded_l, clip_l_slice.shape[1])  # [B,77,768]
+#        folded_g = match_tokens(raw_folded_g, clip_g_slice.shape[1])  # [B,77,1280]
+#
+#        # ------------------------------------------------------------------ #
+#        # 7 · Optional cosine diagnostics
+#        # ------------------------------------------------------------------ #
+#        def cosine_track(f_proj, c_ref, delta):
+#            sched = FormulaScheduler(walker_cfg.scheduler_mode, walker_cfg.scheduler_config)
+#            f_n = torch.nn.functional.normalize(f_proj, dim=-1)
+#            c_n = torch.nn.functional.normalize(c_ref, dim=-1)
+#            sims, alphas = [], []
+#            for step in range(walker_cfg.t_steps):
+#                t = torch.full_like(f_proj[..., 0], step / (walker_cfg.t_steps - 1))
+#                alpha = sched.compute_alpha(t, f_proj, c_ref, context={"delta": delta})
+#                sims.append((f_n * c_n).sum(dim=-1).mean().item())
+#                alphas.append(alpha.mean().item())
+#            return {"sim": sims, "alpha": alphas}
+#        report = {"meta_l": meta_l, "meta_g": meta_g}
+#        if cfg.get("cosine_similarity_gate", False):
+#            report["clip_l"] = cosine_track(folded_l, clip_l_slice, d_l)
+#            report["clip_g"] = cosine_track(folded_g, clip_g_slice, d_g)
+#        # ------------------------------------------------------------------ #
+#        # 8 · Pack final conditioning
+#        # ------------------------------------------------------------------ #
+#        folded_full = torch.cat([folded_l, folded_g], dim=-1)  # [B,77,2048]
+#        logger.info(f"[EncoderSampler] Folded full shape: {folded_full.shape}")
+#
+#        # Assume 77 tokens, swap in canonical START and END tokens
+#        B, T, D = folded_full.shape
+#        start_token = torch.zeros((B, 1, D), device=folded_full.device)  # [CLS]-like vector (zeros)
+#        end_token = torch.zeros((B, 1, D), device=folded_full.device)  # [EOS]-like vector (zeros)
+#
+#        # Snip interior (e.g., tokens 1 to T-2), then prepend/append swapped tokens
+#        snipped = folded_full[:, 1:-1, :]  # [B, T-2, D]
+#        folded_patched = torch.cat([start_token, snipped, end_token], dim=1)  # [B, T, D]
+#
+#        # Sanity check
+#        assert folded_patched.shape == folded_full.shape, f"Shape mismatch: {folded_patched.shape} vs {folded_full.shape}"
+#
+#        # Extract pooled output from EOS (position 76)
+#        pooled_output = folded_patched[:, -1, 768:2048]  # [B, 1280]
+#
+#        conditioning = [[folded_patched.double().cpu(), {"pooled_output": pooled_output.double().cpu()}]]
+#        logger.info(f"[EncoderSampler] Final conditioning shape: {raw_folded_g.shape} {raw_folded_g.get_device()}")
+#        logger.info(f"[EncoderSampler] Pooled output shape: {pooled_output.shape} {pooled_output.get_device()}")
+#        return conditioning, None#report
 
 
 class EncoderConfigNode:
@@ -1358,6 +1371,10 @@ class EncoderLoader:
             raise RuntimeError(f"Failed to load encoder model: {model_name}")
         model, tokenizer = result
 
+        enable_rope_spiral: bool = ("2048" in model_type.lower() )  # Enable rope for BERT models
+        rope_phase_offsets: List[int] = [1, 2, 4, 8, 16]
+        spiral_probe_token: Optional[str] = None  # inject special token if needed
+
         # Build config dictionary for downstream control
         config_dict = {
             "model_id": model_id,
@@ -1368,6 +1385,9 @@ class EncoderLoader:
             "trust_remote_code": trust_remote_code,
             #"context_window": context_window,
             "config": {
+                "enable_rope_spiral": enable_rope_spiral,
+                "rope_phase_offsets": rope_phase_offsets,
+                "spiral_probe_token": spiral_probe_token,
                 #"override_context_window": override_context_window,
                 #"context_window_size": context_window_size,
                 #"sliding_window_size": sliding_window_size,
