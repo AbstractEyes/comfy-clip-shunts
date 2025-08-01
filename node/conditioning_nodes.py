@@ -346,6 +346,7 @@ class ConditioningProjectMultiple:
             out = []
             for combined, info in conditioning:
                 # 1) get reference shape
+                logger.info(f"Projecting conditioning with method {proj_method}")
                 combined = combined.clone()
                 info = dict(info)  # ensure info is a dict
                 ref = combined.shape
@@ -1056,11 +1057,17 @@ blending_modes = {
     # Linearly combines the two input tensors a and b using the parameter t.
     'add': lambda a, b, t: (a * t + b * (1 - t)),
 
+    # Subtracts tensor b from tensor a, scaled by t.
+    'subtract': lambda a, b, t: (a * t - b * t),
+
     # Interpolates between tensors a and b using normalized linear interpolation.
     'bislerp': lambda a, b, t: (a * (1 - t) + b * t),
 
     # Interpolates between tensors a and b using cosine interpolation.
     'cosine interp': lambda a, b, t: (a + b - (a - b) * torch.cos(t * torch.tensor(math.pi))) / 2,
+
+    # Interpolates between tensors a and b using linear interpolation with a twist.
+    'cosine twist': lambda a, b, t: (a * (1 - t) + b * t) if t < 0.5 else (a * t + b * (1 - t)),
 
     # Interpolates between tensors a and b using cubic interpolation.
     'cuberp': lambda a, b, t: a + (b - a) * (3 * t ** 2 - 2 * t ** 3),
@@ -1068,12 +1075,27 @@ blending_modes = {
     # Computes the absolute difference between tensors a and b, scaled by t.
     'difference': lambda a, b, t: (abs(a - b) * t),
 
+    # Adds the absolute difference between tensors a and b, scaled by t.
+    'add difference': lambda a, b, t: (a + abs(a - b) * t),
+
+    # Subtracts the absolute difference between tensors a and b, scaled by t.
+    'subtract difference': lambda a, b, t: (a - abs(a - b) * t),
+
     # Combines tensors a and b using an exclusion formula, scaled by t.
     'exclusion': lambda a, b, t: ((a + b - 2 * a * b) * t),
+
+    # Exclusion fill inject gaps
+    'exclusion fill': lambda a, b, t: (a + (b - a) * t) if t < 0.5 else (a * t + b * (1 - t)),
 
     # Interpolates between tensors a and b using normalized linear interpolation,
     # with a twist when t is greater than or equal to 0.5.
     'hslerp': lambda a, b, t: (a * (1 - t) + b * t) if t < 0.5 else (a * t + b * (1 - t)),
+
+    # Interpolates between tensors a and b using hybrid spherical linear interpolation (HSLERP).
+    'hsl': lambda a, b, t: hslerp(a, b, t),
+
+    # Interpolated using pentachoron interpolation, which is a method for blending tensors
+    'pentachoron': lambda a, b, t: (a * (1 - t) + b * t) if t < 0.5 else (a * t + b * (1 - t)),
 
     # Adds tensor b to tensor a, scaled by t.
     'inject': lambda a, b, t: (a + b * t),
@@ -1087,8 +1109,6 @@ blending_modes = {
     # Interpolates between tensors a and b using spherical linear interpolation (SLERP).
     'slerp': lambda a, b, t: (a * (1 - t) + b * t),
 
-    # Subtracts tensor b from tensor a, scaled by t.
-    'subtract': lambda a, b, t: (a * t - b * t),
 }
 
 
@@ -1127,8 +1147,6 @@ class ABS_WAS_ConditioningBlend:
 
         conditioning_a = ConditioningShifter.clone_conditionings(conditioning_a, device)
         conditioning_b = ConditioningShifter.clone_conditionings(conditioning_b, device)
-        #conditioning_a = ConditioningShifter.set_device_conds(conditioning_a, device)
-        #conditioning_b = ConditioningShifter.set_device_conds(conditioning_b, device)
 
         blend_fn = blending_modes[blending_mode]
         blend_weight = torch.tensor(blending_strength, device=device)

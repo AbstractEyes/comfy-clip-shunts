@@ -197,25 +197,30 @@ class ConditioningShifter:
         return proj.reshape(B, T, target_dim)
 
     @staticmethod
-    def run_adapter(adapter_model: ConditionModulationShuntAdapter,
+    def run_adapter(adapter_model,
                     encoder_embeddings: torch.Tensor,
                     clip_slice: torch.Tensor,
                     guidance_scale: float,
                     adapter_type: str,
                     slice_range: Tuple[int, int]) -> AdapterOutput:
         """Run adapter and package output"""
-        gen_config = {"max_guidance": guidance_scale if guidance_scale > 0 else 1.0}
-
-        #encoder_embeddings, clip_slice = reshape_for_shunt(encoder_embeddings, clip_slice, adapter_model)
+        #gen_config = {"max_guidance": guidance_scale if guidance_scale > 0 else 1.0}
 
         with torch.no_grad():
-            outputs = adapter_model(encoder_embeddings.float(), clip_slice.float(), config=gen_config)
+            outputs = adapter_model(encoder_embeddings.float(), clip_slice.float())#, config=gen_config)
 
             if isinstance(outputs, tuple) and len(outputs) == 8:
                 anchor, delta, log_sigma, attn_c2m, attn_m2c, tau, g_pred, gate = outputs
+                logger.info(
+                    f"[ConditioningShifter] Adapter outputs: {anchor.shape}, {delta.shape}, {log_sigma.shape}, {attn_c2m.shape}, {attn_m2c.shape}, {tau.shape}, {g_pred.shape}, {gate.shape}")
+
+                # CRITICAL FIX: Remove the gate from delta since it's already multiplied in the model
+                # We need to divide it out so we can apply gating consistently in _apply_single
+                delta_ungated = delta / (gate + 1e-8)  # Add epsilon to avoid division by zero
+
                 return AdapterOutput(
                     anchor=anchor,
-                    delta=delta,  # Already has gate multiplied!
+                    delta=delta_ungated,  # Now this is the raw delta without gate
                     log_sigma=log_sigma,
                     tau=tau,
                     g_pred=g_pred,
@@ -295,66 +300,87 @@ class ConditioningShifter:
     def apply_modifications(clip_slice: torch.Tensor, outputs: List[AdapterOutput],
                             config: ShiftConfig) -> torch.Tensor:
         """Apply modifications based on config.pool_method"""
-        torch.manual_seed(config.seed if config.seed >= 0 else torch.randint(0, 2**32, (1,)).item())
+        # FIXED: Use local RNG instead of global seed
+        if config.seed >= 0:
+            generator = torch.Generator(device=clip_slice.device)
+            generator.manual_seed(config.seed)
+        else:
+            generator = None
+
+        logger.info(f"Applying modifications with config: {config}")
 
         modified = clip_slice.clone()
         if config.pool_method == "sequential":
             # Apply each adapter sequentially
             for output in outputs:
-                modified = ConditioningShifter._apply_single(modified, output, config)
+                modified = ConditioningShifter._apply_single(modified, output, config, generator)
             return modified
 
         elif config.pool_method == "weighted_average":
             # Pool all adapters then apply once
             if len(outputs) == 1:
-                return ConditioningShifter._apply_single(modified, outputs[0], config)
+                return ConditioningShifter._apply_single(modified, outputs[0], config, generator)
 
             pooled = ConditioningShifter._pool_outputs(outputs)
-            return ConditioningShifter._apply_single(clip_slice, pooled, config)
+            return ConditioningShifter._apply_single(clip_slice, pooled, config, generator)
 
         else:
             raise ValueError(f"Unknown pool_method: {config.pool_method}")
 
     @staticmethod
     def _apply_single(clip_slice: torch.Tensor, output: AdapterOutput,
-                      config: ShiftConfig) -> torch.Tensor:
+                      config: ShiftConfig, generator: Optional[torch.Generator] = None) -> torch.Tensor:
         """Apply a single adapter output with optional top-k selection"""
 
+        logger.info(f"Applying single adapter output: {output.adapter_type} with slice range {output.slice_range}")
+        logger.info(f"Output shapes: anchor={output.anchor.shape}, delta={output.delta.shape}, log_sigma={output.log_sigma.shape}, gate={output.gate.shape}")
         # Apply top-k selection if enabled
         topk_mask, scores = ConditioningShifter.apply_topk_selection(output, config)
 
-        # Preprocess (but remember delta already has gate!)
-        delta = output.delta * config.delta_scale + config.delta_mean
-
+        # Process gate
         gate_scaled = output.gate * config.gate_probability
         gate_mask = (gate_scaled > config.gate_threshold).float()
         gate_masked = gate_scaled * gate_mask
 
-        # Apply top-k mask to gate and delta
+        # FIXED: Apply delta strength properly
+        delta = output.delta * config.delta_scale + config.delta_mean
+        #delta = delta #* config.delta_strength  # Actually apply strength!
+
+        # FIXED: Consistent masking - apply top-k to all components
         if config.use_topk:
-            # Expand mask to match dimensions
             topk_mask_expanded = topk_mask.unsqueeze(-1)
             gate_masked = gate_masked * topk_mask_expanded
             delta = delta * topk_mask_expanded
 
-        # Apply strength
-        delta_final = delta
+            # Also mask anchor if using anchor mode
+            if config.use_anchor:
+                logger.info(f"Applying top-k mask to anchor: {output.anchor.shape} with mask {topk_mask_expanded.shape}")
+                anchor_masked = output.anchor * topk_mask_expanded
+            else:
+                anchor_masked = output.anchor
+        else:
+            anchor_masked = output.anchor
+
+        # Apply gated delta (single application of gate)
+        delta_final = delta * gate_masked
 
         # Apply based on anchor mode
         if config.use_anchor:
             # Blend original with anchor, then add delta
-            blended = clip_slice * (1 - gate_masked) + output.anchor * gate_masked
+            blended = clip_slice * (1 - gate_masked) + anchor_masked * gate_masked
             clip_modified = blended + delta_final
         else:
             # Simple additive
             clip_modified = clip_slice + delta_final
 
-        # Apply noise
+        # Apply noise with local generator
         if config.sigma_scale > 0 and config.noise_injection > 0:
             sigma = torch.exp(output.log_sigma * config.sigma_scale)
-            clip_modified += torch.randn_like(clip_modified) * sigma * config.noise_injection
+            noise = torch.randn_like(clip_modified)
+            clip_modified += noise * sigma * config.noise_injection
         elif config.noise_injection > 0:
-            clip_modified += torch.randn_like(clip_modified) * config.noise_injection
+            noise = torch.randn_like(clip_modified)
+            clip_modified += noise * config.noise_injection
 
         return clip_modified
 
@@ -368,41 +394,51 @@ class ConditioningShifter:
         pooled_delta = sum(o.delta for o in outputs) / total_weight
         pooled_log_sigma = sum(o.log_sigma for o in outputs) / total_weight
 
-        # Handle tau with different head counts
+        # FIXED: Better tau pooling that preserves head information
         if all(o.tau is not None for o in outputs):
-            # Take mean across heads for each adapter, then average
-            tau_values = [o.tau.mean().item() for o in outputs]
-            pooled_tau_value = sum(tau_values) / total_weight
-            # Create scalar tensor on same device
-            pooled_tau = torch.tensor(pooled_tau_value, device=outputs[0].tau.device)
+            # Stack all tau tensors and average while preserving shape
+            tau_stack = torch.stack([o.tau for o in outputs])
+            pooled_tau = tau_stack.mean(dim=0)  # Preserves original shape
         else:
             pooled_tau = None
 
         pooled_g_pred = sum(o.g_pred for o in outputs) / total_weight if outputs[0].g_pred is not None else None
         pooled_gate = sum(o.gate for o in outputs) / total_weight
 
-        # Pool attention weights if available - handle different head counts
+        # FIXED: Pool attention weights while preserving head information
         pooled_attn_c2m = None
         pooled_attn_m2c = None
         if all(o.attn_c2m is not None for o in outputs):
-            # First, average across heads for each adapter to get [batch, seq_c, seq_m]
-            attn_c2m_list = []
-            attn_m2c_list = []
+            # Option 1: Average across adapters while keeping heads
+            # This assumes all adapters have the same number of heads
+            if all(o.attn_c2m.shape[1] == outputs[0].attn_c2m.shape[1] for o in outputs):
+                # All have same number of heads - average directly
+                attn_c2m_stack = torch.stack([o.attn_c2m for o in outputs])
+                attn_m2c_stack = torch.stack([o.attn_m2c for o in outputs])
+                pooled_attn_c2m = attn_c2m_stack.mean(dim=0)
+                pooled_attn_m2c = attn_m2c_stack.mean(dim=0)
+            else:
+                # Different number of heads - need to handle carefully
+                # Option 2: Pool to max heads and pad smaller ones
+                max_heads = max(o.attn_c2m.shape[1] for o in outputs)
 
-            for o in outputs:
-                # Average across heads dimension
-                attn_c2m_avg = o.attn_c2m.mean(dim=1)  # [batch, seq_c, seq_m]
-                attn_m2c_avg = o.attn_m2c.mean(dim=1)  # [batch, seq_m, seq_c]
-                attn_c2m_list.append(attn_c2m_avg)
-                attn_m2c_list.append(attn_m2c_avg)
+                padded_c2m = []
+                padded_m2c = []
+                for o in outputs:
+                    heads = o.attn_c2m.shape[1]
+                    if heads < max_heads:
+                        # Repeat last head to match max_heads
+                        pad_size = max_heads - heads
+                        last_head_c2m = o.attn_c2m[:, -1:, :, :].repeat(1, pad_size, 1, 1)
+                        last_head_m2c = o.attn_m2c[:, -1:, :, :].repeat(1, pad_size, 1, 1)
+                        padded_c2m.append(torch.cat([o.attn_c2m, last_head_c2m], dim=1))
+                        padded_m2c.append(torch.cat([o.attn_m2c, last_head_m2c], dim=1))
+                    else:
+                        padded_c2m.append(o.attn_c2m)
+                        padded_m2c.append(o.attn_m2c)
 
-            # Now average across adapters
-            pooled_attn_c2m = sum(attn_c2m_list) / total_weight
-            pooled_attn_m2c = sum(attn_m2c_list) / total_weight
-
-            # Add back a dummy heads dimension for compatibility
-            pooled_attn_c2m = pooled_attn_c2m.unsqueeze(1)  # [batch, 1, seq_c, seq_m]
-            pooled_attn_m2c = pooled_attn_m2c.unsqueeze(1)  # [batch, 1, seq_m, seq_c]
+                pooled_attn_c2m = torch.stack(padded_c2m).mean(dim=0)
+                pooled_attn_m2c = torch.stack(padded_m2c).mean(dim=0)
 
         return AdapterOutput(
             anchor=pooled_anchor,
