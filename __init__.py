@@ -39,10 +39,13 @@ from .node.encoder_nodes import (
     EncoderLoader,
     EncoderSamplerConfig,
     # Clip-based swap and handling nodes
-    EncoderSampler,
+    #EncoderSampler,
     RemoveSpecialTokens,
     EncoderStackerNode,
+)
 
+from .node.encoder_sampler import (
+    ClipSampler,
 )
 
 from .node.embedding_nodes import (
@@ -149,6 +152,8 @@ from .node.conditioning_nodes import (
     ConditioningSetDtypeNode,            # untested
     ABS_WAS_ConditioningBlend,           # semi-ready ported from WAS
     RoseSimilarityConditioning,          # untested, but should be ready
+    TestNewCondTypeNode,                 # untested, but should be ready
+    ConditioningSelector,                # untested, but should be ready
 )
 
 NODE_CLASS_MAPPINGS = {
@@ -158,7 +163,7 @@ NODE_CLASS_MAPPINGS = {
 
     # Sampler nodes
     "EncoderSamplerConfig": EncoderSamplerConfig,  # Configuration node for sampling encoders
-    "EncoderSampler": EncoderSampler,  # Sampler node for encoders
+    "ClipSampler": ClipSampler,  # Sampler node for encoders
     "AModelSamplingDiscrete": AModelSamplingDiscrete,  # Discrete sampling node for model outputs
 
     # Shunt adapter loading and management nodes
@@ -277,6 +282,10 @@ NODE_CLASS_MAPPINGS = {
     # Imported and extended conditioning nodes
     "ABS_WAS_ConditioningBlend": ABS_WAS_ConditioningBlend,  # Semi-ready ported from WAS, blends conditioning inputs over steps
     "RoseSimilarityConditioning": RoseSimilarityConditioning,  # Unused, but ready for future use
+
+    # Testing and debugging nodes
+    #"TestNewCondTypeNode": ConditioningSetDeviceNode,  # Unused, but ready for future use
+    "ConditioningSelector": ConditioningSelector,  # Unused, but ready for future use
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -285,8 +294,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 
     # Sampler nodes
     "EncoderSamplerConfig": "🎛️ Encoder Sampler Config",  # Configuration node for sampling encoders
-    "EncoderSampler": "🎲 Encoder Sampler",  # Sampler node for encoders
+    "EncoderSampler": "🎲 Clip Sampler",  # Sampler node for encoders
     "AModelSamplingDiscrete": "🎲 Discrete Model Sampling",  # Discrete sampling node for model outputs
+
 
     # Shunt adapter loading and management nodes
     "SimpleEncoderLoader": "🔍 Simple Encoder Loader",
@@ -384,6 +394,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 
     "ABS_WAS_ConditioningBlend": "🔄 WAS Conditioning Blend",  # Semi-ready ported from WAS, blends conditioning inputs over steps
     "RoseSimilarityConditioning": "🌹 Rose Similarity Conditioning",  # Unused, but ready for future use
+    #"TestNewCondTypeNode": "🔍 Test New Conditioning Type",  # Unused, but ready for future use
+    "ConditioningSelector": "🔍 Conditioning Selector",  # Unused, but ready for future use
+
 
 }
 
@@ -393,7 +406,7 @@ logger.info("""
 ╔══════════════════════════════════════════╗
 ║        🚀 ABS SHUNT SUITE 🚀            ║
 ║    Dev Advanced Bridging System Adapters ║
-║         ⚡ Version 0.9.8 ⚡                ║
+║         ⚡ Version 0.9.8.5 ⚡              ║
 ╚══════════════════════════════════════════╝
 """)
 

@@ -156,12 +156,15 @@ class ClipEncoderLoader:
                     ],
                     {"default": "clip_l", "tooltip": "Symbolic encoder role for this CLIP (used for downstream interpretation)"}
                 ),
+                "clip_set_last_layer": ("INT", {"default": -2, "min": -69696, "max": -1, "step": -1,
+                                                "tooltip": "Set the last layer of the CLIP model to this value. 0 means no change."}),
             },
             "optional": {
                 "device": (
                     ["default", "cpu", "cuda"],
                     {"default": "default", "advanced": True}
                 ),
+
             }
         }
 
@@ -171,7 +174,8 @@ class ClipEncoderLoader:
     CATEGORY = "advanced/loaders"
     DESCRIPTION = "[ABS] Loads a single CLIP and returns both CLIP and ENCODER_PIPE for symbolic pipeline use."
 
-    def load_clip_internal(self, clip_name, model_type, encoder_type, device="default"):
+
+    def load_clip_internal(self, clip_name, model_type, encoder_type, device="default", clip_set_last_layer=-1):
         clip_type = getattr(CLIPType, model_type.upper(), CLIPType.STABLE_DIFFUSION)
 
         model_options = {}
@@ -185,6 +189,7 @@ class ClipEncoderLoader:
             clip_type=clip_type,
             model_options=model_options
         )
+        clip.clip_layer(clip_set_last_layer)  # Set to -1 by default, meaning no change
 
         encoder_pipe = [{
             "clip": clip,

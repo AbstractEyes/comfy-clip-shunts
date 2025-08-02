@@ -948,169 +948,132 @@ import torch
 import math
 
 
-def normalize(latent, target_min=None, target_max=None):
-    """
-    Normalize a tensor `latent` between `target_min` and `target_max`.
-
-    Args:
-        latent (torch.Tensor): The input tensor to be normalized.
-        target_min (float, optional): The minimum value after normalization.
-            - When `None` min will be tensor min range value.
-        target_max (float, optional): The maximum value after normalization.
-            - When `None` max will be tensor max range value.
-
-    Returns:
-        torch.Tensor: The normalized tensor
-    """
-    min_val = latent.min()
-    max_val = latent.max()
-
-    if target_min is None:
-        target_min = min_val
-    if target_max is None:
-        target_max = max_val
-
-    normalized = (latent - min_val) / (max_val - min_val)
-    scaled = normalized * (target_max - target_min) + target_min
-    return scaled
-
-
-def slerp(a, b, t):
-    """
-    Perform Spherical Linear Interpolation (SLERP) between two tensors.
-
-    This function interpolates between two input tensors `a` and `b` using SLERP,
-    which is a method for smoothly transitioning between orientations or vectors
-    represented as tensors.
-
-    Args:
-        a (tensor): The first input tensor.
-        b (tensor): The second input tensor.
-        t (float): The blending factor, a value between 0 and 1 that controls the interpolation.
-
-    Returns:
-        tensor: The result of SLERP interpolation between `a` and `b`.
-
-    Note:
-        SLERP provides a smooth, shortest-path interpolation between two orientations or vectors
-        represented as tensors. It's commonly used in applications like 3D graphics and robotics.
-    """
-    if a.shape != b.shape:
-        raise ValueError("Input tensors a and b must have the same shape.")
-
-    a = torch.nn.functional.normalize(a, dim=-1)
-    b = torch.nn.functional.normalize(b, dim=-1)
-
-    dot_product = torch.sum(a * b, dim=-1).clamp(-1.0, 1.0)
-    angle = torch.acos(dot_product)
-
-    slerp_result = (
-            (a * torch.sin((1 - t) * angle) + b * torch.sin(t * angle)) /
-            torch.sin(angle)
-    )
-
-    slerp_result = normalize(slerp_result)
-
-    return slerp_result
+#def normalize(latent, target_min=None, target_max=None):
+#    """
+#    Normalize a tensor `latent` between `target_min` and `target_max`.
+#
+#    Args:
+#        latent (torch.Tensor): The input tensor to be normalized.
+#        target_min (float, optional): The minimum value after normalization.
+#            - When `None` min will be tensor min range value.
+#        target_max (float, optional): The maximum value after normalization.
+#            - When `None` max will be tensor max range value.
+#
+#    Returns:
+#        torch.Tensor: The normalized tensor
+#    """
+#    min_val = latent.min()
+#    max_val = latent.max()
+#
+#    if target_min is None:
+#        target_min = min_val
+#    if target_max is None:
+#        target_max = max_val
+#
+#    normalized = (latent - min_val) / (max_val - min_val)
+#    scaled = normalized * (target_max - target_min) + target_min
+#    return scaled
 
 
-def hslerp(a, b, t):
-    """
-    Perform Hybrid Spherical Linear Interpolation (HSLERP) between two tensors.
 
-    This function combines two input tensors `a` and `b` using HSLERP, which is a specialized
-    interpolation method for smooth transitions between orientations or colors.
 
-    Args:
-        a (tensor): The first input tensor.
-        b (tensor): The second input tensor.
-        t (float): The blending factor, a value between 0 and 1 that controls the interpolation.
+class ConditioningBlenderSampler:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "pos_conditionings": ("CONDITIONING", {}),
+                "folding_mode": (list(blending_modes.keys()), {"default": "lerp", "tooltip": "Blending mode to use."}),
+            }
+        }
 
-    Returns:
-        tensor: The result of HSLERP interpolation between `a` and `b`.
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION = "combine"
+    CATEGORY = "conditioning"
 
-    Note:
-        HSLERP provides smooth transitions between orientations or colors, particularly useful
-        in applications like image processing and 3D graphics.
-    """
-    if a.shape != b.shape:
-        raise ValueError("Input tensors a and b must have the same shape.")
+    def combine(self,
+                conditioning_a,
+                blending_mode,
+                blending_strength,
+                seed,
+                squash=False,
+                amount_blended=-1,
+                a_pool_strength=0.5,
+                b_pool_strength=0.5,
+                extrapolate_pooled=False,
+                conditioning_b=[], device="cpu"):
+        ...
 
-    num_channels = a.size(1)
 
-    interpolation_tensor = torch.zeros(1, num_channels, 1, 1, device=a.device, dtype=a.dtype)
-    interpolation_tensor[0, 0, 0, 0] = 1.0
 
-    result = (1 - t) * a + t * b
+class ConditioningSelector:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "conditioning": ("CONDITIONING", {}),
+                "index": ("INT", {"default": 1, "min": 0, "step": 1}),
+                "only_one": ("BOOLEAN", {"default": False, "tooltip": "If true, only return the selected conditioning."}),
+            }
+        }
 
-    if t < 0.5:
-        result += (torch.norm(b - a, dim=1, keepdim=True) / 6) * interpolation_tensor
-    else:
-        result -= (torch.norm(b - a, dim=1, keepdim=True) / 6) * interpolation_tensor
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING")
+    RETURN_NAMES = ("before", "after")
+    FUNCTION = "split"
+    CATEGORY = "conditioning"
 
-    return result
+    def split(self, conditioning, index, only_one=False):
+        uc = UsefulConditioning(conditioning).clone()
+
+        # use built-in slicing logic (class handles validation)
+        if only_one:
+            return [uc[index]], None
+        before = uc.slice(0, index)
+        after = uc.slice(index)
+
+        return before, after
+
+
 
 
 import torch
+import math
+import torch.nn.functional as F
+
+# Spherical linear interpolation (slerp), arc-preserving over cosine similarity
+def true_slerp(a, b, t):
+    dot = F.cosine_similarity(a, b, dim=-1).clamp(-0.9995, 0.9995)
+    theta = torch.acos(dot)
+    sin_theta = torch.sin(theta)
+    s1 = torch.sin((1 - t) * theta) / sin_theta
+    s2 = torch.sin(t * theta) / sin_theta
+    return a * s1.unsqueeze(-1) + b * s2.unsqueeze(-1)
+
+# Barycentric-style 5-point interpolation for rose/pentachoron blends
+def pentachoron_blend(points, weights):
+    return sum(w * p for w, p in zip(weights, points))
 
 blending_modes = {
-    # Linearly combines the two input tensors a and b using the parameter t.
-    'add': lambda a, b, t: (a * t + b * (1 - t)),
-
-    # Subtracts tensor b from tensor a, scaled by t.
-    'subtract': lambda a, b, t: (a * t - b * t),
-
-    # Interpolates between tensors a and b using normalized linear interpolation.
-    'bislerp': lambda a, b, t: (a * (1 - t) + b * t),
-
-    # Interpolates between tensors a and b using cosine interpolation.
-    'cosine interp': lambda a, b, t: (a + b - (a - b) * torch.cos(t * torch.tensor(math.pi))) / 2,
-
-    # Interpolates between tensors a and b using linear interpolation with a twist.
-    'cosine twist': lambda a, b, t: (a * (1 - t) + b * t) if t < 0.5 else (a * t + b * (1 - t)),
-
-    # Interpolates between tensors a and b using cubic interpolation.
-    'cuberp': lambda a, b, t: a + (b - a) * (3 * t ** 2 - 2 * t ** 3),
-
-    # Computes the absolute difference between tensors a and b, scaled by t.
-    'difference': lambda a, b, t: (abs(a - b) * t),
-
-    # Adds the absolute difference between tensors a and b, scaled by t.
-    'add difference': lambda a, b, t: (a + abs(a - b) * t),
-
-    # Subtracts the absolute difference between tensors a and b, scaled by t.
-    'subtract difference': lambda a, b, t: (a - abs(a - b) * t),
-
-    # Combines tensors a and b using an exclusion formula, scaled by t.
-    'exclusion': lambda a, b, t: ((a + b - 2 * a * b) * t),
-
-    # Exclusion fill inject gaps
-    'exclusion fill': lambda a, b, t: (a + (b - a) * t) if t < 0.5 else (a * t + b * (1 - t)),
-
-    # Interpolates between tensors a and b using normalized linear interpolation,
-    # with a twist when t is greater than or equal to 0.5.
-    'hslerp': lambda a, b, t: (a * (1 - t) + b * t) if t < 0.5 else (a * t + b * (1 - t)),
-
-    # Interpolates between tensors a and b using hybrid spherical linear interpolation (HSLERP).
-    'hsl': lambda a, b, t: hslerp(a, b, t),
-
-    # Interpolated using pentachoron interpolation, which is a method for blending tensors
-    'pentachoron': lambda a, b, t: (a * (1 - t) + b * t) if t < 0.5 else (a * t + b * (1 - t)),
-
-    # Adds tensor b to tensor a, scaled by t.
-    'inject': lambda a, b, t: (a + b * t),
-
-    # Interpolates between tensors a and b using linear interpolation.
-    'lerp': lambda a, b, t: (a * (1 - t) + b * t),
-
-    # Generates random values and combines tensors a and b with random weights, scaled by t.
-    'random': lambda a, b, t: (a + (torch.rand_like(b) * b - a) * t),
-
-    # Interpolates between tensors a and b using spherical linear interpolation (SLERP).
-    'slerp': lambda a, b, t: (a * (1 - t) + b * t),
-
+    'lerp': lambda a, b, t: a * (1 - t) + b * t,  # Linear interpolation
+    'slerp': true_slerp,                         # Spherical interpolation over cosine arc
+    'cosine': lambda a, b, t: (a + b - (a - b) * torch.cos(t * math.pi)) / 2,  # Cosine-eased LERP
+    'cuberp': lambda a, b, t: a + (b - a) * (3 * t ** 2 - 2 * t ** 3),         # Smooth cubic interpolation
+    'exclusion': lambda a, b, t: (a + b - 2 * a * b) * t,                      # Exclusive dissimilarity blend
+    'inject': lambda a, b, t: a + b * t,                                       # Additive delta injection
+    'random': lambda a, b, t: a + (torch.rand_like(b) * (b - a)) * t,          # Random perturbation toward b
+    'pentachoron': pentachoron_blend,                                          # 5-point latent polytope blend
 }
 
+pooled_blending_modes = {
+    'lerp': lambda a, b, t: a * (1 - t) + b * t,
+    'slerp': true_slerp,
+    'cosine': lambda a, b, t: a + (b - a) * (1 - torch.cos(t * math.pi)),
+    'cuberp': lambda a, b, t: a + (b - a) * (3 * t ** 2 - 2 * t ** 3),
+    'exclusion': lambda a, b, t: a + (b - a) * t - 2 * a * b * t,
+    'inject': lambda a, b, t: a + b * t,
+    'random': lambda a, b, t: a + (torch.rand_like(b) * (b - a)) * t,
+}
 
 class ABS_WAS_ConditioningBlend:
     @classmethod
@@ -1123,6 +1086,14 @@ class ABS_WAS_ConditioningBlend:
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "squash": ("BOOLEAN", {"default": False, "tooltip": "Average each input group before blending."}),
                 "amount_blended": ("INT", {"default": -1, "min": -1, "max": 1000, "step": 1}),
+                "a_pool_strength": ("FLOAT", {
+                    "default": 0.5, "min": -10.0, "max": 10.0, "step": 0.01,
+                    "tooltip": "How strongly to apply delta from pooled B into pooled A."
+                }),
+                "b_pool_strength": ("FLOAT", {
+                    "default": 0.5, "min": -10.0, "max": 10.0, "step": 0.01,
+                    "tooltip": "How strongly to apply delta from pooled B into pooled A."
+                }),
                 "extrapolate_pooled": ("BOOLEAN", {"default": False, "tooltip": "Extrapolate pooled outputs or avoid."}),
             },
             "optional": {
@@ -1135,8 +1106,20 @@ class ABS_WAS_ConditioningBlend:
     RETURN_NAMES = ("conditioning",)
     FUNCTION = "combine"
     CATEGORY = "conditioning"
+    DEPRECATED = True  # This node is deprecated, use the new ConditioningBlenderSampler instead.
 
-    def combine(self, conditioning_a, blending_mode, blending_strength, seed, squash=False, amount_blended=-1, extrapolate_pooled=False, conditioning_b=[], device="cpu"):
+    def combine(self,
+                conditioning_a,
+                blending_mode,
+                blending_strength,
+                seed,
+                squash=False,
+                amount_blended=-1,
+                a_pool_strength=0.5,
+                b_pool_strength=0.5,
+                extrapolate_pooled=False,
+                conditioning_b=[], device="cpu"):
+
         if seed > 0:
             torch.manual_seed(seed)
 
@@ -1145,86 +1128,95 @@ class ABS_WAS_ConditioningBlend:
         if not conditioning_b:
             return (conditioning_a,)
 
-        conditioning_a = ConditioningShifter.clone_conditionings(conditioning_a, device)
-        conditioning_b = ConditioningShifter.clone_conditionings(conditioning_b, device)
+        conditioning_a = UsefulConditioning(conditioning_a) if isinstance(conditioning_a, list) else conditioning_a
+        conditioning_b = UsefulConditioning(conditioning_b) if isinstance(conditioning_b, list) else conditioning_b
 
-        blend_fn = blending_modes[blending_mode]
+        conditioning_a = conditioning_a.clone()
+        conditioning_b = conditioning_b.clone()
+
         blend_weight = torch.tensor(blending_strength, device=device)
+        t = blend_weight.item() if blend_weight.numel() == 1 else float(blend_weight)
 
+        # --- SQUASHED BLEND ---
         if squash:
-            # Average A
-            a_seqs = [entry[0] for entry in conditioning_a]
-            a_avg = self.project_to_dominant_length(a_seqs, device)
+            a_avg = self.project_to_dominant_length([e[0] for e in conditioning_a], device)
+            pa_avg = torch.stack([e[1]["pooled_output"] for e in conditioning_a if "pooled_output" in e[1]]) \
+                .mean(dim=0) if extrapolate_pooled else None
 
-            a_pooleds = [
-                pooled for entry in conditioning_a
-                if (pooled := entry[1].get("pooled_output", None)) is not None
-            ]
+            b_avg = self.project_to_dominant_length([e[0] for e in conditioning_b], device)
+            pb_avg = torch.stack([e[1]["pooled_output"] for e in conditioning_b if "pooled_output" in e[1]]) \
+                .mean(dim=0) if extrapolate_pooled else None
 
-
-            pa_avg = torch.stack(a_pooleds).mean(dim=0) if a_pooleds else None
-
-            # Average B
-            b_seqs = [entry[0] for entry in conditioning_b]
-            b_avg = self.project_to_dominant_length(b_seqs, device)
-            logger.info(f"a_avg shape: {a_avg.shape}")
-            logger.info(f"b_avg shape: {b_avg.shape}")
-            if pooled is not None:
-                logger.info(f"pooled shape: {pooled.shape}")
-            b_pooleds = [
-                pooled for entry in conditioning_b
-                if (pooled := entry[1].get("pooled_output", None)) is not None
-            ]
-            pb_avg = torch.stack(b_pooleds).mean(dim=0) if b_pooleds else None
-
-            # Apply blend
             a_proj, b_proj = self.align_pair_length(a_avg, b_avg, device)
-            cond = normalize(blend_fn(a_proj, b_proj, 1 - blend_weight))
+
+            if blending_mode == "difference":
+                delta = torch.abs(a_proj - b_proj)
+                cond = a_proj + delta * blend_weight
+            elif blending_mode == "difference_exclude":
+                delta = torch.abs(a_proj - b_proj)
+                cond = a_proj - delta * blend_weight
+            elif blending_mode == "pentachoron":
+                points = [a_proj, b_proj, a_proj.clone(), b_proj.clone(), (a_proj + b_proj) / 2]
+                weights = torch.tensor([0.2] * 5, device=device)
+                cond = F.normalize(pentachoron_blend(points, weights))
+            else:
+                blend_fn = blending_modes[blending_mode]
+                cond = F.normalize(blend_fn(a_proj, b_proj, 1 - blend_weight))
 
             pooled = None
             if extrapolate_pooled and pa_avg is not None and pb_avg is not None:
-                pooled = normalize(blend_fn(pa_avg, pb_avg, 1 - blend_weight))
-            else:
-                # use the pooled output of the first conditioning
-                pooled = conditioning_a[0][1].get("pooled_output", None)
+                pooled_fn = pooled_blending_modes.get(blending_mode, lambda a, b, t: (a + b) / 2)
+                pooled = pooled_fn(pa_avg, pb_avg, t)
+                pooled = F.normalize(pooled, dim=-1)
+            elif pa_avg is not None or pb_avg is not None:
+                pooled = pa_avg if pa_avg is not None else pb_avg
 
             return ([[cond, {"pooled_output": pooled}]],)
 
-        # Pairwise blend (non-squashed)
+        # --- PAIRWISE BLEND ---
         result = []
         num_blend = len(conditioning_a) if amount_blended == -1 else min(amount_blended, len(conditioning_a))
 
         if not conditioning_b:
             conditioning_b = [[a.clone(), meta] for a, meta in conditioning_a]
 
-
         for i in range(num_blend):
             a, meta_a = conditioning_a[i]
-            if extrapolate_pooled:
-                pa = meta_a.get("pooled_output", None)
-            else:
-                pa = None
+            pa = meta_a.get("pooled_output", None)
 
             for b, meta_b in conditioning_b:
-                if extrapolate_pooled:
-                    pb = meta_b.get("pooled_output", None)
-                else:
-                    pb = None
+                pb = meta_b.get("pooled_output", None)
 
                 a, b = a.to(device), b.to(device)
-                if pa is not None: pa = pa.to(device).clone()
-                if pb is not None: pb = pb.to(device).clone()
+                pa = pa.to(device).clone() if pa is not None else None
+                pb = pb.to(device).clone() if pb is not None else None
+                pa = (a_pool_strength * pa) if pa is not None else None
+                pb = (b_pool_strength * pb) if pb is not None else None
 
                 a_proj, b_proj = self.align_pair_length(a, b, device)
-                cond = normalize(blend_fn(a_proj, b_proj, 1 - blend_weight))
+
+                if blending_mode == "difference":
+                    delta = torch.abs(a_proj - b_proj)
+                    cond = a_proj + delta * blend_weight
+                elif blending_mode == "difference_exclude":
+                    delta = torch.abs(a_proj - b_proj)
+                    cond = a_proj - delta * blend_weight
+                elif blending_mode == "pentachoron":
+                    points = [a_proj, b_proj, a_proj.clone(), b_proj.clone(), (a_proj + b_proj) / 2]
+                    weights = torch.tensor([0.75] * 5, device=device)
+                    cond = F.normalize(pentachoron_blend(points, weights))
+                else:
+                    blend_fn = blending_modes[blending_mode]
+                    cond = F.normalize(blend_fn(a_proj, b_proj, 1 - blend_weight))
 
                 pooled = None
-                if pa is not None and pb is not None:
-                    pooled = normalize(blend_fn(pa, pb, 1 - blend_weight))
-                elif not extrapolate_pooled:
-                    pooled = meta_a.get("pooled_output", None)
-                    if pooled is None:
-                        pooled = meta_b.get("pooled_output", None)
+                if extrapolate_pooled and pa is not None and pb is not None:
+                    pooled_fn = pooled_blending_modes.get(blending_mode, lambda a, b, t: (a + b) / 2)
+                    pooled = pooled_fn(pa, pb, t)
+                    pooled = F.normalize(pooled, dim=-1)
+                elif pa is not None or pb is not None:
+                    pooled = pa if pa is not None else pb
+
                 result.append([cond, {"pooled_output": pooled}])
 
         return (result,)
@@ -1247,7 +1239,6 @@ class ABS_WAS_ConditioningBlend:
         return torch.stack([resize(t) for t in tensors]).mean(dim=0)
 
     def align_pair_length(self, a: torch.Tensor, b: torch.Tensor, device):
-        """Ensure a and b have the same token length (T) for safe blending."""
         T = max(a.shape[1], b.shape[1])
 
         def pad_to(t):
@@ -1261,6 +1252,12 @@ class ABS_WAS_ConditioningBlend:
                 return torch.cat([t, pad], dim=1)
 
         return pad_to(a.to(device)), pad_to(b.to(device))
+
+# ----------------------------------------------------------------------
+# Encoder Blender Sampler
+# ----------------------------------------------------------------------
+
+
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -1323,12 +1320,53 @@ class RoseSimilarityConditioning:
             modes.append(x + rose_vals * ((n + r) - p))
             modes.extend([n, r, p])
 
-            averaged = torch.stack([normalize(m) for m in modes]).mean(dim=0)
+            averaged = torch.stack([F.normalize(m) for m in modes]).mean(dim=0)
             if normalize_result:
-                averaged = normalize(averaged)
+                averaged = F.normalize(averaged)
 
             result.append([averaged, {"pooled_output": pooled}])
 
         return (result,)
+
+
+from ..utils.conditioning_helper import ConditioningHelper, UsefulConditioning
+
+
+class TestNewCondTypeNode:
+    """
+        This node should convert the original cond into a more useful object for access.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "conditioning": ("CONDITIONING", {}),
+            }
+        }
+
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("new_conditioning",)
+
+    FUNCTION = "convert_conditioning"
+    CATEGORY = "utils/conditioning"
+    def convert_conditioning(self, conditioning):
+        """
+        Convert CONDITIONING to a more useful format.
+        """
+        out = []
+        for combined, info in conditioning:
+            # Convert to a more useful format
+            new_combined = ConditioningHelper.convert_conditioning(combined)
+
+        return (new_combined,)
+
+
+
+
+
+
+
+
+
 
 

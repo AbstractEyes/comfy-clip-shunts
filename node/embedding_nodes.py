@@ -4,42 +4,44 @@ import json, logging, uuid, re, torch
 from pathlib import Path
 from typing import List, Tuple, Optional
 
-from folder_paths import get_folder_paths            # Comfy helper
-
+from folder_paths import get_folder_paths
 from ..embedding.embedding_manager import get_bank, EmbeddingManager
 
 logger = logging.getLogger(__name__)
+
+from ..utils.conditioning_helper import ConditioningHelper, UsefulConditioning
 
 # -------------------------------------------------------------------------
 # helpers – path & bank
 def _default_embed_dir() -> str:
     return str(Path(get_folder_paths("embeddings")[0]) / "cached_embeddings")
 
+
 def _bank(path: str = "", force=False) -> EmbeddingManager:
     return get_bank(path or _default_embed_dir(), force_reload=force)
+
 
 # token parsing helpers
 def _parse_token_field(raw: str) -> List[int]:
     """'101, 202 303' → [101,202,303]."""
     return [int(v) for v in re.split(r"[,\s]+", raw.strip()) if v]
 
+
 def _extract_tokens_from_cond(cond: list) -> List[int]:
     """Look for token-IDs embedded in conditioning extras."""
     if len(cond) < 2:
         return []
-    key, obj = cond[1]
-    if isinstance(obj, torch.Tensor) and key.lower().startswith("token"):
-        return obj.flatten().int().cpu().tolist()
+    _, obj = cond  # Fixed: was unpacking incorrectly
     if isinstance(obj, dict) and "token_ids" in obj:
         return list(map(int, obj["token_ids"]))
     return []
+
 
 # -------------------------------------------------------------------------
 # 1 ▸ SAVE NODE
 class ABS_SaveEmbedding:
     """
-    Save first tensor in CONDITIONING into the ABS bank.
-    Token-IDs are auto-extracted or can be supplied manually.
+    Save CONDITIONING bundle into the ABS bank.
     """
 
     @classmethod
@@ -47,7 +49,7 @@ class ABS_SaveEmbedding:
         return {
             "required": {
                 "conditioning": ("CONDITIONING",),
-                "trigger": (["BEATRIX", "ZANA", "WILDCARD"], {"default": "BEATRIX"} ),
+                "trigger": ("STRING", {"default": "BEATRIX"}),
                 "prompt": ("STRING", {"default": "", "multiline": True}),
                 "meta_json": ("STRING", {"default": "{}", "multiline": True}),
                 "force": ("BOOLEAN", {"default": False}),
@@ -56,52 +58,65 @@ class ABS_SaveEmbedding:
 
     RETURN_TYPES = ("CONDITIONING",)
     RETURN_NAMES = ("conditioning",)
-    CATEGORY     = "utils/embedding"
-    FUNCTION     = "save"
+    CATEGORY = "utils/embedding"
+    FUNCTION = "save"
     OUTPUT_NODE = True
 
-    # ------------------------------------------------------------------
     def save(self, conditioning, trigger, prompt, meta_json, force):
+        conditioning = UsefulConditioning(conditioning) if isinstance(conditioning, list) else conditioning
         if not conditioning:
             raise ValueError("conditioning list is empty")
 
-        bank = _bank()
+        bank = _bank(force=force)
+
         if not trigger:
             trigger = f"auto_{uuid.uuid4().hex[:8]}"
+
+        # Check if trigger already exists
         if not force:
-            for md5, meta in bank.meta.items():
+            for bundle_id, meta in bank.meta.items():
                 if meta.get("prompt_trigger") == trigger:
                     logger.info(f"[ABS] trigger '{trigger}' exists – skip")
                     return (conditioning,)
 
-        md5 = bank.save_conditioning_pack(
-            conditioning=conditioning,
+        try:
+            extra_meta = json.loads(meta_json or "{}")
+        except json.JSONDecodeError:
+            logger.warning(f"[ABS] Invalid meta_json, using empty dict")
+            extra_meta = {}
+
+        bundle_id = bank.save_bundle(
             trigger=trigger,
+            conditioning=conditioning,
             prompt_text=prompt,
             folder=bank.path,
-            meta_extra=json.loads(meta_json or "{}")
+            meta_extra=extra_meta
         )
-        bank.build_prompt_matrix()
-        logger.info(f"[ABS] saved bundle {md5[:8]} as '{trigger}' | prompt='{prompt[:64]}…'")
+
+        logger.info(f"[ABS] saved bundle {bundle_id[:8]} as '{trigger}' | prompt='{prompt[:64]}…'")
         return (conditioning,)
 
 
 # -------------------------------------------------------------------------
 # dropdown helper
 def _bundle_lists():
+    """Get lists of bundle IDs for dropdown display."""
     b = _bank()
     if not b.meta:
         return (["<no bundles>"], [""])
+
     vis, true = [], []
-    for md5, meta in b.meta.items():
-        vis.append(meta.get("prompt_trigger") or md5[:8])
-        true.append(md5)
+    for bundle_id, meta in b.meta.items():
+        display_name = meta.get("prompt_trigger", bundle_id[:8])
+        vis.append(display_name)
+        true.append(bundle_id)
     return vis, true
+
 
 # -------------------------------------------------------------------------
 # 2 ▸ LOAD NODE
 class ABS_LoadEmbedding:
-    """Load a stored bundle tensor as CONDITIONING."""
+    """Load a stored bundle as CONDITIONING using UsefulConditioning."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -111,41 +126,74 @@ class ABS_LoadEmbedding:
             default = "<no bundles>"
         else:
             default = vis[0]
+
         return {
             "required": {
                 "bundle_id": (vis, {"default": default}),
-                "tensor_key": ("STRING", {"default": "conditioning"}),
-                "device": ("STRING", {"default": "auto"}),
+                "device": (["auto", "cpu", "cuda"], {"default": "auto"}),
             }
         }
 
     RETURN_TYPES = ("CONDITIONING",)
     RETURN_NAMES = ("conditioning",)
-    CATEGORY     = "utils/embedding"
-    FUNCTION     = "load"
+    CATEGORY = "utils/embedding"
+    FUNCTION = "load"
 
-    # ------------------------------------------------------------------
-    def _md5(self, ident: str) -> str:
-        for md5, meta in _bank().meta.items():
-            if md5.startswith(ident) or meta.get("prompt_trigger") == ident:
-                return md5
+    def _resolve_bundle(self, ident: str) -> str:
+        """Resolve bundle ID from trigger name or partial ID."""
+        bank = _bank()
+
+        # Direct ID match
+        if ident in bank.meta:
+            return ident
+
+        # Search by trigger or partial ID
+        for bundle_id, meta in bank.meta.items():
+            if meta.get("prompt_trigger") == ident or bundle_id.startswith(ident):
+                return bundle_id
+
         raise KeyError(f"bundle '{ident}' not found")
 
-    def load(self, bundle_id, tensor_key, device):
-        bank = _bank()
-        md5  = self._md5(bundle_id)
-        tensor = bank.get_tensor(md5, tensor_key)
+    def load(self, bundle_id, device):
+        if bundle_id == "<no bundles>":
+            raise ValueError("No bundles available to load")
 
-        device = "cuda" if device == "auto" and torch.cuda.is_available() else device
-        return ([(tensor_key, tensor.to(device))],)
+        bank = _bank()
+
+        # Resolve the actual bundle ID
+        resolved_id = self._resolve_bundle(bundle_id)
+
+        # Load the bundle as UsefulConditioning
+        useful_cond = bank.load_bundle(resolved_id)
+
+        # Determine device
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        # Convert to standard CONDITIONING format with proper device placement
+        conditioning_list = []
+        for i in range(len(useful_cond)):
+            tensor = useful_cond.get_tensor(i).to(device)
+            meta = useful_cond.get_all_metadata()[i].copy()
+
+            # Ensure pooled_output is on correct device if present
+            if "pooled_output" in meta and isinstance(meta["pooled_output"], torch.Tensor):
+                meta["pooled_output"] = meta["pooled_output"].to(device)
+
+            conditioning_list.append([tensor, meta])
+
+        logger.info(
+            f"[ABS] loaded bundle {resolved_id[:8]} (trigger: {bank.meta[resolved_id].get('prompt_trigger', 'none')})")
+
+        return (conditioning_list,)
 
 
 # -------------------------------------------------------------------------
-# 3 ▸ SHAPER NODE
+# 3 ▸ SHAPER NODE (Fixed)
 class ABS_ShaperEmbedding:
     """
-    learn=True  → save incoming tensor (+ tokens) under trigger
-    learn=False → prepend saved embedding (trigger / md5) to pipe
+    learn=True  → save incoming conditioning under trigger
+    learn=False → load and merge saved embedding with incoming conditioning
     """
 
     @classmethod
@@ -156,36 +204,131 @@ class ABS_ShaperEmbedding:
             default = "<no bundles>"
         else:
             default = vis[0]
+
         return {
             "required": {
                 "conditioning": ("CONDITIONING",),
                 "bundle_id": (vis, {"default": default}),
-                "learn":   ("BOOLEAN", {"default": False}),
-                "force":   ("BOOLEAN", {"default": False}),
+                "learn": ("BOOLEAN", {"default": False}),
+                "force": ("BOOLEAN", {"default": False}),
+                "mode": (["prepend", "append", "replace"], {"default": "prepend"}),
             }
         }
 
     RETURN_TYPES = ("CONDITIONING",)
     RETURN_NAMES = ("conditioning",)
-    CATEGORY     = "utils/embedding"
-    FUNCTION     = "apply"
+    CATEGORY = "utils/embedding"
+    FUNCTION = "apply"
     OUTPUT_NODE = True
 
-
-    # ------------------------------------------------------------------
-    def apply(self, conditioning, trigger, learn, force):
+    def apply(self, conditioning, bundle_id, learn, force, mode):
         if not conditioning:
             raise ValueError("conditioning list empty")
 
         if learn:
-            ABS_SaveEmbedding().save(conditioning, trigger, "", "{}", force)
-            return (conditioning,)
+            # Save mode - use bundle_id as trigger
+            if bundle_id == "<no bundles>":
+                bundle_id = f"auto_{uuid.uuid4().hex[:8]}"
 
-        if not trigger:
-            raise ValueError("trigger required when learn=False")
+            saver = ABS_SaveEmbedding()
+            return saver.save(
+                conditioning=conditioning,
+                trigger=bundle_id,
+                prompt="",
+                meta_json="{}",
+                force=force
+            )
+        else:
+            # Load and merge mode
+            if bundle_id == "<no bundles>":
+                raise ValueError("No bundle selected for loading")
 
-        #todo rewrite it's broken
-        return #todo broken
+            # Load the saved embedding
+            loader = ABS_LoadEmbedding()
+            loaded_cond = loader.load(bundle_id, "auto")[0]
+
+            # Merge based on mode
+            if mode == "replace":
+                return (loaded_cond,)
+            elif mode == "append":
+                return (conditioning + loaded_cond,)
+            else:  # prepend
+                return (loaded_cond + conditioning,)
+
+
+# -------------------------------------------------------------------------
+# 4 ▸ EMBEDDING INSPECTOR NODE (New)
+class ABS_InspectEmbedding:
+    """Inspect the contents of a saved embedding bundle."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        vis, _ = _bundle_lists()
+        if not vis:
+            vis = ["<no bundles>"]
+            default = "<no bundles>"
+        else:
+            default = vis[0]
+
+        return {
+            "required": {
+                "bundle_id": (vis, {"default": default}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "STRING", "STRING")
+    RETURN_NAMES = ("info", "prompt_text", "metadata")
+    CATEGORY = "utils/embedding"
+    FUNCTION = "inspect"
+    OUTPUT_NODE = True
+
+    def inspect(self, bundle_id):
+        if bundle_id == "<no bundles>":
+            return ("No bundles available", "", "{}")
+
+        bank = _bank()
+
+        # Resolve bundle
+        resolved_id = None
+        for bid, meta in bank.meta.items():
+            if meta.get("prompt_trigger") == bundle_id or bid.startswith(bundle_id):
+                resolved_id = bid
+                break
+
+        if not resolved_id:
+            return (f"Bundle '{bundle_id}' not found", "", "{}")
+
+        # Get metadata
+        meta = bank.meta[resolved_id]
+        useful_cond = bank.load_bundle(resolved_id)
+
+        # Build info string
+        info_parts = [
+            f"Bundle ID: {resolved_id[:16]}...",
+            f"Trigger: {meta.get('prompt_trigger', 'none')}",
+            f"Created: {meta.get('created_at', 'unknown')}",
+            f"Entries: {len(useful_cond)}",
+            f"Tensor Keys: {', '.join(meta.get('tensor_keys', []))}",
+        ]
+
+        # Add tensor shapes
+        for i in range(len(useful_cond)):
+            tensor = useful_cond.get_tensor(i)
+            pooled = useful_cond.get_pooled(i)
+            info_parts.append(
+                f"  Entry {i}: tensor={tuple(tensor.shape)}, pooled={'yes' if pooled is not None else 'no'}")
+
+        info = "\n".join(info_parts)
+        prompt_text = meta.get("prompt_text", "")
+
+        # Clean metadata for display
+        display_meta = {
+            k: v for k, v in meta.items()
+            if k not in ["conditioning_extras", "tensor_keys", "dims"]
+        }
+        metadata = json.dumps(display_meta, indent=2)
+
+        return (info, prompt_text, metadata)
 
 
 from comfy.utils import ProgressBar

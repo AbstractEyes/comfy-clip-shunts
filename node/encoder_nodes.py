@@ -14,7 +14,7 @@ from ..utils.conditioning_shifter import ConditioningShifter
 
 from ..sampler.formulas.folding import FoldingKernels
 from ..sampler.formulas.schedules import SchedulerModes
-
+from ..utils.conditioning_helper import ConditioningHelper, UsefulConditioning, ModelSlicer
 
 class EncoderStackerNode:
     """
@@ -197,6 +197,7 @@ class EncoderSamplerSimple:
         # Ensure clips and encoders are valid
         if not clips or not encoders:
             raise ValueError("Both clips and encoders must be provided.")
+
 
 
 
@@ -711,58 +712,55 @@ class EncoderSampler:
 
         return (pos_sampled_conditioning, pos_raw_conditioning, pos_debug, neg_sampled_conditioning, neg_raw_conditioning, neg_debug)
 
+    def __prepare_conditioning(
+        self, prompt, encoders, clip, device, mode,
+        config=None, reckless_config=None, clip_gate_config=None
+    ):
+        logger.info(f"[EncoderSampler] Sampling with mode: {mode} on device {device}")
 
+        # ── 1. raw encoder embeddings ───────────────────────────────────────
+        a_raws = [
+            (encoder, self.__extract_symbolic(encoder, prompt, device, config))
+            for encoder in encoders
+        ]
 
-    def __prepare_conditioning(self, prompt, encoders, clip, device, mode, config=None, reckless_config=None, clip_gate_config=None):
-        #negative_prompt = negative_prompt_in or config.get("negative_prompt", None)
-        logger.info(f"[EncoderSampler] Sampling with mode: {mode} on device {device}")#, prompt: {prompt}, encoders: {encoders}")
-
-        # we aren't setting the rope accessor correctly, we need to do it manually
-        # if bert enable rope
-        a_raws = []
-        for encoder in encoders:
-            a_raws.append([encoder, self.__extract_symbolic(encoder, prompt, device, config)])
-
-        logger.info(f"[EncoderSampler] Pre-removal prompt {prompt}.")
+        # ── 2. baseline CLIP conditioning + pooled ──────────────────────────
         encoder_prompt = remove_special_tokens(prompt, remove_clip=True)[0] if prompt else None
-        logger.info(f"[EncoderSampler] Cleaned prompt: {encoder_prompt}")
-        cond, data = self.__schedule_and_extract_conds(clip, encoder_prompt, device, mode=mode)
-        orig_clip_full = cond.clone()
-        orig_features_full = data.get("features", None)
-        orig_features_full = orig_features_full.clone() if orig_features_full is not None else None
+        clip_tensor, clip_meta = self.__schedule_and_extract_conds(
+            clip, encoder_prompt, device, mode=mode
+        )
+        orig_clip_full = clip_tensor.clone()
+        orig_pool_full = clip_meta.get("pooled_output")            # ← no bool-test
+        if orig_pool_full is not None:
+            orig_pool_full = orig_pool_full.clone()
 
-        pooled_output = data.get("pooled_output", None)
-        orig_pool_full = pooled_output.clone() if pooled_output is not None else None
+        # ── 3. symbolic slicing via ModelSlicer ─────────────────────────────
+        base_uc = UsefulConditioning(
+            [[clip_tensor.clone(), {"pooled_output": orig_pool_full}]]
+        )
+        clip_uc = ModelSlicer.slice(base_uc, model_type=mode, device=device)
 
-        clip_slices = self.__slice_conds(cond.clone(), orig_pool_full, orig_features_full, mode=mode)
-
+        # ── 4. fold each slice through Integra ──────────────────────────────
         folded_outputs: Dict[str, List[torch.Tensor]] = {}
-
         for encoder, a_raw in a_raws:
-            for cond_name, slice in clip_slices.items():
-                folded = self._run_path(a_raw, cond_name, slice, config, device, encoder)
-                folded_outputs.setdefault(cond_name, []).append(folded)
+            for idx in range(len(clip_uc)):
+                slice_tensor = clip_uc.get_tensor(idx)
+                key = clip_uc.get_field(idx, "slicer_info")["key"]
+
+                folded = self._run_integra(a_raw, key, slice_tensor, config, device, encoder)
+                folded_outputs.setdefault(key, []).append(folded)
 
         if not folded_outputs:
             raise RuntimeError("No encoder-condition slices folded successfully.")
-        else:
-            logger.info(f"[EncoderSampler] Folded outputs: {list(folded_outputs.keys())}")
+        logger.info(f"[EncoderSampler] Folded outputs: {list(folded_outputs.keys())}")
 
+        # ── 5. assemble final conditioning bundle ───────────────────────────
         conditioning = self._pack_conditioning_from_registry(
-            folded_outputs=folded_outputs,
-            cfg=config,
-            device=device,
-            mode=mode,
+            folded_outputs, cfg=config, device=device, mode=mode
         )
-        pooled = conditioning[0][1].get("pooled_output", None)
-        orig_pool_ready = {
-            "pooled_output": (orig_pool_full.clone() if orig_pool_full is not None else None)
-        }
-        raw_conditioning = [[orig_clip_full, orig_pool_ready]]
-        # log the conds and the pools of both outputs
+        raw_conditioning = [[orig_clip_full, {"pooled_output": orig_pool_full}]]
 
         return conditioning, raw_conditioning, {}
-
 
     def __extract_symbolic(self, pipe, prompt, device, config=None):
         encoder_type = pipe.get("type", "unknown").lower()
@@ -841,25 +839,8 @@ class EncoderSampler:
 
         return cond.to(device), {"features": features, "pooled_output": pool.get("pooled_output", None) if pool else None}
 
-    def __slice_conds(self, clip_full, pool_dict, other=None, mode="sdxl"):
-        slices = {}
-        if mode == "sd1":
-            slices["clip_l"] = clip_full
-        elif mode == "sdxl":
-            slices["clip_l"] = clip_full[:, :, :768]
-            slices["clip_g"] = clip_full[:, :, 768:]
-        elif mode == "flux":
-            slices["t5"] = clip_full
-            slices["clip_l"] = other
-        elif mode == "hidream":
-            slices["clip_l"] = clip_full[:, :, :768]
-            slices["clip_g"] = clip_full[:, :, 768:2048]
-        elif mode == "full_no_pool":
-            slices["clip_l"] = clip_full # we'll assume this as a similar to sd1 mode
-        return slices
 
-
-    def _run_path(self, a_raw, cond_name, clip_slice, cfg, device, encoder):
+    def _run_integra(self, a_raw, cond_name, clip_slice, cfg, device, encoder):
         if a_raw.size(-1) != clip_slice.size(-1) or cfg.get("force_projection_in", False):
             a_proj = match_project(a_raw, clip_slice, mode=cfg.get("interpolation_method_in", "linear"))
         else:
@@ -994,14 +975,6 @@ class EncoderSampler:
 
         return conditioning
 
-    def _pool_clip_l_tokens(self, walked_clip_l: torch.Tensor, strategy: str = "last") -> torch.Tensor:
-        if strategy == "mean":
-            return walked_clip_l.mean(dim=1)
-        elif strategy == "first":
-            return walked_clip_l[:, 0, :]
-        elif strategy == "last":
-            return walked_clip_l[:, -1, :]
-        raise ValueError(f"Unknown pooling strategy: {strategy}")
 
 class ClipStacker:
     # takes in clip pipelines and converts them into a stacked multi-clip conditioning

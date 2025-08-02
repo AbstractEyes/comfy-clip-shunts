@@ -61,12 +61,120 @@ MODEL_EXPECTATIONS = {
 }
 
 
+import torch
+from typing import List, Dict, Union
+import logging
+
+
+
+import torch
+from typing import List, Optional, Union, Iterator
+from collections.abc import MutableSequence
+
+class UsefulConditioning(MutableSequence):
+    """
+    Canonical, list-compatible wrapper for conditioning bundles:
+      - [cond_tensor, metadata]
+      - [cond_tensor, pooled_tensor, metadata]
+    Always normalizes to: [cond_tensor, {pooled_output, ...}]
+    """
+
+    def __init__(self, conds: List[list]):
+        self.conds: List[List[Union[torch.Tensor, dict]]] = []
+
+        for entry in conds:
+            if len(entry) == 2:
+                cond, meta = entry
+            elif len(entry) == 3:
+                cond, pooled, meta = entry
+                if isinstance(meta, dict):
+                    meta = dict(meta)
+                    meta.setdefault("pooled_output", pooled)
+                else:
+                    raise TypeError("Expected dict as third element for 3-part conditioning")
+            else:
+                raise ValueError(f"Unsupported conditioning entry: {entry}")
+
+            assert isinstance(cond, torch.Tensor), "First element must be tensor"
+            assert isinstance(meta, dict), "Last element must be dictionary"
+            self.conds.append([cond, meta])
+
+    # --- List Interface ---
+    def __len__(self): return len(self.conds)
+    def __getitem__(self, idx): return self.conds[idx]
+    def __setitem__(self, idx, value):
+        assert isinstance(value, list) and len(value) in (2, 3)
+        self.conds[idx] = UsefulConditioning([value])[0]
+    def __delitem__(self, idx): del self.conds[idx]
+    def __iter__(self) -> Iterator: return iter(self.conds)
+    def __contains__(self, item): return item in self.conds
+    def insert(self, index, item):
+        self.conds.insert(index, UsefulConditioning(item)[0])
+    def append(self, item): self.insert(len(self.conds), item)
+    def extend(self, items): [self.append(i) for i in items]
+    def pop(self, index=-1): return self.conds.pop(index)
+    def index(self, value): return self.conds.index(value)
+    def count(self, value): return self.conds.count(value)
+
+    def to_list(self) -> List[List[Union[torch.Tensor, dict]]]:
+        return self.conds
+
+    # --- Semantic Access ---
+    def get_tensor(self, index: int) -> torch.Tensor:
+        return self.conds[index][0]
+
+    def set_tensor(self, index: int, tensor: torch.Tensor):
+        self.conds[index][0] = tensor
+
+    def get_pooled(self, index: int) -> Optional[torch.Tensor]:
+        return self.conds[index][1].get("pooled_output", None)
+
+    def set_pooled(self, index: int, pooled: torch.Tensor):
+        self.conds[index][1]["pooled_output"] = pooled
+
+    def get_field(self, index: int, key: str) -> Optional[torch.Tensor]:
+        return self.conds[index][1].get(key, None)
+
+    def set_field(self, index: int, key: str, value: torch.Tensor):
+        self.conds[index][1][key] = value
+
+    def get_all_tensors(self) -> List[torch.Tensor]:
+        return [entry[0] for entry in self.conds]
+
+    def get_all_pooled(self) -> List[Optional[torch.Tensor]]:
+        return [entry[1].get("pooled_output", None) for entry in self.conds]
+
+    def get_all_metadata(self) -> List[dict]:
+        return [entry[1] for entry in self.conds]
+
+    def clone(self, device="cpu") -> "UsefulConditioning":
+        cloned = []
+        for tensor, meta in self.conds:
+            cloned_tensor = tensor.clone().to(device).detach().contiguous()
+            cloned_meta = {k: (v.clone().to(device).detach().contiguous() if torch.is_tensor(v) else v) for k, v in meta.items()}
+            cloned.append([cloned_tensor, cloned_meta])
+        return UsefulConditioning(cloned)
+
+    def slice(self, start: int, end: Optional[int] = None) -> "UsefulConditioning":
+        return UsefulConditioning(self.conds[start:end])
+
 
 
 class ConditioningHelper:
     """
     This is a helper util meant to provide common functionality for conditioning nodes.
     """
+
+    @staticmethod
+    def convert_conditioning(conditioning: list):
+        """
+        Convert a list of conditioning tensors to a UsefulConditioning object.
+        """
+        if not ConditioningHelper.verify(conditioning, silent=True):
+            raise ValueError("Invalid conditioning format.")
+
+        # Convert the list of lists to UsefulConditioning
+        return UsefulConditioning(conditioning)
 
     @staticmethod
     def verify(conditioning: list, silent: bool = False) -> bool:
@@ -104,118 +212,76 @@ class ConditioningHelper:
         # if we made it this far, then we have a proper conditioning
         return True
 
-    @staticmethod
-    def extract_tensors(conditioning: list) -> list:
-        return [entry[0] for entry in conditioning if isinstance(entry, list) and isinstance(entry[0], torch.Tensor)]
-
-    @staticmethod
-    def get_pooled(conditioning: list, default=None) -> list:
-        pooled = []
-        for entry in conditioning:
-            if isinstance(entry, list) and len(entry) > 1:
-                pool = entry[1].get("pooled_output", default)
-                pooled.append(pool)
-        return pooled
+import torch
+from typing import List, Dict, Union
+import logging
 
 
+class ModelSlicer:
     @staticmethod
-    def to(conditioning: list, dtype=None, device=None) -> list:
+    def slice(
+        conds: Union[UsefulConditioning, List[List[Union[torch.Tensor, dict]]]],
+        model_type: str,
+        device: str = "cpu"
+    ) -> UsefulConditioning:
         """
-        Move all tensors in the conditioning structure to the specified dtype and/or device,
-        without modifying non-tensor metadata entries. Movement is skipped if not required.
+        Slices and tags a full conditioning input into its component parts based on MODEL_EXPECTATIONS.
+        Preserves all original metadata and injects slicing tags into `meta['slicer_info']`.
         """
-        new_conditioning = []
+        uc = conds if isinstance(conds, UsefulConditioning) else UsefulConditioning(conds)
+        expectation = MODEL_EXPECTATIONS.get(model_type)
 
-        for entry in conditioning:
-            if not isinstance(entry, list) or not isinstance(entry[0], torch.Tensor):
-                continue  # Skip malformed entry
+        if not expectation:
+            raise ValueError(f"[ModelSlicer] No expectations found for model type: {model_type}")
 
-            tensor = entry[0]
-            meta = entry[1] if len(entry) > 1 and isinstance(entry[1], dict) else {}
-            target_dtype = dtype or tensor.dtype
-            target_device = device or tensor.device
+        slices_def = expectation.get("slices", {})
+        if not slices_def:
+            raise ValueError(f"[ModelSlicer] No slices defined for model type: {model_type}")
 
-            # Move main tensor if needed
-            new_tensor = tensor
-            if tensor.device != target_device or tensor.dtype != target_dtype:
-                new_tensor = tensor.to(dtype=target_dtype, device=target_device)
+        output = []
 
-            # Preserve all metadata, only moving tensors
-            new_meta = {}
-            for key, val in meta.items():
-                if isinstance(val, torch.Tensor):
-                    if val.device != target_device or val.dtype != target_dtype:
-                        new_meta[key] = val.to(dtype=target_dtype, device=target_device)
-                    else:
-                        new_meta[key] = val
+        for entry_index in range(len(uc)):
+            tensor = uc.get_tensor(entry_index)
+            pooled = uc.get_pooled(entry_index)
+            meta = uc.get_all_metadata()[entry_index]
+
+            for key, (scope, start, end) in slices_def.items():
+                if scope == "full":
+                    sliced = tensor[:, :, start:end] if start is not None else tensor
+                elif scope == "no_token":
+                    sliced = tensor[:, -1:, start:end] if start is not None else tensor[:, -1:]
+                elif scope == "extended":
+                    sliced = tensor
                 else:
-                    new_meta[key] = val  # pass through unmodified
-
-            new_conditioning.append([new_tensor, new_meta])
-
-        return new_conditioning
-
-    @staticmethod
-    def get_slices(conditioning: list, mode: str, do_clone: bool = False) -> list:
-        """
-        Slice a conditioning list into per-entry dictionaries using MODEL_EXPECTATIONS[mode].
-        Includes all tensor fields from the metadata, including pooled_output.
-
-        Args:
-            conditioning: The conditioning list to slice.
-            mode: Model key in MODEL_EXPECTATIONS.
-            do_clone: If True, deep clone returned tensors.
-
-        Returns:
-            List[Dict[str, Tensor]]: One dict per conditioning entry.
-        """
-
-        if mode not in MODEL_EXPECTATIONS:
-            raise ValueError(f"[ConditioningHelper] Unknown model mode: {mode}")
-
-        expectations = MODEL_EXPECTATIONS[mode]["slices"]
-        sliced_conditionings = []
-
-        if not ConditioningHelper.verify(conditioning, silent=True):
-            raise ValueError("Invalid conditioning input format.")
-
-        for entry in conditioning:
-            tensor = entry[0]
-            meta = entry[1] if len(entry) > 1 and isinstance(entry[1], dict) else {}
-            slice_dict = {}
-
-            # Handle explicit slices
-            for name, spec in expectations.items():
-                source_type, start, end = spec
-                if source_type == "full":
-                    src = tensor
-                elif source_type == "no_token":
-                    src = meta.get("pooled_output", None)
-                elif source_type == "extended":
-                    src = meta.get(name, None)
-                else:
-                    raise ValueError(f"Unknown slice source type: {source_type}")
-
-                if src is None:
+                    logger.warning(f"[ModelSlicer] Unknown scope: {scope}, skipping key: {key}")
                     continue
 
-                if start is not None:
-                    if src.dim() == 3:
-                        sliced = src[:, :, start:end]
-                    elif src.dim() == 2:
-                        sliced = src[:, start:end]
-                    else:
-                        sliced = src
-                else:
-                    sliced = src
+                tagged_meta = dict(meta)  # full clone
+                tagged_meta.setdefault("slicer_info", {})
+                tagged_meta["slicer_info"].update({
+                    "key": key,
+                    "origin": model_type,
+                    "scope": scope,
+                })
 
-                slice_dict[name] = sliced.clone() if do_clone else sliced
+                if pooled is not None and "pooled_output" not in tagged_meta:
+                    try:
+                        pooled_slice = pooled[:, start:end] if start is not None else pooled
+                        tagged_meta["pooled_output"] = pooled_slice
+                    except Exception:
+                        tagged_meta["pooled_output"] = pooled
 
-            # Pull in any other tensors from meta that weren’t explicitly sliced
-            for k, v in meta.items():
-                if k not in slice_dict and isinstance(v, torch.Tensor):
-                    slice_dict[k] = v.clone() if do_clone else v
+                output.append([sliced.to(device), tagged_meta])
 
-            sliced_conditionings.append(slice_dict)
+        # --- Special Processing ---
+        specials = expectation.get("special_processing", [])
+        for rule in specials:
+            try:
+                src_key, target_expr = [x.strip() for x in rule.split("→")]
+                for _, meta in output:
+                    if meta.get("slicer_info", {}).get("key") == src_key:
+                        exec(target_expr, {}, {"meta": meta})
+            except Exception as e:
+                logger.warning(f"[ModelSlicer] Failed special processing: {rule} → {e}")
 
-        return sliced_conditionings
+        return UsefulConditioning(output)

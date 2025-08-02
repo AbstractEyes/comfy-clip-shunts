@@ -96,9 +96,9 @@ class IntegraOrchestrator:
                     end = T
                     start = max(0, end - self.window_size)
 
-                a_win = a[:, start:end, :]
-                b_win = b[:, start:end, :]
-                d_win = d[:, start:end, :]
+                a_win = a[:, start:end, :].clone()
+                b_win = b[:, start:end, :].clone()
+                d_win = d[:, start:end, :].clone()
                 # mask the first and last token if the window to see but not utilize them
                 #if self.override_context:
                 #    a_win[:, 0, :] = -100.0  # Mask first token
