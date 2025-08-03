@@ -149,6 +149,8 @@ class ConditioningStackMultipleNode:
         if conditioning_5 is not None:
             conditionings.extend(conditioning_5)
 
+        conditionings = ConditioningHelper.convert_conditioning(conditionings).clone()
+
         #ConditioningShifter.conditioning_set_values(conditionings, {"time_start", time_start, "time_start", time_end })
         #if cond_strength != 1.0 or pool_strength != 1.0:
         #    conditionings = ConditioningShifter.conditioning_set_strength(conditionings, cond_strength, pool_strength)
@@ -1296,16 +1298,25 @@ class RoseSimilarityConditioning:
             "purpose":  purpose[0][1].get("pooled_output", None),
             "none":     None
         }.get(pooled_output_source, None)
+        pooled.clone() if pooled is not None else None
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # move all to the correct device
+
+
         x_input = [[x.clone().to(device), meta] for x, meta in x_input]
         need = [[n.clone().to(device), meta] for n, meta in need]
         relation = [[r.clone().to(device), meta] for r, meta in relation]
         purpose = [[p.clone().to(device), meta] for p, meta in purpose]
+
+        x_input = UsefulConditioning(x_input).clone()
+        need = UsefulConditioning(need).clone()
+        relation = UsefulConditioning(relation).clone()
+        purpose = UsefulConditioning(purpose).clone()
+
         for i, (x, meta) in enumerate(x_input):
-            n = need[i % len(need)][0]
-            r = relation[i % len(relation)][0]
-            p = purpose[i % len(purpose)][0]
+            n = need[i % len(need)][0].clone()
+            r = relation[i % len(relation)][0].clone()
+            p = purpose[i % len(purpose)][0].clone()
 
             # Align lengths
             T = max(x.shape[1], n.shape[1], r.shape[1], p.shape[1])
