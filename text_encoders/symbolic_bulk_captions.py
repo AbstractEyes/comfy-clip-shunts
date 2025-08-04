@@ -11,12 +11,23 @@ BEATRIX_SPECIAL_TOKENS_AND_SHUNTS = [
     "<offset>","<object_left>","<object_right>",
     "<relation>","<intent>","<style>",
     "<fabric>","<jewelry>",
-    "[SHUNT_1000000]","[SHUNT_1000001]","[SHUNT_1000002]","[SHUNT_1000003]","[SHUNT_1000004]",
-    "[SHUNT_1000005]","[SHUNT_1000006]","[SHUNT_1000007]","[SHUNT_1000008]","[SHUNT_1000009]","[SHUNT_1000010]",
-    "[SHUNT_1000011]","[SHUNT_1000012]","[SHUNT_1000013]","[SHUNT_1000014]","[SHUNT_1000015]","[SHUNT_1000016]",
-    "[SHUNT_1000017]","[SHUNT_1000018]","[SHUNT_1000019]","[SHUNT_1000020]","[SHUNT_1000021]","[SHUNT_1000022]",
-    "[SHUNT_1000023]","[SHUNT_1000024]","[SHUNT_1000025]",
+    "[SHUNT_1000000]", "[SHUNT_1000001]", "[SHUNT_1000002]",
+    "[SHUNT_1000003]", "[SHUNT_1000004]", "[SHUNT_1000005]",
+    "[SHUNT_1000006]", "[SHUNT_1000007]", "[SHUNT_1000008]",
+    "[SHUNT_1000009]", "[SHUNT_1000010]", "[SHUNT_1000011]",
+    "[SHUNT_1000012]", "[SHUNT_1000013]", "[SHUNT_1000014]",
+    "[SHUNT_1000015]", "[SHUNT_1000016]", "[SHUNT_1000017]",
+    "[SHUNT_1000018]", "[SHUNT_1000019]", "[SHUNT_1000020]",
+    "[SHUNT_1000021]", "[SHUNT_1000022]", "[SHUNT_1000023]",
+    "[SHUNT_1000024]", "[SHUNT_1000025]",
 ]
+
+BEATRIX_SPECIAL_TOKENS = BEATRIX_SPECIAL_TOKENS_AND_SHUNTS[:26]
+BEATRIX_SHUNTS = BEATRIX_SPECIAL_TOKENS_AND_SHUNTS[26:]
+
+def get_shunt_from_symbolic(symbolic: str) -> str:
+    return BEATRIX_SPECIAL_TOKENS_AND_SHUNTS[BEATRIX_SPECIAL_TOKENS_AND_SHUNTS.index(symbolic) + 26]
+
 # ─────────────────────────────────────────────
 # Symbolic template renderer
 
@@ -53,23 +64,20 @@ def render_symbolic_template(advanced=False):
         "footwear": resolve("FOOTWEAR_TYPES"),
         "object_left": extract_object_side("left"),
         "object_right": extract_object_side("right"),
-        "relation": random.choice([
-            "next to", "beside", "on top of", "under",
-            "to the right of", "to the left of", "above", "below"
-        ]),
-        "texture": resolve("TEXTURE_TAGS", "textured surface"),
-        "hair_style": resolve("HAIRSTYLES_TYPES", "short"),
-        "lighting": resolve("LIGHTING_TYPES", "soft ambient light"),
-        "hair_length": resolve("HAIR_LENGTH_TYPES", "short"),
-        "material": resolve("MATERIAL_TYPES", "metal"),
-        "pattern": resolve("PATTERN_TAGS", "striped"),
-        "accessory": resolve("ACCESSORY_TYPES", "bag"),
-        "surface": resolve("HUMAN_SURFACES", "stone bench"),
-        "zone": resolve("ZONE_TAGS", "left side"),
-        "grid": resolve("GRID_TAGS", "center point"),
-        "fabric": resolve("FABRIC_TYPES", "wool"),
-        "jewelry": resolve("JEWELRY_TYPES", "bracelet"),
-        "headwear": resolve("HEADWEAR_TYPES", "beret")
+        "relation": resolve("RELATION_TAGS"),
+        "texture": resolve("TEXTURE_TAGS"),
+        "hair_style": resolve("HAIRSTYLES_TYPES"),
+        "lighting": resolve("LIGHTING_TYPES", ),
+        "hair_length": resolve("HAIR_LENGTH_TYPES"),
+        "material": resolve("MATERIAL_TYPES"),
+        "pattern": resolve("PATTERN_TAGS"),
+        "accessory": resolve("ACCESSORY_TYPES"),
+        "surface": resolve("HUMAN_SURFACES"),
+        "zone": resolve("ZONE_TAGS"),
+        "grid": resolve("GRID_TAGS"),
+        "fabric": resolve("FABRIC_TYPES"),
+        "jewelry": resolve("JEWELRY_TYPES"),
+        "headwear": resolve("HEADWEAR_TYPES")
     }
 
     for key, val in substitutions.items():
@@ -77,9 +85,24 @@ def render_symbolic_template(advanced=False):
 
     return template
 
+
+def resolve_reasonable_associations(token: str) -> str:
+    if "*" in token:
+        # todo# actually associate properly; until then just remove wildcards and inject something random
+        return token.replace("*", random.choice([
+            "viewed", "seen", "captured", "observed", "depicted", "portrayed",
+            "rendered", "illustrated", "shown", "displayed", "presented",
+            "depicted in", "illustrated in", "rendered in", "shown in", "displayed in",
+            "presented in", "captured in", "observed in", "seen in", "viewed in",
+            "on top of", "under", "beside", "next to", "to the right of",
+            "to the left of", "above", "below", "in front of", "behind"]))
+    else:
+        # if no wildcards, just return the token
+        return token
+
+
 # ─────────────────────────────────────────────
 # Gender normalization logic
-
 def resolve_gender_token(token: str) -> str:
     token = token.strip().lower()
     number_map = {
@@ -93,6 +116,7 @@ def resolve_gender_token(token: str) -> str:
         count_word = number_map.get(number, number)
         return f"{count_word} {word_resolved}"
 
+    # the blacklist handles anything under a certain age as per directives
     singular_map = {"girl": "woman", "boy": "man", "child": "person", "kid": "person", "children": "people"}
     plural_map = {"girls": "women", "boys": "men"}
 
@@ -106,6 +130,542 @@ def resolve_gender_token(token: str) -> str:
             return token.replace(k, v, 1)
 
     return token
+
+
+CATEGORICAL_TEMPLATES = {
+    # 1. Subject tokens (3 variations)
+    "<subject>": [
+        "a {gender} {pose} {offset}",
+        "a {gender} wearing {upper_clothing} while {pose}",
+        "a {gender} with {hair_style} hair, {pose} {offset}",
+        "{gender} in {zone} {pose}",
+        "a {gender} holding {object_right} while {pose}",
+        "detailed portrait of {gender} with {emotion} expression, {pose} near {surface}",
+        "{gender} dressed in {material} {upper_clothing}, {pose} under {lighting}",
+        "a {gender} with {hair_length} {hair_style} hair wearing {accessory}, {pose} {offset}",
+        "figure of {gender} {pose} on {surface}, wearing {footwear} and {jewelry}",
+        "{gender} displaying {emotion} while {pose}, {upper_clothing} made of {fabric}",
+        "compositional study of {gender} {pose} in {zone}, illuminated by {lighting}",
+        "a {gender} with {texture} {material} clothing, {pose} {relation} {object_right}",
+        "{gender} featuring {pattern} {upper_clothing} and {headwear}, {pose} on {surface}",
+        "artistic depiction of {gender} {pose}, wearing {jewelry} and {accessory}, {offset}",
+        "stylized {gender} with {hair_length} hair styled in {hair_style}, {pose} near {object_left}"
+    ],
+
+    "<subject1>": [
+        "first {gender} {pose} near {object_right}",
+        "primary {gender} wearing {upper_clothing} {offset}",
+        "main {gender} with {hair_style} hair on {surface}",
+        "foreground {gender} {pose} with {accessory}",
+        "leading {gender} in {material} clothing",
+        "central {gender} displaying {emotion} expression, {pose} under {lighting}",
+        "primary figure wearing {fabric} {upper_clothing} with {pattern}, {pose} in {zone}",
+        "main subject with {hair_length} {hair_style} hair and {jewelry}, {pose} on {surface}",
+        "first person dressed in {material} outfit with {footwear}, {pose} {relation} {object_right}",
+        "foreground {gender} with {headwear} and {accessory}, {pose} {offset}",
+        "primary {gender} showing {texture} clothing details, {pose} near {object_left}",
+        "leading figure in {pattern} {upper_clothing}, {pose} illuminated by {lighting}",
+        "main {gender} with {emotion} mood wearing {jewelry}, {pose} on {surface}",
+        "central subject featuring {fabric} garments and {footwear}, {pose} in {zone}",
+        "primary {gender} styled with {hair_style} and {accessory}, {pose} {offset}"
+    ],
+
+    "<subject2>": [
+        "second {gender} {pose} {relation} first person",
+        "another {gender} wearing {footwear} {offset}",
+        "background {gender} with {emotion} expression",
+        "accompanying {gender} holding {accessory}",
+        "secondary {gender} on {surface}",
+        "additional {gender} dressed in {material} {upper_clothing}, {pose} in {zone}",
+        "second figure with {hair_length} {hair_style} hair, {pose} under {lighting}",
+        "companion {gender} wearing {pattern} clothing and {jewelry}, {pose} {offset}",
+        "background person showing {emotion} while {pose}, dressed in {fabric} garments",
+        "secondary subject with {headwear} and {footwear}, {pose} near {object_right}",
+        "another figure displaying {texture} {upper_clothing}, {pose} on {surface}",
+        "accompanying {gender} with {accessory} and {jewelry}, {pose} {relation} main subject",
+        "second person featuring {hair_style} hairstyle and {emotion} expression, {pose} in {zone}",
+        "additional {gender} in {material} outfit with {pattern}, {pose} {offset}",
+        "secondary figure wearing {fabric} clothing and {footwear}, {pose} under {lighting}"
+    ],
+
+    # 2. Pose
+    "<pose>": [
+        "{gender} {pose} near {object_right}",
+        "person {pose} while wearing {upper_clothing}",
+        "{gender} {pose} on {surface}",
+        "figure {pose} under {lighting}",
+        "{pose} position with {accessory}",
+        "dynamic {pose} captured {offset}, wearing {material} clothing",
+        "expressive {pose} on {surface}, illuminated by {lighting}",
+        "{gender} demonstrating {pose} with {emotion} expression, near {object_left}",
+        "graceful {pose} position wearing {fabric} {upper_clothing} and {footwear}",
+        "athletic {pose} in {zone}, accessorized with {jewelry} and {accessory}",
+        "contemplative {pose} {relation} {object_right}, dressed in {pattern} garments",
+        "energetic {pose} under {lighting}, featuring {hair_style} hairstyle",
+        "relaxed {pose} on {surface} with {texture} surroundings",
+        "dramatic {pose} {offset}, wearing {headwear} and {upper_clothing}",
+        "subtle {pose} gesture with {emotion} mood, adorned with {jewelry}"
+    ],
+
+    # 3. Emotion
+    "<emotion>": [
+        "{gender} looking {emotion} while {pose}",
+        "a {emotion} {gender} {offset}",
+        "{gender} with {emotion} expression",
+        "{emotion} mood in {lighting}",
+        "displaying {emotion} near {object_right}",
+        "profound {emotion} expression captured on {gender}'s face while {pose}",
+        "subtle {emotion} mood enhanced by {lighting} on {surface}",
+        "{gender} conveying {emotion} through {pose}, wearing {upper_clothing}",
+        "intense {emotion} displayed {offset}, with {hair_style} hair flowing",
+        "nuanced {emotion} expression paired with {accessory} and {jewelry}",
+        "{emotion} atmosphere created by {gender} {pose} near {object_left}",
+        "complex {emotion} state shown through {pose} and {material} clothing",
+        "genuine {emotion} moment captured in {zone} under {lighting}",
+        "layered {emotion} expression with {pattern} {upper_clothing} and {footwear}",
+        "evocative {emotion} presence {relation} {object_right}, {pose} position"
+    ],
+
+    # 4. Surface
+    "<surface>": [
+        "{gender} {pose} on {surface}",
+        "{object_left} placed on {surface}",
+        "a {surface} with {texture}",
+        "{surface} supporting {object_right}",
+        "{material} {surface} in {zone}",
+        "weathered {surface} displaying {texture} beneath {gender} who {pose}",
+        "polished {surface} reflecting {lighting}, supporting {object_left} and {object_right}",
+        "textured {surface} with {pattern} details, {gender} {pose} upon it",
+        "sturdy {surface} made of {material}, decorated with {accessory}",
+        "elegant {surface} in {zone}, illuminated by {lighting} from above",
+        "rustic {surface} showing {texture} patterns, {relation} {object_right}",
+        "modern {surface} with {material} finish, supporting {gender} who {pose}",
+        "ancient {surface} bearing {pattern} markings, {offset} in composition",
+        "functional {surface} holding {object_left} and {accessory}, {lighting} enhanced",
+        "decorative {surface} with {fabric} covering, positioned in {zone}"
+    ],
+
+    # 5. Lighting
+    "<lighting>": [
+        "scene illuminated by {lighting}",
+        "{gender} under {lighting} while {pose}",
+        "{lighting} casting shadows on {surface}",
+        "{lighting} highlighting {texture}",
+        "ambient {lighting} in {zone}",
+        "dramatic {lighting} creating depth around {gender} who {pose} on {surface}",
+        "soft {lighting} filtering through, highlighting {material} {upper_clothing}",
+        "harsh {lighting} defining {texture} on {object_right} and {surface}",
+        "natural {lighting} bathing {gender} with {hair_style} hair in warm glow",
+        "artificial {lighting} emphasizing {pattern} on {fabric} clothing",
+        "moody {lighting} setting atmosphere for {emotion} expression {offset}",
+        "directional {lighting} sculpting {gender}'s {pose} near {object_left}",
+        "diffused {lighting} softening {texture} details on {accessory} and {jewelry}",
+        "contrasting {lighting} in {zone}, creating visual interest on {surface}",
+        "cinematic {lighting} enhancing {material} properties of {upper_clothing}"
+    ],
+
+    # 6. Material
+    "<material>": [
+        "{upper_clothing} made of {material}",
+        "a {material} {object_right}",
+        "{gender} wearing {material} clothing",
+        "{material} texture on {surface}",
+        "luxurious {material} {accessory}",
+        "refined {material} used in {upper_clothing} with {pattern} design",
+        "raw {material} forming {object_left} {relation} {object_right}",
+        "processed {material} creating {texture} on {surface} in {zone}",
+        "synthetic {material} in {footwear} and {accessory} combination",
+        "organic {material} draped as {upper_clothing}, {pose} enhancing flow",
+        "composite {material} with {fabric} blend in {jewelry} and {headwear}",
+        "traditional {material} worked into {pattern} for {gender}'s outfit",
+        "modern {material} treatment on {surface} under {lighting}",
+        "weathered {material} showing age on {object_right} {offset}",
+        "polished {material} reflecting {lighting} on {accessory} details"
+    ],
+
+    # 7. Accessory
+    "<accessory>": [
+        "{gender} wearing {accessory}",
+        "a {accessory} beside {object_right}",
+        "{gender} holding {accessory}",
+        "{accessory} made of {material}",
+        "decorative {accessory} {offset}",
+        "ornate {accessory} crafted from {material} with {pattern} details",
+        "functional {accessory} complementing {upper_clothing} on {gender}",
+        "vintage {accessory} paired with {jewelry} and {footwear}",
+        "modern {accessory} featuring {texture} finish under {lighting}",
+        "handcrafted {accessory} {relation} {object_left} in {zone}",
+        "designer {accessory} with {fabric} elements worn by {gender}",
+        "traditional {accessory} displaying {pattern} while {pose}",
+        "statement {accessory} contrasting with {material} {upper_clothing}",
+        "subtle {accessory} enhancing {emotion} expression {offset}",
+        "layered {accessory} arrangement with {jewelry} on {surface}"
+    ],
+
+    # 8. Footwear
+    "<footwear>": [
+        "{gender} wearing {footwear}",
+        "a pair of {footwear} {offset}",
+        "{footwear} placed near {object_left}",
+        "{material} {footwear} on {surface}",
+        "stylish {footwear} in {zone}",
+        "worn {footwear} made of {material} with {texture} details",
+        "pristine {footwear} complementing {upper_clothing} and {accessory}",
+        "custom {footwear} featuring {pattern} design under {lighting}",
+        "practical {footwear} suited for {pose} on {surface}",
+        "elegant {footwear} paired with {jewelry} and {fabric} garments",
+        "weathered {footwear} telling stories, {relation} {object_right}",
+        "designer {footwear} with {material} construction in {zone}",
+        "comfortable {footwear} supporting {gender} while {pose}",
+        "decorative {footwear} with {texture} embellishments {offset}",
+        "functional {footwear} contrasting with formal {upper_clothing}"
+    ],
+
+    # 9. Upper body clothing
+    "<upper_body_clothing>": [
+        "{gender} wearing {upper_clothing}",
+        "a {upper_clothing} {offset}",
+        "{upper_clothing} draped over {surface}",
+        "{fabric} {upper_clothing} with {pattern}",
+        "{upper_clothing} in {zone}",
+        "tailored {upper_clothing} made from {material} with {texture} finish",
+        "flowing {upper_clothing} adorned with {pattern} and {accessory}",
+        "structured {upper_clothing} paired with {jewelry} and {footwear}",
+        "casual {upper_clothing} in {fabric} displaying {emotion} mood",
+        "formal {upper_clothing} illuminated by {lighting} on {surface}",
+        "vintage {upper_clothing} with {pattern} details {relation} {object_left}",
+        "contemporary {upper_clothing} featuring {material} blend in {zone}",
+        "layered {upper_clothing} creating {texture} visual interest {offset}",
+        "embellished {upper_clothing} with {jewelry} accents under {lighting}",
+        "minimalist {upper_clothing} contrasting with ornate {headwear}"
+    ],
+
+    # 10. Hair style
+    "<hair_style>": [
+        "{gender} with {hair_style} {hair_length} hair",
+        "a {gender} sporting {hair_style}",
+        "{hair_style} hair styled with {accessory}",
+        "{hair_style} under {headwear}",
+        "elegant {hair_style} {offset}",
+        "intricate {hair_style} adorned with {jewelry} and {accessory}",
+        "natural {hair_style} flowing in {hair_length} waves under {lighting}",
+        "styled {hair_style} complementing {upper_clothing} and {emotion} expression",
+        "textured {hair_style} with {pattern} elements near {object_right}",
+        "classic {hair_style} updated with modern {accessory} in {zone}",
+        "windswept {hair_style} creating movement while {pose} on {surface}",
+        "polished {hair_style} contrasting with {texture} {material} clothing",
+        "casual {hair_style} paired with {headwear} and {jewelry}",
+        "dramatic {hair_style} enhanced by {lighting} effects {offset}",
+        "traditional {hair_style} with {hair_length} styling {relation} {object_left}"
+    ],
+
+    # 11. Hair length
+    "<hair_length>": [
+        "{gender} with {hair_length} {hair_style} hair",
+        "{hair_length} hair flowing {offset}",
+        "displaying {hair_length} locks",
+        "{hair_length} hair under {lighting}",
+        "{hair_length} strands with {texture}",
+        "luxurious {hair_length} hair styled in {hair_style} with {accessory}",
+        "natural {hair_length} tresses cascading over {upper_clothing}",
+        "precisely cut {hair_length} hair framing {emotion} expression",
+        "flowing {hair_length} locks enhanced by {lighting} on {surface}",
+        "textured {hair_length} hair adorned with {jewelry} and {headwear}",
+        "voluminous {hair_length} style creating silhouette in {zone}",
+        "sleek {hair_length} hair contrasting with {pattern} {fabric} clothing",
+        "windblown {hair_length} strands during {pose} {offset}",
+        "carefully maintained {hair_length} hair {relation} {object_right}",
+        "dramatic {hair_length} styling complementing {material} {upper_clothing}"
+    ],
+
+    # 12. Headwear
+    "<headwear>": [
+        "{gender} wearing {headwear}",
+        "a {headwear} {offset}",
+        "{headwear} placed on {surface}",
+        "{material} {headwear} with {pattern}",
+        "stylish {headwear} complementing {hair_style}",
+        "traditional {headwear} crafted from {material} with {texture} details",
+        "modern {headwear} adorned with {accessory} and {jewelry}",
+        "functional {headwear} protecting from {lighting} in {zone}",
+        "decorative {headwear} featuring {pattern} design on {fabric}",
+        "vintage {headwear} paired with {upper_clothing} and {footwear}",
+        "statement {headwear} creating focal point while {pose}",
+        "subtle {headwear} enhancing {hair_length} {hair_style} arrangement",
+        "weather-appropriate {headwear} on {surface} near {object_left}",
+        "ceremonial {headwear} with {material} construction {offset}",
+        "casual {headwear} contrasting formal {upper_clothing} ensemble"
+    ],
+
+    # 13. Texture
+    "<texture>": [
+        "{surface} with {texture} finish",
+        "{object_left} showing {texture}",
+        "a {texture} pattern on {material}",
+        "{texture} detail under {lighting}",
+        "rich {texture} in {zone}",
+        "complex {texture} created by {material} on {surface} under {lighting}",
+        "subtle {texture} variations on {upper_clothing} and {accessory}",
+        "pronounced {texture} contrasting smooth {object_right} in {zone}",
+        "layered {texture} effects on {fabric} {pattern} design",
+        "natural {texture} enhanced by weathering on {surface} {offset}",
+        "artificial {texture} mimicking organic patterns on {footwear}",
+        "varied {texture} creating visual interest {relation} {object_left}",
+        "uniform {texture} across {material} {headwear} and {jewelry}",
+        "rough {texture} juxtaposed with polished {accessory} details",
+        "delicate {texture} revealed by {lighting} on {upper_clothing}"
+    ],
+
+    # 14. Pattern
+    "<pattern>": [
+        "{upper_clothing} with {pattern} design",
+        "a {pattern} {material} {object_right}",
+        "{pattern} covering {surface}",
+        "intricate {pattern} on {fabric}",
+        "{pattern} motif {offset}",
+        "repeating {pattern} across {material} {upper_clothing} and {accessory}",
+        "organic {pattern} inspired by nature on {surface} in {zone}",
+        "geometric {pattern} creating rhythm on {fabric} {footwear}",
+        "traditional {pattern} updated for modern {headwear} design",
+        "abstract {pattern} enhanced by {lighting} on {texture} surface",
+        "cultural {pattern} adorning {jewelry} and {upper_clothing}",
+        "minimalist {pattern} contrasting busy {object_left} arrangement",
+        "bold {pattern} making statement on {material} garment {offset}",
+        "subtle {pattern} revealed under close inspection of {accessory}",
+        "layered {pattern} combinations creating depth {relation} {object_right}"
+    ],
+
+    # 15. Grid
+    "<grid>": [
+        "composition following {grid} layout",
+        "{gender} positioned on {grid}",
+        "elements arranged in {grid}",
+        "{grid} structure in {zone}",
+        "visual {grid} with {object_left} and {object_right}",
+        "precise {grid} alignment of {gender} {pose} with {surface} elements",
+        "dynamic {grid} breaking traditional rules in {zone} placement",
+        "harmonious {grid} balancing {object_left} and {object_right} {offset}",
+        "mathematical {grid} underlying {pattern} on {material} surface",
+        "intuitive {grid} guiding eye through {lighting} and shadow",
+        "classical {grid} proportions for {gender} wearing {upper_clothing}",
+        "modern {grid} interpretation with {accessory} as focal point",
+        "organic {grid} suggested by natural {texture} arrangements",
+        "rigid {grid} softened by {fabric} draping and {pose}",
+        "conceptual {grid} relating {emotion} to spatial {relation}"
+    ],
+
+    # 16. Zone
+    "<zone>": [
+        "{gender} positioned in {zone}",
+        "activity happening in {zone}",
+        "{object_left} located in {zone}",
+        "focus on {zone} area",
+        "{lighting} illuminating {zone}",
+        "primary action occurring in {zone} with {gender} {pose}",
+        "secondary elements arranged in {zone} around {object_right}",
+        "visual weight concentrated in {zone} through {lighting} placement",
+        "negative space defining {zone} boundaries near {surface}",
+        "compositional {zone} emphasized by {pattern} and {texture}",
+        "foreground {zone} featuring {upper_clothing} and {accessory} details",
+        "background {zone} providing context with {object_left} placement",
+        "transitional {zone} linking elements through {material} continuity",
+        "isolated {zone} creating focus on {emotion} expression {offset}",
+        "interconnected {zone} relating {footwear} to {surface} interaction"
+    ],
+
+    # 17. Offset
+    "<offset>": [
+        "{gender} {offset}",
+        "{object_right} placed {offset}",
+        "scene captured {offset}",
+        "composition {offset}",
+        "elements arranged {offset}",
+        "strategic placement {offset} creating visual tension with {object_left}",
+        "balanced arrangement {offset} despite asymmetrical {pose}",
+        "dramatic positioning {offset} enhanced by {lighting} direction",
+        "subtle shift {offset} revealing {texture} on {surface}",
+        "intentional framing {offset} emphasizing {pattern} details",
+        "dynamic capture {offset} showing movement in {upper_clothing}",
+        "classical placement {offset} following {grid} principles",
+        "unexpected angle {offset} revealing hidden {accessory} details",
+        "harmonious positioning {offset} uniting {zone} elements",
+        "thoughtful arrangement {offset} guiding viewer through {emotion}"
+    ],
+
+    # 18. Object left
+    "<object_left>": [
+        "{object_left} on the left side",
+        "{object_left} {relation} {object_right}",
+        "{object_left} made of {material}",
+        "prominent {object_left} in {zone}",
+        "{object_left} under {lighting}",
+        "carefully placed {object_left} with {texture} surface in {zone}",
+        "weathered {object_left} showing {pattern} from use over time",
+        "functional {object_left} serving purpose {relation} {gender}",
+        "decorative {object_left} crafted from {material} with {fabric} accents",
+        "symbolic {object_left} representing {emotion} in composition",
+        "vintage {object_left} contrasting modern {object_right} {offset}",
+        "organic {object_left} complementing structured {surface} geometry",
+        "illuminated {object_left} catching {lighting} dramatically",
+        "textured {object_left} providing tactile interest near {accessory}",
+        "minimal {object_left} balancing ornate {upper_clothing} details"
+    ],
+
+    # 19. Object right
+    "<object_right>": [
+        "{object_right} on the right side",
+        "{object_right} near {gender}",
+        "{object_right} with {texture}",
+        "decorative {object_right} {offset}",
+        "{object_right} on {surface}",
+        "significant {object_right} made from {material} in {zone}",
+        "artistic {object_right} displaying {pattern} under {lighting}",
+        "practical {object_right} used by {gender} while {pose}",
+        "antique {object_right} with {texture} patina on {surface}",
+        "contemporary {object_right} featuring {fabric} elements",
+        "natural {object_right} {relation} manufactured {object_left}",
+        "polished {object_right} reflecting surrounding {lighting} effects",
+        "weathered {object_right} telling story through wear {offset}",
+        "geometric {object_right} following {grid} placement rules",
+        "organic {object_right} softening rigid {pattern} arrangements"
+    ],
+
+    # 20. Relation
+    "<relation>": [
+        "{object_left} {relation} {object_right}",
+        "{gender} {relation} {surface}",
+        "{accessory} {relation} {object_right}",
+        "spatial {relation} between elements",
+        "{relation} positioning in {zone}",
+        "dynamic {relation} created between {gender} and {object_left} through {pose}",
+        "harmonic {relation} linking {upper_clothing} to {surface} textures",
+        "contrasting {relation} between {material} and {fabric} elements",
+        "subtle {relation} suggested by {lighting} connecting distant objects",
+        "physical {relation} demonstrated through {footwear} contact with {surface}",
+        "visual {relation} established via {pattern} continuity across {zone}",
+        "emotional {relation} between {emotion} expression and {object_right}",
+        "compositional {relation} following {grid} to link {accessory} placement",
+        "temporal {relation} implied between weathered {object_left} and new {jewelry}",
+        "conceptual {relation} uniting {texture} variations {offset}"
+    ],
+
+    # 21. Intent
+    "<intent>": [
+        "creating {intent} mood",
+        "{intent} purpose with {emotion}",
+        "conveying {intent} through {pose}",
+        "{intent} narrative in scene",
+        "artistic {intent} {offset}",
+        "deliberate {intent} expressed through {gender}'s {pose} and {emotion}",
+        "subtle {intent} woven into {pattern} and {material} choices",
+        "powerful {intent} communicated via {lighting} on {surface}",
+        "layered {intent} revealed through {upper_clothing} and {accessory} symbolism",
+        "cultural {intent} embedded in {jewelry} and {headwear} selection",
+        "personal {intent} manifested in {hair_style} and {footwear} styling",
+        "universal {intent} transcending specific {zone} placement",
+        "complex {intent} requiring contemplation of {object_left} {relation} {object_right}",
+        "immediate {intent} apparent in {texture} and {fabric} contrasts",
+        "evolving {intent} suggested by transitional {lighting} {offset}"
+    ],
+
+    # 22. Style
+    "<style>": [
+        "rendered in {style} aesthetic",
+        "{style} artistic approach",
+        "{style} treatment of {lighting}",
+        "distinctive {style} composition",
+        "{style} interpretation {offset}",
+        "refined {style} evident in {gender}'s {pose} and {upper_clothing} selection",
+        "bold {style} expressed through {pattern} and {material} combinations",
+        "subtle {style} nuances in {texture} treatment on {surface}",
+        "period {style} accuracy in {headwear} and {footwear} details",
+        "contemporary {style} merging with traditional {jewelry} elements",
+        "experimental {style} pushing boundaries of {lighting} and {zone}",
+        "classical {style} principles applied to modern {accessory} arrangement",
+        "signature {style} recognizable in {emotion} portrayal and {hair_style}",
+        "evolving {style} blending multiple influences in {fabric} choices",
+        "cohesive {style} unifying disparate elements through {grid} structure"
+    ],
+
+    # 23. Fabric
+    "<fabric>": [
+        "{upper_clothing} made from {fabric}",
+        "luxurious {fabric} {accessory}",
+        "{fabric} draped over {surface}",
+        "soft {fabric} with {pattern}",
+        "{fabric} material in {zone}",
+        "premium {fabric} woven with {material} threads creating {texture}",
+        "delicate {fabric} flowing around {gender} during {pose}",
+        "structured {fabric} maintaining form in {upper_clothing} design",
+        "vintage {fabric} showing {pattern} popular in past eras",
+        "innovative {fabric} blend combining natural and synthetic {material}",
+        "handwoven {fabric} displaying artisanal {texture} under {lighting}",
+        "sustainable {fabric} used in {footwear} and {accessory} construction",
+        "traditional {fabric} treatment creating unique {pattern} {offset}",
+        "modern {fabric} technology enabling {emotion} through drape",
+        "layered {fabric} creating depth {relation} {surface} backdrop"
+    ],
+
+    # 24. Jewelry
+    "<jewelry>": [
+        "{gender} wearing {jewelry}",
+        "elegant {jewelry} {offset}",
+        "{jewelry} paired with {upper_clothing}",
+        "sparkling {jewelry} under {lighting}",
+        "{material} {jewelry} as accent",
+        "heirloom {jewelry} crafted from {material} with {pattern} engravings",
+        "contemporary {jewelry} complementing traditional {upper_clothing} style",
+        "statement {jewelry} creating focal point against {fabric} backdrop",
+        "delicate {jewelry} catching {lighting} with subtle sparkle",
+        "layered {jewelry} arrangement enhancing {emotion} expression",
+        "cultural {jewelry} representing heritage worn with {headwear}",
+        "minimalist {jewelry} balancing ornate {accessory} details",
+        "vintage {jewelry} showing {texture} from years of wear",
+        "custom {jewelry} designed to match {footwear} embellishments",
+        "symbolic {jewelry} placed strategically in {zone} for meaning"
+    ],
+}
+
+#"""Initialize templates for all 26 categories with expanded diversity"""
+
+
+## 25. Lower body clothing (adding this as it seems to be missing)
+#"<lower_body_clothing>": [
+#    "{gender} wearing {lower_clothing} with {pattern}",
+#    "flowing {lower_clothing} made of {fabric} {offset}",
+#    "{material} {lower_clothing} paired with {footwear}",
+#    "tailored {lower_clothing} in {zone} under {lighting}",
+#    "casual {lower_clothing} with {texture} details on {surface}",
+#    "formal {lower_clothing} complementing {upper_clothing} ensemble",
+#    "vintage {lower_clothing} featuring {pattern} from bygone era",
+#    "contemporary {lower_clothing} with innovative {material} blend",
+#    "functional {lower_clothing} designed for {pose} flexibility",
+#    "decorative {lower_clothing} adorned with {accessory} elements",
+#    "layered {lower_clothing} creating visual interest through {fabric}",
+#    "structured {lower_clothing} maintaining silhouette while {pose}",
+#    "flowing {lower_clothing} enhanced by movement and {lighting}",
+#    "traditional {lower_clothing} updated with modern {pattern}",
+#    "minimalist {lower_clothing} allowing focus on {jewelry} details"
+#],
+#
+## 26. Background (adding this for environmental context)
+#"<background>": [
+#    "atmospheric {background} setting enhancing {emotion}",
+#    "{background} environment complementing {style} aesthetic",
+#    "detailed {background} with {texture} elements in {zone}",
+#    "minimal {background} focusing attention on {gender} {pose}",
+#    "complex {background} incorporating {object_left} and {object_right}",
+#    "natural {background} with organic {pattern} under {lighting}",
+#    "architectural {background} providing {grid} structure",
+#    "abstract {background} created through {material} and light",
+#    "historical {background} context for period {upper_clothing}",
+#    "futuristic {background} contrasting vintage {accessory} elements",
+#    "textured {background} adding depth behind {surface} placement",
+#    "gradient {background} transitioning through {zone} areas",
+#    "patterned {background} echoing {fabric} design motifs",
+#    "atmospheric {background} enhanced by {lighting} effects {offset}",
+#    "contextual {background} supporting narrative {intent}"
+#]
 
 SYMBOLIC_TEMPLATE = [
     "a person {pose} {offset} wearing {upper_clothing} and {footwear}",
@@ -534,9 +1094,6 @@ SYMBOLIC_TEMPLATE_ADVANCED = [
     "a {gender1} hiding their face, a {gender2} offering a {object_right} from across a {material} step",
     "a {gender} standing in place, while dozens of {accessory} objects scatter across the {texture} floor"
 ]
-
-
-
 
 
 
@@ -3719,25 +4276,81 @@ ACCESSORY_TYPES = [
     "shoulder wrap", "lapel pin", "scouter", "holster", "necklace pouch",
     "translucent visor", "decorative pins", "amulet", "beaded necklace",
     "digital watch", "clunky bracelet", "flower crown", "hood ornament",
-    "fashion chain", "pendant mirror", "smart glasses"
+    "fashion chain", "pendant mirror", "smart glasses", "hair ribbon",
+    "hair scrunchie", "sunglass chain", "keychain", "phone case",
+    "glittery headband", "statement earrings", "feathered hairpiece",
+    "decorative belt", "fashion brooch", "wrist cuff", "ankle strap",
+    "fashion gloves", "stylish beret", "decorative scarf", "hair comb",
+    "fashion visor", "decorative hairpin", "stylish headband",
+    "fashion choker", "decorative arm cuff", "stylish anklet",
+    "fashion lanyard", "decorative fingerless gloves", "stylish fanny pack",
+    "fashion sling bag", "decorative crossbody bag", "stylish handbag",
+    "fashion waist pouch", "decorative utility belt", "stylish pocket chain",
+    "fashion cane", "decorative parasol", "stylish fan", "fashion monocle",
+    "decorative goggles", "stylish headphones", "fashion earmuffs",
+    "decorative bandana", "stylish ribbon", "fashion shawl", "decorative capelet",
+    "stylish neck warmer", "fashion chest strap", "decorative body harness",
+    "stylish ankle cuffs", "fashion brooch", "decorative pendant",
+    "choker", "armband", "anklet", "bracelet", "brooch", "hairpin", "headband",
+    "barrette", "tiara", "cufflink", "watch", "sunglasses", "monocle",
+    "eyepatch", "badge", "pin", "lapel pin", "ribbon", "sash",
+    "corsage", "cummerbund", "scarf", "shawl", "muffler", "necklace",
+    "earring", "earcuff", "toe ring", "belt chain", "utility belt",
+    "gloves", "gauntlet", "mittens", "arm warmer", "leg warmer",
+    "garter", "halter", "visor", "veil", "diadem", "hairband",
+    "hair ribbon", "feather clip", "cravat", "ascot", "decorative chain",
+    "neck cuff", "lace trim", "metal band", "clasp", "decorative buckle",
+    "ornamental clip", "spike collar", "chain braid", "lace rose",
+    "riveted strap", "plated link", "woven cord", "scaled loop",
+    "fabric swirl", "ceremonial ring", "ghost bell", "veil loop",
+    "crowned hinge", "mask chain", "grip hook", "knuckle wrap",
+    "signal disc", "arc clip", "anchor cuff", "veil ring", "thread hook",
+    "bandplate", "braid loop", "net tassel", "feather lash", "ribbon point",
+    "dust flare", "flare crest", "plume chain", "dream loop",
+    "hood", "cape", "beret", "sunhat", "visor clip", "tie clip",
+    "chain belt", "hair comb", "snood", "bow tie", "mantle",
+    "shoulder pad", "boot strap", "glove strap", "pocket chain",
+    "neck drape", "wrap band", "waist tie", "ear string", "tunic band"
+
 ]
 
 SHAPE_TYPES = [
-    "cube", "sphere", "cylinder", "cone", "pyramid",
-    "tetrahedron", "octahedron", "dodecahedron", "icosahedron",
-    "capsule", "prism", "oblate shape", "torus", "ring form",
-    "disk", "arched frame", "arc", "looped structure", "beveled block",
-    "rounded slab", "polygonal block", "textured column",
-    "triangular wedge", "cubic segment", "stacked forms",
-    "layered pillar", "ellipsoid", "distorted orb", "fragmented shell",
-    "half-sphere", "stepped platform", "tilted pillar", "chiseled block",
-    "floating shard", "geometric shell", "hollow column", "spiral coil",
-    "low-poly chunk", "segment ring", "faceted crystal", "modular node",
-    "nested frame", "offset disk", "stacked octagons", "twisted beam",
-    "folded panel", "floating panel", "plated form", "gridded wedge",
-    "angled fin", "pyramidal object", "asymmetric brick", "mirrored prism",
-    "rotated hexagon", "orb cluster", "low-profile dome", "fragment cluster",
-    "wave-form slab", "collapsed arch", "perforated pillar"
+    # Geometric primitives
+    "cube", "sphere", "cylinder", "cone", "pyramid", "tetrahedron",
+    "octahedron", "dodecahedron", "icosahedron", "torus", "prism",
+    "capsule", "ellipsoid", "half-sphere", "disk", "ring",
+
+    # Compound and dimensional structures
+    "pentachoron", "truncated cone", "rounded cube", "oblate sphere",
+    "prolate spheroid", "rhombic prism", "triangular wedge", "beveled block",
+    "hollow torus", "looped form", "polygon mesh", "twisted cylinder",
+    "spiral form", "gridded cube", "mirror-reflective polyhedron",
+
+    # Stylized and abstract volumes
+    "stacked forms", "layered pillar", "arched frame", "twisted beam",
+    "angled fin", "offset disk", "fragment cluster", "geometric shell",
+    "low-poly chunk", "stepped platform", "collapsed arch",
+    "tilted pillar", "floating shard", "sliced cube",
+    "faceted crystal", "modular node", "nested frame",
+    "mirrored prism", "rotated hexagon", "interlocking shapes",
+    "fragmented shell", "distorted orb", "wave-form slab",
+    "curved slab", "floating panel", "plated form",
+    "angular block", "asymmetric brick", "gridded wedge",
+    "chiseled block", "polygonal block", "layered disk",
+
+    # New precise geometries and extended forms
+    "parallelogram", "trapezoid", "rhomboid", "hexagon", "heptagon",
+    "octagon", "nonagon", "decagon", "ellipse", "star polygon",
+    "lens shape", "clover form", "cross section", "gear-like ring",
+    "intersecting rings", "mesh dome", "arc segment", "notched disk",
+    "spline surface", "cutaway cube", "twist prism", "bent rod",
+    "pinched slab", "wave cut", "angular coil", "coil spring",
+    "collapsed dome", "open frame", "wrapped loop", "rippled tile",
+    "corner joint", "offset spiral", "linked hoops", "double torus",
+    "inverted dome", "sliced prism", "cracked wedge", "split helix",
+    "concentric shells", "inner cavity shape", "perimeter band",
+    "sunburst disk", "refracted crystal", "jagged ring", "honeycomb cell",
+    "petal structure", "axonometric shard", "corner-fold shape", "glyph slab"
 ]
 
 DECORATION_TYPES = [
@@ -3747,37 +4360,127 @@ DECORATION_TYPES = [
     "framed photo", "family portrait", "calendar", "mirror",
     "wall sconce", "hanging plant", "macrame hanger", "dreamcatcher",
     "vintage clock", "antique mirror", "mounted animal head", "wooden plaque",
+    "woven wall hanging", "metal wall art", "framed map", "wall-mounted sculpture",
+    "textile wall art", "woven basket wall decor", "framed botanical print",
+    "hanging textile art", "woven tapestry", "ceramic wall plate",
+    "hanging photo collage", "woven wall basket", "hanging mirror",
+    "mural", "decorative wall panel", "wall-mounted shelf",
+    "photo wall grid", "hanging art installation",
 
     # Ceiling / Hanging Decor
     "chandelier", "ceiling fan", "paper lantern", "string lights",
     "hanging lamp", "mobile", "wind chime", "ceiling drape",
     "disco ball", "suspended globe", "beaded curtain", "tinsel strand",
+    "hanging planter", "fabric canopy", "hanging sculpture", "woven pendant",
+    "hanging mirror", "glass pendant", "woven light fixture", "hanging art piece",
+    "hanging terrarium", "woven basket light", "hanging textile", "hanging clock",
+    "hanging tapestry", "hanging floral arrangement", "hanging crystal",
+    "hanging dream catcher", "hanging wall art", "hanging photo display",
+    "hanging candle holder", "hanging glass orb", "hanging wooden sculpture",
 
     # Shelf & Manteltop
     "vase with flowers", "candleholder", "statue", "figurine",
     "crystal cluster", "photo frame", "mini bust", "bronze sculpture",
     "ceramic figurine", "ornamental bowl", "dried flower bundle",
     "small clock", "incense burner", "keepsake box", "decorative book stack",
+    "antique trinket", "glass terrarium", "wooden carving", "framed art piece",
+    "glass paperweight", "decorative globe", "wooden box", "ceramic vase",
+    "metal sculpture", "woven basket", "artistic candle", "decorative plate",
+    "etched glass vase", "hand-painted jar", "woven wall hanging",
 
     # Tabletop / Centerpiece
     "centerpiece bowl", "table runner", "ornamental tray", "geometric sculpture",
     "bonsai tree", "terrarium", "jar of marbles", "pile of smooth stones",
     "salt lamp", "sand garden", "candle array", "glass dome",
+    "decorative clock", "wooden bowl", "ceramic dish", "glass vase",
+    "metal bowl", "woven placemat", "artistic coaster set", "decorative lantern",
+    "etched glass bowl", "handcrafted pottery", "woven centerpiece",
+    "decorative fruit bowl", "glass candle holder", "wooden centerpiece",
 
     # Floor Decor
     "floor mirror", "floor vase", "potted plant", "fern stand",
     "indoor tree", "planter box", "floor sculpture", "corner lamp",
     "tripod lamp", "textile totem", "standee", "vinyl poster stand",
-    "fabric display panel", "floor lantern",
+    "fabric display panel", "floor lantern", "woven rug",
+    "hanging tapestry", "floor cushion", "woven pouf", "decorative ladder",
+    "hanging planter", "freestanding coat rack", "floor clock",
+    "woven wall basket", "hanging art piece", "floor candle holder",
 
     # Niche / Cultural / Artistic
     "origami sculpture", "folding fan", "tatami mat", "woven panel",
     "cultural mask", "calligraphy scroll", "spiritual statue",
     "wreath", "festival banner", "display sword", "ink painting",
     "ceremonial plate", "woven dream shield", "etched glass panel"
+    "woven tapestry", "cultural artifact", "ceramic tile art",
+    "woven wall hanging", "handcrafted textile", "woven basket",
+    "woven wall basket", "woven wall hanging", "handcrafted textile",
 ]
 
+RELATION_TAGS = [
+    # Basic spatial relationships
+    "next to", "beside", "on top of", "under", "to the right of", "to the left of",
+    "above", "below", "in front of", "behind", "adjacent to",
+    "across from", "in between", "surrounding", "enclosed by", "encircled by",
+    "overlapping with", "touching", "connected to", "linked to", "attached to",
+
+    # Geometric / Directional
+    "diagonally above", "diagonally below", "centered over", "off-center from",
+    "between", "surrounding", "encircling", "aligned with", "opposite from", "mirrored by",
+    "parallel to", "perpendicular to", "angled towards", "facing towards",
+    "facing away from", "angled away from", "slightly offset from", "directly across from",
+
+    # Touching / Contact
+    "touching", "leaning against", "attached to", "stacked on", "resting against",
+    "embedded in", "hooked onto", "hanging from", "sitting on",
+    "dangling from", "propped against", "affixed to", "secured to", "clinging to",
+    "fastened to", "tethered to", "anchored to", "connected to", "linked to",
+
+    # Containment / Inclusion
+    "inside", "outside of", "within", "encased in", "covered by", "enclosed within",
+    "wrapped around", "nestled inside", "trapped under", "surrounded by",
+    "contained within", "framed by", "bordered by", "enveloped by",
+    "cocooned in", "shrouded by", "shielded by", "protected by",
+
+    # Positional intent
+    "leading", "following", "offset from", "hovering over", "drifting near",
+    "partially covering", "peeking from behind", "projected onto",
+    "overlapping with", "intersecting with",
+    "framing", "bordering", "edging", "cascading from", "spilling over",
+
+    # Relational logic
+    "subordinate to", "dominant over", "supporting", "obscuring", "revealed by",
+    "contrasting with", "complementing", "enhancing", "diminishing", "amplifying",
+    "influencing", "inspired by", "echoing", "reflecting", "mimicking",
+
+    # Abstract / metaphorical (optional flair)
+    "echoing", "reflecting", "shadowing", "contrasting with", "mimicking",
+    "intertwined with", "linked to", "intersecting with",
+    "complementing", "juxtaposed with", "in harmony with", "in conflict with",
+    "inspired by", "influenced by", "connected to", "associated with",
+]
+
+#these are the human poses, pay attention and don't replace the whole thing with the wrong list please.
 HUMAN_POSES = [
+    # Limb and offset control expansions
+    "left arm forward", "left arm backward", "left arm outstretched",
+    "left arm bent", "left arm tucked", "right arm forward", "right arm backward",
+    "right arm outstretched", "right arm bent", "right arm tucked",
+
+    "left leg forward", "left leg back", "left leg lifted", "left leg bent",
+    "left leg extended", "right leg forward", "right leg back",
+    "right leg lifted", "right leg bent", "right leg extended",
+
+    "torso leaned left", "torso leaned right", "torso twisted left", "torso twisted right",
+    "torso upright", "shoulders raised", "shoulders lowered", "spine arched",
+    "spine curled", "spine twisted",
+
+    "head turned slightly", "head sharply turned", "head raised high", "head bowed",
+    "chin raised", "chin tucked", "neck elongated", "neck compressed",
+
+    "hand reaching up", "hand reaching down", "hand reaching out",
+    "hand clenched", "hand splayed", "finger pointing", "fingers curled",
+    "fingers interlocked", "palm open", "palm downward",
+
     "standing", "sitting", "crouching", "kneeling",
     "lying down", "leaning", "walking", "running",
     "jumping", "reclining", "reaching", "bending forward",
@@ -3791,6 +4494,82 @@ HUMAN_POSES = [
 
     "turned slightly", "posed dynamically", "looking to the side", "looking away",
     "facing to the side", "facing viewer", "first person view",
+    "looking down", "looking up", "tilted head", "head turned",
+    "head tilted", "head down", "head up", "head turned left", "head turned right",
+    "arms akimbo", "hands on hips", "hands clasped", "hands on knees",
+    "hands on thighs", "hands in pockets", "hands raised", "hands clasped behind back",
+    "hands on head", "hands behind head", "hands on waist", "hands on chest",
+    "twerking", "striking a pose", "posing confidently", "posing playfully",
+    "posing dramatically", "posing elegantly", "posing casually", "posing thoughtfully",
+    "stretching", "twisting torso", "arching back", "leaning forward",
+]
+
+#These are human PHOTOGRAPH ANGLES, add additional angles.
+HUMAN_PHOTOGRAPH_ANGLES = [
+    # Expanded and refined human-centric photography angles
+    "front-facing", "side profile", "three-quarters view", "back view",
+    "from side", "from above", "from below","overhead shot",
+    "worm's eye view", "bird's eye view", "close-up", "medium shot",
+    "wide shot", "extreme close-up", "long shot", "full body shot",
+    "half body shot", "portrait orientation", "landscape orientation",
+    "high angle", "low angle", "dutch angle", "candid shot",
+    "action shot", "posed shot", "dynamic angle", "static angle",
+    "tilted angle", "straight on", "angled shot", "profile view",
+    "over-the-shoulder", "looking up at subject", "looking down on subject",
+    "rear three-quarters", "corner shot", "reflected angle", "mirror view",
+    "obstructed view", "behind foreground", "silhouette capture",
+    "cross angle shot", "diagonal composition", "soft focus angle",
+    "foreground blur", "background focus", "zoomed detail", "extreme high angle",
+    "extreme low angle", "intimate framing", "distant perspective",
+    "follow cam", "tracking shot", "rotated capture", "pivot angle",
+    "shoulder-mounted view", "torso-centered", "upper-body locked",
+    "waist-down focus", "knee-height shot", "ground plane view",
+    "helmet view", "chest rig angle", "frame-filling portrait",
+    "angled head tilt", "posed leg arc", "gesture emphasis",
+    "motion-emphasized angle", "composed symmetry", "off-center balance",
+    "forced perspective", "lens-distorted portrait", "bokeh-framed pose",
+    "fisheye proximity", "near-eye angle", "cropped offset view",
+    "transition focus frame", "spatial compression", "refracted subject view",
+    "frontal compression", "echoed reflection angle", "mirrored asymmetry",
+    "framing through space", "eye-contact capture", "non-eye-contact angle",
+    "oblique human framing"
+]
+
+
+EMOTION_TYPES = [
+    # Core emotions
+    "happy", "sad", "thoughtful", "confident", "mysterious", "playful", "serene",
+    "intense", "melancholic", "joyful", "contemplative", "curious", "nostalgic", "excited",
+    "anxious", "angry", "fearful", "surprised", "disgusted", "ashamed", "bored",
+    "embarrassed", "relaxed", "hopeful", "proud", "grateful", "content", "inspired",
+    "lonely", "jealous", "regretful", "resentful", "guilty", "frustrated", "overwhelmed",
+
+    # Positive spectrum
+    "content", "grateful", "peaceful", "hopeful", "inspired", "excited", "ecstatic",
+    "relieved", "tender", "affectionate", "cheerful", "uplifted", "amused", "carefree",
+    "optimistic", "enthusiastic", "proud", "admiring", "nostalgic", "satisfied",
+    "playful", "curious", "intrigued", "fascinated", "enlightened", "rejuvenated",
+
+    # Negative spectrum
+    "angry", "anxious", "fearful", "ashamed", "bitter", "jealous", "regretful", "resentful",
+    "insecure", "lonely", "desperate", "guilty", "grieving", "disappointed", "frustrated",
+    "overwhelmed", "nervous", "embarrassed", "disgusted", "horrified", "terrified",
+    "shocked", "apprehensive", "dreadful", "distressed", "despondent", "dejected",
+
+    # Neutral / Ambiguous
+    "neutral", "pensive", "stoic", "apathetic", "ambivalent", "indifferent", "tired",
+    "detached", "blank", "uncertain", "conflicted", "unsettled", "disoriented", "bewildered",
+    "confused", "disillusioned", "skeptical", "cynical", "unimpressed",
+
+    # Expressive or performative
+    "flirtatious", "sly", "defiant", "proud", "sarcastic", "smug", "teasing", "teary",
+    "bashful", "shy", "awkward", "curious", "startled", "embarrassed", "bashful", "bashful", "bashful",
+    "astonished", "bewildered", "confounded", "distraught", "disgusted", "horrified",
+
+    # Elevated / rare
+    "euphoric", "vindicated", "spiteful", "overwhelmed", "awe-struck", "tranquil",
+    "reverent", "haunted", "devoted", "wistful", "mournful", "cathartic",
+    "nostalgic", "transcendent", "enlightened", "sublime", "exhilarated", "elated",
 ]
 
 CLOTHING_SURFACE_LINKERS = [
@@ -3814,7 +4593,9 @@ CLOTHING_SURFACE_LINKERS = [
     "looped over",  # e.g. belt looped over a hook
     "hanging off",  # e.g. hoodie hanging off a doorknob
     "hooked onto",  # e.g. coat hooked onto a hanger
-    "peeking out from under"  # e.g. sock peeking out from under a chair
+    "peeking out from under",  # e.g. sock peeking out from under a chair
+    "underneath",  # e.g. shoes underneath a table
+    "draped across",  # e.g. blanket draped across a sofa
 ]
 
 HUMAN_INTERACTIONS = [
@@ -3849,68 +4630,167 @@ HUMAN_INTERACTIONS = [
     "handing to",  # handing to someone
     "talking to",  # talking to someone
     "pointing at",  # pointing at object, screen
-    "bouncing",
-    "falling",
-    "sliding",
-    "dragging",
-    "rapidly bouncing",
-    "swinging weapon",
-    "swinging racket",
-    "swinging sword",
-    "left punch",
-    "right punch",
-    "left kick",
-    "right kick",
-    "roundhouse kick",
-    "jump kick",
-    "back flip",
-    "front flip",
-    "gymnastics",
-    "acrobatics",
+    "bouncing", "falling", "sliding", "dragging", "rapidly bouncing", "swinging weapon", "swinging racket",
+    "swinging sword", "left punch", "right punch", "left kick", "right kick", "roundhouse kick", "jump kick",
+    "back flip", "front flip", "gymnastics", "acrobatics", "dancing", "dancing alone",
+    "spinning", "twirling", "waving", "shaking", "tossing", "catching", "throwing ball", "throwing frisbee",
+    "throwing rock", "throwing snowball", "throwing paper airplane", "throwing confetti", "throwing bouquet",
+    "bedroom dancing", "kitchen dancing", "living room dancing", "party dancing", "wedding dancing",
+    "club dancing", "street dancing", "dance battle", "dance competition", "dance rehearsal",
+    "dance performance", "dance class", "dance practice", "dance routine", "dance choreography",
+    "walking", "running", "jogging", "sprinting", "strolling", "hiking", "skipping",
+    "crawling", "sprinting", "jogging", "walking briskly", "walking slowly", "walking casually",
+    "prancing", "tiptoeing", "strutting", "marching", "shuffling",
+    "navigating", "maneuvering", "traversing", "exploring", "wandering",
+    "vaulting", "leaping", "bounding", "hopping", "jumping over",
+    "zigzagging", "dodging", "weaving", "sidestepping", "backpedaling",
+    "avoiding", "ducking", "diving", "rolling", "tumbling",
+    "quickly moving", "swiftly moving", "rapidly moving", "briskly moving",
+    "walking purposefully", "walking aimlessly", "walking with intent",
+    "exiting", "entering", "approaching", "retreating", "advancing",
+]
+
+HUMAN_ACTIONS = [
+    "throwing", "catching", "kicking", "punching", "pushing",
+    "pulling", "lifting", "carrying", "dragging", "shaking",
+    "waving", "pointing", "holding", "grabbing", "clutching",
+    "squeezing", "pressing", "tapping", "stroking", "rubbing",
+    "scratching", "patting", "stroking", "caressing", "massaging",
+    "hugging", "embracing", "high-fiving", "fist-bumping", "handshaking",
+    "wrestling", "fighting", "sparring", "boxing", "martial arts",
+    "dancing", "twirling", "spinning", "jumping", "leaping",
+    "running", "walking", "jogging", "sprinting", "strolling",
+    "hopping", "skipping", "crawling", "climbing", "balancing",
+    "sitting", "standing", "kneeling", "lying down", "reclining",
+    "bending", "stretching", "twisting", "turning", "leaning",
+    "swaying", "rocking", "bobbing", "shuffling", "gliding",
+    "sliding", "skating", "rollerblading", "surfing", "snowboarding",
+    "skiing", "hiking", "mountaineering", "exploring", "wandering",
+    "galloping", "trotting", "cantering", "prancing", "tiptoeing",
+    "strutting", "marching", "shuffling", "zigzagging", "dodging",
+    "weaving", "sidestepping", "backpedaling", "avoiding", "ducking",
+    "diving", "rolling", "tumbling", "cartwheeling", "backflipping",
+    "frontflipping", "spinning around", "turning around", "pivoting",
+    "quickly moving", "swiftly moving", "rapidly moving", "briskly moving",
+    "walking purposefully", "walking aimlessly", "walking with intent",
+    "running toward", "running away from", "running alongside",
+    "overcoming an obstacle", "jumping over a barrier", "vaulting a fence",
+    "interacting with surroundings", "navigating through a crowd",  "maneuvering through a space",
+    "walking through a door", "walking up stairs", "walking down stairs",
+    "walking through a hallway", "walking across a bridge", "walking along a path",
+    "walking through a garden", "walking on a beach", "walking in a park",
+    "walking through a market", "walking in a city street", "walking through a forest",
+    "club walk", "street walk", "mall walk", "park walk", "beach walk",
+    "club dance", "street dance", "mall dance", "park dance", "beach dance",
+    "club twerk", "street twerk", "mall twerk", "park twerk", "beach twerk",
+    "club shuffle", "street shuffle", "mall shuffle", "park shuffle", "beach shuffle",
+    "club vogue", "street vogue", "mall vogue", "park vogue", "beach vogue",
+    "fashion walk", "runway walk", "catwalk walk", "model walk", "high fashion walk",
+    "fashion dance", "runway dance", "catwalk dance", "model dance", "high fashion dance",
+    "fashion twerk", "runway twerk", "catwalk twerk", "model twerk", "high fashion twerk",
+    "yoga pose", "meditation pose", "stretching", "exercising", "lifting weights",
+    "doing push-ups", "doing sit-ups", "doing squats", "doing lunges", "doing yoga",
+    "doing pilates", "doing tai chi", "doing aerobics", "doing cardio", "doing crossfit",
+    "doing calisthenics", "doing martial arts", "doing kickboxing", "doing boxing",
+    "doing dance aerobics", "doing Zumba", "doing hip hop dance", "doing breakdancing",
+    "doing contemporary dance", "doing ballet", "doing jazzercise", "doing step aerobics",
+    "doing body step", "doing body jam", "doing body flow", "doing body sculpt",
+    "moving gracefully", "moving fluidly", "moving rhythmically", "moving with purpose",
+    "moving with confidence", "moving with agility", "moving with precision",
+    "moving with strength", "moving with speed", "moving with control",
+    "punching", "kicking", "blocking", "dodging", "parrying",
+    "grappling", "throwing", "tackling", "pinning", "submitting",
+    "striking", "attacking", "defending", "countering", "feinting",
+    "sparring", "fighting", "competing", "training", "practicing",
+    "wrestling", "boxing", "martial arts", "karate", "taekwondo",
+    "judo", "kickboxing", "muay thai", "brazilian jiu-jitsu", "mixed martial arts",
+    "self-defense", "combat sports", "grappling arts", "striking arts",
+    "combat training", "sparring match", "fight choreography", "martial arts demonstration",
+    "combat drill", "sparring session", "martial arts practice", "self-defense class",
+    "self-defense technique", "combat technique", "sparring technique", "martial arts move",
+    "self-defense move", "combat maneuver", "sparring maneuver", "martial arts stance",
+    "self-defense stance", "combat position", "sparring position", "martial arts form",
+    "kendo", "capoeira", "krav maga", "aikido", "wing chun",
+    "tai chi", "kung fu", "jeet kune do", "silat", "sambo",
+    "hapkido", "muay boran", "systema", "savate", "bando",
+    "fighting stance", "ready stance", "guard position", "defensive posture",
 ]
 
 HUMAN_SURFACES = [
-    "table",
-    "counter",
-    "desk",
-    "chair",
-    "bench",
-    "shelf",
-    "wall",
-    "cabinet",
-    "bar",
-    "pillar",
-    "furniture",
-    "sofa",
-    "bedframe",
-    "bookshelf",
-    "doorframe",
-    "window ledge",
-    "ledge",
-    "crate",
-    "barrel",
-    "locker",
-    "stool",
-    "frame",
-    "couch",
-    "sink",
-    "rail",
-    "divider",
-    "low wall",
-    "panel",
-    "archway",
-    "console",
-    "rack",
-    "appliance",
-    "toilet",
-    "drivers seat",
-    "passenger seat",
-    "pilot seat",
-    "gamer chair",
-    "gamer desk",
-    "high wall",
-    "computer monitor",
+    # pretty much anywhere a person or a usable human-like object can be
+    "table", "counter", "desk", "chair", "bench", "shelf", "wall", "cabinet", "bar",
+    "pillar", "furniture", "sofa", "bedframe", "bookshelf", "doorframe", "window ledge", "ledge", "crate", "barrel",
+    "locker", "stool", "frame", "couch", "sink", "rail", "divider", "low wall", "panel", "archway", "console",
+    "rack", "appliance", "toilet", "drivers seat", "passenger seat", "pilot seat", "gamer chair", "gamer desk",
+    "high wall", "computer monitor", "keyboard", "hedge", "fence", "gate", "platform", "stage", "podium",
+    "balcony", "terrace", "veranda", "porch", "outdoor table", "picnic table", "garden bench", "fireplace",
+    "mantel", "fire pit", "outdoor counter", "picnic blanket", "garden path", "stone wall", "wooden deck",
+    "bar", "gazebo", "pergola", "outdoor kitchen", "poolside", "hot tub edge", "outdoor lounge chair",
+    "sofa", "outdoor coffee table", "outdoor dining table", "outdoor bar stool", "outdoor fire pit",
+    "swing", "outdoor hammock", "outdoor rocking chair", "outdoor bench swing", "outdoor picnic table",
+    "bar cart", "outdoor storage box", "outdoor planter", "outdoor umbrella stand", "outdoor grill",
+    "concrete slab", "stone bench", "wooden swing", "outdoor lounge area", "outdoor fire table",
+    "quick access panel", "outdoor seating area", "outdoor bar area", "outdoor dining area",
+    "exterior wall", "outdoor wall art", "outdoor sculpture", "outdoor lighting fixture",
+    "underground tunnel", "subway platform", "train seat", "bus seat", "airplane seat",
+    "boat deck", "yacht deck", "dock", "pier", "jetty", "ferry deck", "cruise ship deck",
+    "nightclub dance floor", "concert stage", "theater stage", "arena floor",
+    "virtual reality platform", "gaming stage", "esports arena", "amusement park ride",
+    "carpet", "rug", "mat", "tatami mat", "yoga mat", "exercise mat",
+    "gym floor", "dance floor", "sports court", "athletic field", "track",
+    "playground equipment", "swingset", "slide", "jungle gym", "sandbox",
+    "climbing wall", "balance beam", "monkey bars", "seesaw", "tire swing",
+    "rug", "carpet", "doormat", "welcome mat", "area rug", "throw rug",
+    "floor mat", "bath mat", "kitchen mat", "runner rug", "shag rug",
+    "woven rug", "jute rug", "oriental rug", "persian rug", "kilim rug",
+    "upholstered chair", "bean bag chair", "recliner", "rocking chair",
+    "folding chair", "director's chair", "bar stool", "lounge chair", "armchair",
+    "ottoman", "pouffe", "stool", "footstool", "chaise lounge", "settee",
+    "love seat", "sectional sofa", "futon", "papasan chair", "swing chair",
+    "hammock chair", "hanging chair", "egg chair", "hanging pod chair",
+    "hanging rattan chair", "hanging macrame chair", "hanging wicker chair",
+    "wall", "fence", "gate", "partition", "divider", "barrier", "palisade",
+    "fence panel", "privacy screen", "garden trellis", "wooden fence",
+    "window", "door", "archway", "doorway", "gatepost", "picket fence",
+    "window frame", "door frame", "arched window", "arched door",
+    "window ledge", "door ledge", "balcony railing", "fence post",
+    "balccony wall", "fence gate", "garden gate", "security gate",
+    "iron gate", "wooden gate", "metal gate", "sliding gate", "swing gate",
+    "folding gate", "rolling gate", "security fence", "chain link fence",
+    "privacy fence", "picket fence", "vinyl fence", "wooden trellis",
+    "garden wall", "stone wall", "brick wall", "concrete wall", "retaining wall",
+    "cobblestone path", "gravel path", "asphalt path", "brick path",
+    "flagstone path", "stepping stone path", "wooden boardwalk", "dirt path",
+
 ]
+
+HUMAN_EXPRESSIONS = [
+    # Facial expressions
+    "smiling", "frowning", "laughing", "crying", "grimacing", "pouting",
+    "glaring", "winking", "squinting", "raising eyebrows", "furrowing brow",
+    "rolling eyes", "biting lip", "sticking out tongue", "gasping", "sighing",
+    "sneering", "snarling", "giggling", "beaming", "blushing",
+    "astonished", "confused", "disgusted", "embarrassed", "excited",
+    "angry mouth", "angry eyes", "sad mouth", "sad eyes", "surprised mouth",
+    "surprised eyes", "neutral mouth", "neutral eyes", "thoughtful expression",
+    "contemplative expression", "serious expression", "playful expression",
+    "mischievous expression", "flirtatious expression", "seductive expression",
+    "intense expression", "mysterious expression", "confident expression",
+    "thoughtful gaze", "intense gaze", "soft gaze", "piercing gaze",
+    "wide-eyed", "narrowed eyes", "soft smile", "broad smile", "subtle smile",
+    "smirk", "half-smile", "open-mouthed smile", "closed-lip smile",
+    "smiling with eyes", "smiling with mouth", "smiling with teeth",
+    "smiling with lips", "smiling with cheeks", "smiling with dimples",
+    "smiling with eyebrows raised", "smiling with head tilted",
+    "smiling with head down", "smiling with head up", "smiling with head turned",
+    "smiling with head straight", "smiling with head cocked", "smiling with head tilted slightly",
+    "smiling with head tilted forward", "smiling with head tilted backward",
+    "smiling with head tilted to the side", "smiling with head tilted at an angle",
+    "grimacing", "smirking", "sneering", "scowling", "pouting", "frowning",
+    "glaring", "winking", "squinting", "raising eyebrows", "furrowing brow",
+    'cross-eyed', 'wide-eyed', 'narrowed eyes', 'piercing gaze', 'soft gaze',
+]
+
 
 IRREGULARS = {
     "person": "people",
@@ -3921,6 +4801,7 @@ IRREGULARS = {
     "tooth": "teeth"
 }
 
+
 BLACKLIST = {
     "child", "children", "kid", "kiddy", "kiddo",
     "kindergarten", "kindergartener", "kindergartens",
@@ -3929,7 +4810,367 @@ BLACKLIST = {
     "gradeschooler", "tweens", "schoolboy", "schoolgirl", "nursery"
 }
 
-OFFSET_TAGS = [
+
+STYLE_TYPES = [
+    # Core
+    "photorealistic", "artistic", "minimalist", "dramatic", "cinematic", "vintage", "modern", "classical",
+    "experimental", "documentary", "portrait", "landscape", "abstract", "conceptual", "surrealistic", "hyperrealistic",
+    "whimsical", "elegant", "gritty", "noir", "futuristic", "retro", "vintage-inspired", "bohemian",
+    "industrial", "rustic", "eclectic", "urban", "naturalistic", "fantastical", "mythical", "sci-fi",
+    "fantasy", "horror", "noir", "steampunk", "cyberpunk", "gothic", "art deco", "art nouveau",
+    "baroque", "rococo", "brutalist", "postmodern", "constructivist", "expressionist", "impressionist",
+    "cubist", "dadaist", "symbolist", "realist", "pop art", "graffiti",
+    "hyperrealistic", "low poly", "pixel art", "vector art", "line art", "3D render", "claymation",
+    "stop motion", "photomontage", "mosaic", "stained glass", "embroidery", "tapestry", "woodcut", "linocut",
+    "noir photography", "macro photography", "wide angle photography", "bokeh photography",
+    "high contrast photography", "low light photography", "vintage film photography", "ultra HD photography",
+    "soft focus photography", "long exposure photography", "HDR photography", "fisheye photography",
+    "aerial photography", "drone shot photography", "time-lapse photography", "slow motion photography",
+    "cinematic photography", "documentary style photography", "street photography", "portrait photography",
+    "editorial fashion", "runway fashion", "street fashion", "industrial design", "futuristic design",
+    "gothic fashion", "cyberpunk fashion", "steampunk fashion", "biopunk fashion", "dark academia",
+    "light academia", "y2k fashion", "vaporwave aesthetic", "aesthetic core", "cozy aesthetic",
+    "boho aesthetic", "urban aesthetic", "eco-modern design", "avant-garde fashion", "retro-futuristic",
+    "kitsch", "camp", "whimsical design", "elegant design",
+    "mythological", "post-apocalyptic", "dreamlike", "otherworldly", "ritualistic",
+
+    # Visual / Art Movement
+    "surreal", "baroque", "rococo", "futurist", "brutalist", "art nouveau", "art deco",
+    "postmodern", "constructivist", "expressionist", "impressionist", "cubist",
+    "dadaist", "symbolist", "realist", "hyperrealistic", "pop art", "graffiti",
+    "abstract expressionist", "color field", "minimalist", "conceptual art",
+    "op art", "photorealism", "naive art", "folk art", "street art",
+    "lowbrow", "highbrow", "outsider art", "digital art", "installation art",
+    "performance art", "video art", "mixed media", "collage art", "assemblage",
+    "found object art", "text art", "sound art", "kinetic art", "light art",
+    "environmental art", "land art", "public art", "community art", "social practice art",
+
+    # Medium-Based
+    "oil painting", "digital illustration", "charcoal sketch", "ink drawing",
+    "watercolor", "collage", "pastel", "pixel art", "low poly", "wireframe", "line art",
+    "vector art", "3D render", "claymation", "stop motion", "photomontage",
+    "mosaic", "stained glass", "embroidery", "tapestry", "woodcut", "linocut",
+    "etching", "screen printing", "lithography", "engraving", "ceramics",
+    "glassblowing", "metalwork", "jewelry design", "textile art", "fiber art",
+    "printmaking", "bookbinding", "calligraphy", "typography", "graffiti art",
+    "street art", "urban art", "installation art", "performance art",
+    "video art", "digital collage", "augmented reality art", "virtual reality art",
+
+    # Photography / Film
+    "noir", "monochrome", "sepia", "macro", "wide angle", "bokeh", "high contrast",
+    "low light", "vintage film", "ultra HD", "soft focus", "long exposure",
+    "HDR", "fisheye", "aerial", "drone shot", "time-lapse", "slow motion",
+    "cinematic", "documentary style", "street photography", "portrait photography",
+    "fashion photography", "editorial photography", "lifestyle photography",
+    "architectural photography", "product photography", "food photography",
+    "wildlife photography", "sports photography", "event photography",
+    "astrophotography", "underwater photography", "macro photography",
+    "black and white photography", "color photography", "fine art photography",
+    "conceptual photography", "abstract photography", "photojournalism",
+    "street style photography", "fashion editorial", "runway photography",
+    "urban exploration photography", "candid photography", "self-portrait photography",
+    "night photography", "long exposure photography", "high-speed photography",
+
+    # Fashion / Editorial / Design
+    "editorial", "runway", "street fashion", "industrial", "futuristic", "gothic",
+    "cyberpunk", "steampunk", "biopunk", "dark academia", "light academia",
+    "y2k", "vaporwave", "aesthetic core", "cozy", "boho", "urban", "eco-modern",
+    "avant-garde", "retro-futuristic", "kitsch", "camp", "whimsical", "elegant",
+    "vintage-inspired", "bohemian", "industrial chic", "rustic", "eclectic",
+    "urban chic", "naturalistic", "fantastical", "mythical", "sci-fi",
+    "fantasy", "horror", "noir", "steampunk", "cyberpunk", "gothic",
+    "art deco", "art nouveau", "baroque", "rococo", "brutalist", "postmodern",
+
+
+    # Genre-Fusion
+    "mythological", "post-apocalyptic", "dreamlike", "otherworldly", "ritualistic", "religious iconography",
+    "fantasy", "sci-fi", "horror", "noir", "western", "steampunk", "cyberpunk",
+    "urban fantasy", "magical realism", "historical fiction", "fairy tale", "folklore",
+    "supernatural", "cosmic horror", "space opera", "time travel", "alternate history",
+    "dystopian", "utopian", "mythic", "legendary", "epic", "sword and sorcery",
+    "urban legend", "ghost story", "suspense", "thriller", "crime noir", "detective fiction",
+    "romantic", "comedic", "satirical", "parodic", "absurdist", "existential",
+    "philosophical", "metafictional", "magical realism", "speculative fiction",
+
+]
+
+INTENT_TYPES = [
+    # Core
+    "emotional", "narrative", "aesthetic", "conceptual", "documentary", "expressive", "symbolic", "atmospheric",
+    "thematic", "cultural", "historical", "social commentary", "political", "philosophical", "satirical", "provocative",
+    "educational", "entertaining", "immersive", "reflective", "introspective", "transformative", "visionary", "innovative",
+    "experimental", "interactive", "immersive experience", "sensory", "evocative", "poetic", "lyrical", "narrative-driven",
+    "character-driven", "plot-driven", "world-building", "mythic", "epic", "ritualistic", "transformational", "origin-focused",
+    "coming of age", "rebirth", "sacrifice", "revelation", "mystery", "conflict-driven", "internal journey",
+    "spiritual awakening", "moral tension", "provocative", "political", "satirical", "educational", "cautionary",
+    "persuasive", "journalistic", "testimonial", "allegorical", "activist", "compositional study", "gesture-focused",
+    "motion-driven", "light study", "texture-focused", "character centric", "environmental", "perspective-driven",
+
+    # Psychological / Emotional States
+    "melancholic", "nostalgic", "euphoric", "haunting", "serene", "tense",
+    "romantic", "tragic", "contemplative", "hopeful", "lonely", "reflective",
+    "anxious", "exuberant", "playful", "sentimental", "stoic", "wistful",
+    "bittersweet", "cathartic", "introspective", "haunted", "devoted", "wistful",
+    "mournful", "cathartic", "awe-struck", "tranquil", "reverent", "haunted",
+    "devoted", "wistful", "mournful", "cathartic", "euphoric", "vindicated",
+    "spiteful", "overwhelmed", "awe-struck", "tranquil", "reverent", "haunted",
+
+
+    # Narrative Drivers
+    "heroic", "mythic", "epic", "ritualistic", "transformational", "origin-focused",
+    "coming of age", "rebirth", "sacrifice", "revelation", "mystery", "conflict-driven",
+    "internal journey", "spiritual awakening", "moral tension",
+    "transformative", "visionary", "innovative", "experimental", "interactive",
+    "immersive experience", "sensory", "evocative", "poetic", "lyrical",
+    "narrative-driven", "character-driven", "plot-driven", "world-building",
+    "mythic", "epic", "ritualistic", "transformational", "origin-focused",
+
+    # Communication / Social
+    "provocative", "political", "satirical", "educational", "cautionary", "persuasive",
+    "journalistic", "testimonial", "allegorical", "activist",
+    "social commentary", "cultural critique", "historical reflection", "philosophical exploration",
+    "cultural exploration", "historical reflection", "social commentary", "political critique",
+    "philosophical exploration", "satirical", "provocative", "educational", "cautionary",
+    "persuasive", "journalistic", "testimonial", "allegorical", "activist",
+
+    # Visual / Compositional
+    "compositional study", "gesture-focused", "motion-driven", "light study", "texture-focused",
+    "character centric", "environmental", "perspective-driven", "minimal narrative",
+    "symbolic", "atmospheric", "thematic", "cultural", "historical", "social commentary",
+    "political", "philosophical", "satirical", "provocative", "educational", "entertaining",
+    "immersive", "reflective", "introspective", "transformative", "visionary", "innovative",
+    "experimental", "interactive", "immersive experience", "sensory", "evocative",
+    "poetic", "lyrical", "narrative-driven", "character-driven", "plot-driven", "world-building",
+    "mythic", "epic", "ritualistic", "transformational", "origin-focused", "coming of age",
+    "rebirth", "sacrifice", "revelation", "mystery", "conflict-driven", "internal journey",
+
+    # Conceptual / Meta
+    "meta-narrative", "simulation", "deconstructed", "ritual subversion", "symbol-dense",
+    "myth reimagined", "absurdist", "visual pun", "ontological reflection",
+    "philosophical inquiry", "cultural commentary", "historical reinterpretation", "social critique",
+    "political satire", "philosophical exploration", "satirical", "provocative", "educational",
+    "cautionary", "persuasive", "journalistic", "testimonial", "allegorical", "activist",
+
+]
+
+ZONE_TAGS = [ # a depiction and view controlled offset meant to be used for relative image position
+    "left side", "center", "right side", "foreground", "background",
+    "top", "bottom", "upper half", "lower half", "left half", "right half",
+    "upper left", "upper right", "lower left", "lower right",
+    "upper left corner", "upper right corner", "lower left corner", "lower right corner",
+    "top left", "top right", "bottom left", "bottom right",
+    "top half", "bottom half", "left third", "right third", "center third",
+    "upper left third", "upper right third", "lower left third", "lower right third",
+    "upper left quadrant", "upper right quadrant", "lower left quadrant", "lower right quadrant",
+    "upper left zone", "upper right zone", "lower left zone", "lower right zone",
+    "upper zone", "lower zone", "left zone", "right zone",
+    "center zone", "top zone", "bottom zone", "left zone", "right zone",
+    "upper third", "lower third", "middle ground", 'depicted-up', 'depicted-down', 'depicted-left', 'depicted-right',
+    'left-up', 'left-down', 'left-left', 'left-right', 'right-up', 'right-down', 'right-left', 'right-right',
+    'center-up', 'center-down', 'center-left', 'center-right', 'middle-up', 'middle-down', 'middle-left', 'middle-right',
+    'top-left', 'top-right', 'bottom-left', 'bottom-right',
+    'top-center', 'bottom-center', 'left-center', 'right-center'
+]
+
+SYMBOLIC_LOGIC_TAGS = [
+    "and", "or", "not", "if", "then", "implies", "equivalent", "for all", "there exists",
+    "center point", "rule of thirds", "golden ratio",
+    "diagonal composition", "symmetrical layout", "asymmetrical balance",
+    "5x5 grid", "6x6 grid", "7x7 grid", "8x8 grid", "9x9 grid",
+    "rule of 3", "rule of 5", "rule of 7", "rule of 9",
+    "rule of 11", "rule of 13", "rule of 15", "rule of 17", "rule of 19",
+    "rule of 21", "rule of 23", "rule of 25", "rule of 27", "rule of 29",
+    "formula", "equation", "proposition", "statement", "axiom",
+    "theorem", "lemma", "corollary", "hypothesis", "conjecture",
+    "proof", "derivation", "conclusion", "premise", "assumption",
+    "logical operator", "quantifier", "predicate", "relation", "function",
+    "associative", "commutative", "distributive", "identity", "inverse",
+    "negation", "conjunction", "disjunction", "implication", "biconditional",
+    "universal quantifier", "existential quantifier", "negation symbol",
+    "conjunction symbol", "disjunction symbol", "implication symbol", "biconditional symbol",
+    "universal quantifier symbol", "existential quantifier symbol", "set notation",
+    "set theory", "function notation", "relation notation", "logic notation",
+    "predicate logic", "propositional logic", "first-order logic", "second-order logic",
+    "modal logic", "temporal logic", "fuzzy logic", "description logic",
+    "non-monotonic logic", "default logic", "belief logic", "paraconsistent logic",
+    "intuitionistic logic", "constructive logic", "relevance logic", "substructural logic",
+    "logical deduction", "logical inference", "logical reasoning", "logical argument",
+    "logical fallacy", "logical paradox", "logical contradiction", "logical tautology",
+    "logical equivalence", "logical implication", "logical necessity", "logical possibility",
+    "associative property", "commutative property", "distributive property",
+    "identity property", "inverse property", "negation property", "conjunction property",
+    "disjunction property", "implication property", "biconditional property",
+    "additive identity", "multiplicative identity", "additive inverse", "multiplicative inverse",
+    "logical connectives", "logical operators", "logical symbols", "logical expressions",
+    "logical formulas", "logical statements", "logical propositions", "logical predicates",
+    "logical relations", "logical functions", "logical quantifiers", "logical negation",
+    "logical conjunction", "logical disjunction", "logical implication", "logical biconditional",
+    "addition", "subtraction", "multiplication", "division", "exponentiation",
+    "modulus", "factorial", "permutation", "combination", "binomial coefficient",
+    "set union", "set intersection", "set difference", "set complement", "set Cartesian product",
+    "set power set", "set subset", "set superset", "set disjoint", "set symmetric difference",
+    "set partition", "set relation", "set function", "set mapping", "set bijection",
+    "set injection", "set surjection", "set equivalence", "set isomorphism", "set homomorphism",
+    "set automorphism", "set endomorphism", "set monomorphism", "set epimorphism",
+    "set morphism", "set algebra", "set lattice", "set topology", "set metric",
+    "set norm", "set distance", "set convergence", "set continuity", "set compactness",
+    "set connectedness", "set completeness", "set separability", "set compactification",
+    "set convergence", "set continuity", "set compactness", "set connectedness",
+    "algebraic structure", "group theory", "ring theory", "field theory",
+    "vector space", "linear algebra", "module theory", "category theory",
+    "topos theory", "homotopy theory", "sheaf theory", "model theory",
+    "proof theory", "set theory", "combinatorial logic", "quantum logic",
+    "fuzzy set theory", "intuitionistic logic", "constructive logic", "relevance logic",
+    "substructural logic", "paraconsistent logic", "default logic", "belief logic",
+    "modal logic", "temporal logic", "description logic", "non-monotonic logic",
+    "axiomatic system", "formal system", "logical system", "proof system",
+    "deductive system", "inductive system", "abductive system", "axiomatic set theory",
+    "formal logic", "mathematical logic", "computational logic", "philosophical logic",
+    "theoretical computer science", "discrete mathematics", "algorithmic logic",
+    "theorem proving", "proof assistant", "automated reasoning", "formal verification",
+    "model checking", "program verification", "type theory", "lambda calculus",
+    "theorem", "lemma", "corollary", "hypothesis", "conjecture",
+    "proof", "derivation", "conclusion", "premise", "assumption",
+    "logical operator", "quantifier", "predicate", "relation", "function",
+    "associative", "commutative", "distributive", "identity", "inverse",
+    "logic", "set", "function", "relation", "predicate",
+    "proposition", "statement", "axiom", "theorem", "lemma", "corollary",
+    "hypothesis", "conjecture", "proof", "derivation", "conclusion",
+    "premise", "assumption", "logical operator", "quantifier", "predicate",
+    "relation", "function", "associative", "commutative", "distributive",
+    "identity", "inverse", "negation", "conjunction", "disjunction",
+    "implication", "biconditional", "universal quantifier", "existential quantifier",
+    "negation symbol", "conjunction symbol", "disjunction symbol", "implication symbol",
+    "biconditional symbol", "universal quantifier symbol", "existential quantifier symbol",
+
+]
+
+ASSOCIATIVE_LOGICAL_TAGS = [
+    "* and *", "* or *", "* not *", "* if *", "* then *", "* implies *", "* equivalent *",
+    "* for all *", "* there exists *", "* center point *", "* rule of thirds *", "* golden ratio *",
+    "* diagonal composition *", "* symmetrical layout *", "* asymmetrical balance *",
+    "* 5x5 grid *", "* 6x6 grid *", "* 7x7 grid *", "* 8x8 grid *", "* 9x9 grid *",
+    "* rule of 3 *", "* rule of 5 *", "* rule of 7 *", "* rule of 9 *",
+    "* rule of 11 *", "* rule of 13 *", "* rule of 15 *", "* rule of 17 *", "* rule of 19 *",
+    "* rule of 21 *", "* rule of 23 *", "* rule of 25 *", "* rule of 27 *", "* rule of 29 *",
+    "* formula *", "* equation *", "* proposition *", "* statement *", "* axiom *",
+    "* theorem *", "* lemma *", "* corollary *", "* hypothesis *", "* conjecture *",
+    "* proof *", "* derivation *", "* conclusion *", "* premise *", "* assumption *",
+    "* logical operator *", "* quantifier *", "* predicate *", "* relation *", "* function *",
+    "* associative *", "* commutative *", "* distributive *", "* identity *", "* inverse *",
+    "a * negation *", "a * conjunction *", "a * disjunction *", "a * implication *", "a * biconditional *",
+    "* universal quantifier *", "* existential quantifier *", "* negation symbol *",
+    "* conjunction symbol *", "* disjunction symbol *", "* implication symbol *", "* biconditional symbol *",
+    "* universal quantifier symbol *", "* existential quantifier symbol *", "* set notation *",
+    "* and * or *", "* with * and *", "* with * or *", "* with * not *", "* with * if *", "* with * then *",
+    "* with * implies *", "* with * equivalent *", "* with * for all *", "* with * there exists *",
+    "* with * center point *", "* with * rule of thirds *", "* with * golden ratio *",
+    "* with * diagonal composition *", "* with * symmetrical layout *", "* with * asymmetrical balance *",
+    "* with * 5x5 grid *", "* with * 6x6 grid *", "* with * 7x7 grid *", "* with * 8x8 grid *", "* with * 9x9 grid *",
+    "* with * rule of 3 *", "* with * rule of 5 *", "* with * rule of 7 *", "* with * rule of 9 *",
+    "* with * rule of 11 *", "* with * rule of 13 *", "* with * rule of 15 *", "* with * rule of 17 *", "* with * rule of 19 *",
+    "* with * rule of 21 *", "* with * rule of 23 *", "* with * rule of 25 *", "* with * rule of 27 *", "* with * rule of 29 *",
+    "* with * formula *", "* with * equation *", "* with * proposition *", "* with * statement *", "* with * axiom *",
+    "* with * theorem *", "* with * lemma *", "* with * corollary *", "* with * hypothesis *", "* with * conjecture *",
+    "* with * proof *", "* with * derivation *", "* with * conclusion *", "* with * premise *", "* with * assumption *",
+    "* with * logical operator *", "* with * quantifier *", "* with * predicate *", "* with * relation *", "* with * function *",
+    "* with * associative *", "* with * commutative *", "* with * distributive *", "* with * identity *", "* with * inverse *",
+    "* with * negation *", "* with * conjunction *", "* with * disjunction *", "* with * implication *", "* with * biconditional *",
+    "* with * universal quantifier *", "* with * existential quantifier *", "* with * negation symbol *",
+    "* or * and *", "* orelse * and *", "* or * or *", "* orelse * or *", "* or * not *", "* orelse * not *",
+    "* or * if *", "* orelse * if *", "* or * then *", "* orelse * then *",
+    "* or * implies *", "* orelse * implies *", "* or * equivalent *", "* orelse * equivalent *",
+    "* or * for all *", "* orelse * for all *", "* or * there exists *", "* orelse * there exists *",
+    "* or * center point *", "* orelse * center point *", "* or * rule of thirds *", "* orelse * rule of thirds *",
+    "* or * golden ratio *", "* orelse * golden ratio *",
+]
+
+
+GRID_TAGS = [ # meant to be a more direct hardcoded form of zone tags
+    "grid", "3x3 grid",
+    "grid_a1", "grid_a2", "grid_a3", "grid_a4", "grid_a5", "grid_a6", "grid_a7", "grid_a8", "grid_a9", "grid_a10",
+    "grid_b1", "grid_b2", "grid_b3", "grid_b4", "grid_b5", "grid_b6", "grid_b7", "grid_b8", "grid_b9", "grid_b10",
+    "grid_c1", "grid_c2", "grid_c3", "grid_c4", "grid_c5", "grid_c6", "grid_c7", "grid_c8", "grid_c9", "grid_c10",
+    "grid_d1", "grid_d2", "grid_d3", "grid_d4", "grid_d5", "grid_d6", "grid_d7", "grid_d8", "grid_d9", "grid_d10",
+    "grid_e1", "grid_e2", "grid_e3", "grid_e4", "grid_e5", "grid_e6", "grid_e7", "grid_e8", "grid_e9", "grid_e10",
+    "grid_f1", "grid_f2", "grid_f3", "grid_f4", "grid_f5", "grid_f6", "grid_f7", "grid_f8", "grid_f9", "grid_f10",
+    "grid_g1", "grid_g2", "grid_g3", "grid_g4", "grid_g5", "grid_g6", "grid_g7", "grid_g8", "grid_g9", "grid_g10",
+    "grid_h1", "grid_h2", "grid_h3", "grid_h4", "grid_h5", "grid_h6", "grid_h7", "grid_h8", "grid_h9", "grid_h10",
+    "grid_i1", "grid_i2", "grid_i3", "grid_i4", "grid_i5", "grid_i6", "grid_i7", "grid_i8", "grid_i9", "grid_i10",
+    "grid_j1", "grid_j2", "grid_j3", "grid_j4", "grid_j5", "grid_j6", "grid_j7", "grid_j8", "grid_j9", "grid_j10",
+    "grid_k1", "grid_k2", "grid_k3", "grid_k4", "grid_k5", "grid_k6", "grid_k7", "grid_k8", "grid_k9", "grid_k10",
+    "grid_l1", "grid_l2", "grid_l3", "grid_l4", "grid_l5", "grid_l6", "grid_l7", "grid_l8", "grid_l9", "grid_l10",
+    "grid_m1", "grid_m2", "grid_m3", "grid_m4", "grid_m5", "grid_m6", "grid_m7", "grid_m8", "grid_m9", "grid_m10",
+    "grid_n1", "grid_n2", "grid_n3", "grid_n4", "grid_n5", "grid_n6", "grid_n7", "grid_n8", "grid_n9", "grid_n10",
+    "grid_o1", "grid_o2", "grid_o3", "grid_o4", "grid_o5", "grid_o6", "grid_o7", "grid_o8", "grid_o9", "grid_o10",
+    "grid_p1", "grid_p2", "grid_p3", "grid_p4", "grid_p5", "grid_p6", "grid_p7", "grid_p8", "grid_p9", "grid_p10",
+    "grid_q1", "grid_q2", "grid_q3", "grid_q4", "grid_q5", "grid_q6", "grid_q7", "grid_q8", "grid_q9", "grid_q10",
+    "grid_r1", "grid_r2", "grid_r3", "grid_r4", "grid_r5", "grid_r6", "grid_r7", "grid_r8", "grid_r9", "grid_r10",
+    "grid_s1", "grid_s2", "grid_s3", "grid_s4", "grid_s5", "grid_s6", "grid_s7", "grid_s8", "grid_s9", "grid_s10",
+    "grid_t1", "grid_t2", "grid_t3", "grid_t4", "grid_t5", "grid_t6", "grid_t7", "grid_t8", "grid_t9", "grid_t10",
+    "grid_u1", "grid_u2", "grid_u3", "grid_u4", "grid_u5", "grid_u6", "grid_u7", "grid_u8", "grid_u9", "grid_u10",
+    "grid_v1", "grid_v2", "grid_v3", "grid_v4", "grid_v5", "grid_v6", "grid_v7", "grid_v8", "grid_v9", "grid_v10",
+    "grid_w1", "grid_w2", "grid_w3", "grid_w4", "grid_w5", "grid_w6", "grid_w7", "grid_w8", "grid_w9", "grid_w10",
+    "grid_x1", "grid_x2", "grid_x3", "grid_x4", "grid_x5", "grid_x6", "grid_x7", "grid_x8", "grid_x9", "grid_x10",
+    "grid_y1", "grid_y2", "grid_y3", "grid_y4", "grid_y5", "grid_y6", "grid_y7", "grid_y8", "grid_y9", "grid_y10",
+    "grid_z1", "grid_z2", "grid_z3", "grid_z4", "grid_z5", "grid_z6", "grid_z7", "grid_z8", "grid_z9", "grid_z10",
+    "grid_a11", "grid_a12", "grid_a13", "grid_a14", "grid_a15", "grid_a16", "grid_a17", "grid_a18", "grid_a19", "grid_a20",
+    "grid_b11", "grid_b12", "grid_b13", "grid_b14", "grid_b15", "grid_b16", "grid_b17", "grid_b18", "grid_b19", "grid_b20",
+    "grid_c11", "grid_c12", "grid_c13", "grid_c14", "grid_c15", "grid_c16", "grid_c17", "grid_c18", "grid_c19", "grid_c20",
+    "grid_d11", "grid_d12", "grid_d13", "grid_d14", "grid_d15", "grid_d16", "grid_d17", "grid_d18", "grid_d19", "grid_d20",
+    "grid_e11", "grid_e12", "grid_e13", "grid_e14", "grid_e15", "grid_e16", "grid_e17", "grid_e18", "grid_e19", "grid_e20",
+    "grid_f11", "grid_f12", "grid_f13", "grid_f14", "grid_f15", "grid_f16", "grid_f17", "grid_f18", "grid_f19", "grid_f20",
+    "grid_g11", "grid_g12", "grid_g13", "grid_g14", "grid_g15", "grid_g16", "grid_g17", "grid_g18", "grid_g19", "grid_g20",
+    "grid_h11", "grid_h12", "grid_h13", "grid_h14", "grid_h15", "grid_h16", "grid_h17", "grid_h18", "grid_h19", "grid_h20",
+    "grid_i11", "grid_i12", "grid_i13", "grid_i14", "grid_i15", "grid_i16", "grid_i17", "grid_i18", "grid_i19", "grid_i20",
+    "grid_j11", "grid_j12", "grid_j13", "grid_j14", "grid_j15", "grid_j16", "grid_j17", "grid_j18", "grid_j19", "grid_j20",
+    "grid_k11", "grid_k12", "grid_k13", "grid_k14", "grid_k15", "grid_k16", "grid_k17", "grid_k18", "grid_k19", "grid_k20",
+    "grid_l11", "grid_l12", "grid_l13", "grid_l14", "grid_l15", "grid_l16", "grid_l17", "grid_l18", "grid_l19", "grid_l20",
+    "grid_m11", "grid_m12", "grid_m13", "grid_m14", "grid_m15", "grid_m16", "grid_m17", "grid_m18", "grid_m19", "grid_m20",
+    "grid_n11", "grid_n12", "grid_n13", "grid_n14", "grid_n15", "grid_n16", "grid_n17", "grid_n18", "grid_n19", "grid_n20",
+    "grid_o11", "grid_o12", "grid_o13", "grid_o14", "grid_o15", "grid_o16", "grid_o17", "grid_o18", "grid_o19", "grid_o20",
+    "grid_p11", "grid_p12", "grid_p13", "grid_p14", "grid_p15", "grid_p16", "grid_p17", "grid_p18", "grid_p19", "grid_p20",
+    "grid_q11", "grid_q12", "grid_q13", "grid_q14", "grid_q15", "grid_q16", "grid_q17", "grid_q18", "grid_q19", "grid_q20",
+
+    "grid_r11", "grid_r12", "grid_r13", "grid_r14", "grid_r15", "grid_r16", "grid_r17", "grid_r18", "grid_r19", "grid_r20",
+    "grid_s11", "grid_s12", "grid_s13", "grid_s14", "grid_s15", "grid_s16", "grid_s17", "grid_s18", "grid_s19", "grid_s20",
+    "grid_t11", "grid_t12", "grid_t13", "grid_t14", "grid_t15", "grid_t16", "grid_t17", "grid_t18", "grid_t19", "grid_t20",
+    "grid_u11", "grid_u12", "grid_u13", "grid_u14", "grid_u15", "grid_u16", "grid_u17", "grid_u18", "grid_u19", "grid_u20",
+    "grid_v11", "grid_v12", "grid_v13", "grid_v14", "grid_v15", "grid_v16", "grid_v17", "grid_v18", "grid_v19", "grid_v20",
+    "grid_w11", "grid_w12", "grid_w13", "grid_w14", "grid_w15", "grid_w16", "grid_w17", "grid_w18", "grid_w19", "grid_w20",
+    "grid_x11", "grid_x12", "grid_x13", "grid_x14", "grid_x15", "grid_x16", "grid_x17", "grid_x18", "grid_x19", "grid_x20",
+    "grid_y11", "grid_y12", "grid_y13", "grid_y14", "grid_y15", "grid_y16", "grid_y17", "grid_y18", "grid_y19", "grid_y20",
+    "grid_z11", "grid_z12", "grid_z13", "grid_z14", "grid_z15", "grid_z16", "grid_z17", "grid_z18", "grid_z19", "grid_z20",
+
+    "grid_a21", "grid_a22", "grid_a23", "grid_a24", "grid_a25",
+    "grid_b21", "grid_b22", "grid_b23", "grid_b24", "grid_b25",
+    "grid_c21", "grid_c22", "grid_c23", "grid_c24", "grid_c25",
+    "grid_d21", "grid_d22", "grid_d23", "grid_d24", "grid_d25",
+    "grid_e21", "grid_e22", "grid_e23", "grid_e24", "grid_e25",
+    "grid_f21", "grid_f22", "grid_f23", "grid_f24", "grid_f25",
+    "grid_g21", "grid_g22", "grid_g23", "grid_g24", "grid_g25",
+    "grid_h21", "grid_h22", "grid_h23", "grid_h24", "grid_h25",
+    "grid_i21", "grid_i22", "grid_i23", "grid_i24", "grid_i25",
+    "grid_j21", "grid_j22", "grid_j23", "grid_j24", "grid_j25",
+    "grid_k21", "grid_k22", "grid_k23", "grid_k24", "grid_k25",
+    "grid_l21", "grid_l22", "grid_l23", "grid_l24", "grid_l25",
+    "grid_m21", "grid_m22", "grid_m23", "grid_m24", "grid_m25",
+    "grid_n21", "grid_n22", "grid_n23", "grid_n24", "grid_n25",
+    "grid_o21", "grid_o22", "grid_o23", "grid_o24", "grid_o25",
+    "grid_p21", "grid_p22", "grid_p23", "grid_p24", "grid_p25",
+    "grid_q21", "grid_q22", "grid_q23", "grid_q24", "grid_q25",
+    "grid_r21", "grid_r22", "grid_r23", "grid_r24", "grid_r25",
+    "grid_s21", "grid_s22", "grid_s23", "grid_s24", "grid_s25",
+    "grid_t21", "grid_t22", "grid_t23", "grid_t24", "grid_t25",
+    "grid_u21", "grid_u22", "grid_u23", "grid_u24", "grid_u25",
+    "grid_v21", "grid_v22", "grid_v23", "grid_v24", "grid_v25",
+    "grid_w21", "grid_w22", "grid_w23", "grid_w24", "grid_w25",
+    "grid_x21", "grid_x22", "grid_x23", "grid_x24", "grid_x25",
+    "grid_y21", "grid_y22", "grid_y23", "grid_y24", "grid_y25",
+    "grid_z21", "grid_z22", "grid_z23", "grid_z24", "grid_z25",
+]
+
+OFFSET_TAGS = [ # meant to be used for object and subject position within scenes
     "depicted upper-left",
     "depicted upper-center",
     "depicted upper-middle",
@@ -4028,104 +5269,185 @@ OFFSET_TAGS = [
     "* adjacent *",
 ]
 
-LIGHTING_TYPES = [
+LIGHTING_TYPES = [  # Cleaned and expanded lighting conditions and styles
     "well-lit", "dimly lit", "sunlit", "backlit", "candle-lit",
-    "fluorescent-lit", "shadowy", "softly lit", "overexposed",
-    "warm glow", "evening light", "morning light", "natural light",
-    "reflected light", "spotlit", "glowing ambient", "window-lit",
-    "silhouetted", "harsh overhead lighting", "diffuse studio light"
+    "moonlit", "spotlit", "overcast", "harshly lit", "softly lit",
+    "dramatically lit", "evenly lit", "brightly lit", "shadowed",
+    "glow-lit", "neon-lit", "fluorescent-lit", "studio-lit",
+    "natural light", "ambient light", "diffused light", "harsh light",
+    "low light", "high contrast light", "soft shadows", "hard shadows",
+    "high key lighting", "low key lighting", "golden hour", "blue hour",
+    "twilight lighting", "dappled light", "filtered sunlight", "reflected light",
+    "glowing ambient", "window-lit", "silhouetted", "overexposed",
+    "warm glow", "evening glow", "morning light", "directional light",
+    "side-lit", "top-lit", "bottom-lit", "color cast lighting", "rim-lit",
+    "edge lighting", "shadow-rich", "flash-lit", "glint-lit",
+
+    # Extended lighting types
+    "chrome reflection", "tungsten light", "halogen light", "torch-lit",
+    "firelight", "incandescent light", "sodium-vapor light", "mercury-vapor light",
+    "laser illumination", "volumetric lighting", "beam-lit", "streak lighting",
+    "pinhole light", "noir light", "film noir lighting", "cinematic lighting",
+    "studio softbox", "ring light", "bounce light", "refraction lighting",
+    "sky bloom", "color wash", "polarized light", "infrared lighting",
+    "ultraviolet light", "spot haze", "light leak", "light bloom",
+    "ghost lighting", "mist-lit", "fog backlight", "mist glow",
+    "shadow wash", "gradient lighting", "monochrome light", "redshift lighting",
+    "cool temperature light", "warm temperature light", "magic hour",
+    "storm-glow", "electric wash", "oil-lamp light", "bioluminescent light",
+    "streetlamp-lit", "lantern-lit", "overhead beam", "horizon glow",
+    "blinking illumination", "dynamic range lighting", "diffuse bounce",
+    "caustic light", "shimmer-lit", "specular highlight", "reflected glow",
+    "low-rider glow", "arc-lamp wash", "subsurface light", "tinted exposure",
+    "color gel wash", "multiple light sources", "asymmetric lighting",
+    "immersive lighting", "flicker-lit", "emergency lights", "signal light",
+    "searchlight beam", "ambient occlusion shadow", "skybox-lit",
+    "directional rim", "scattered daylight", "voltage wash",
+    "cool bounce", "paper lantern light", "holographic lighting", "virtual lighting"
 ]
 
 QUALITY_PREFIXES = [
-    "a clean render of",
-    "a beautiful photograph of",
-    "a cinematic view of",
-    "a stylized composition of",
-    "a simplified depiction of",
-    "a hyper-detailed rendering of",
-    "a faded polaroid of",
-    "a noisy image of",
-    "a low-resolution rendering of",
-    "a high-quality studio shot of",
-    "a magazine editorial of",
-    "a low-light snapshot of"
+    "high-quality",
+    "high quality",
+    "low-quality",
+    "low quality",
+    "high-resolution",
+    "low-resolution",
+    "high definition",
+    "low definition",
+    "detailed",
+    "highly detailed",
+    "low-detail",
+    "low detail",
+    "crisp",
+    "blurry",
+    "sharp",
+    "soft",
+    "vivid",
+    "muted",
+    "vibrant",
+    "washed out",
+    "washed-out",
+    "clean",
+    "dirty",
+    "clear",
+    "foggy",
+    "grainy",
+    "noisy",
+    "smooth",
+    "rough",
+    "textured",
+    "flat",
+    "stylized",
+    "artistic",
+    "realistic",
+    "hyper-realistic",
+    "cinematic",
+    "documentary-style",
+    "photo-realistic",
+    "photorealistic",
+    "illustrative",
+    "conceptual",
+    "RAW photograph",
+    "digital painting",
+    "award-winning",
+    "award winning",
+    "fashion editorial",
+    "fashion editorial style",
+    "vintage style",
+    "retro style",
+    "monochrome",
+    "black and white",
+    "sepia-toned",
+    "sepia toned",
+    "clean render of",
+    "beautiful photograph of",
+    "cinematic view of",
+    "stylized composition of",
+    "simplified depiction of",
+    "hyper-detailed rendering of",
+    "faded polaroid of",
+    "noisy image of",
+    "low-resolution rendering of",
+    "high-quality studio shot of",
+    "magazine editorial of",
+    "low-light snapshot of",
+    "vibrant digital painting of",
+    "moody atmospheric shot of",
+    "soft-focus portrait of",
+    "sharp focus image of",
+    "grainy film photo of",
+    "high-contrast image of",
+    "well-composed shot of",
+    "dramatic lighting setup of",
+    "surreal interpretation of",
+    "perfectly lit",
+    "well-balanced composition of",
+    "detailed close-up of",
+    "well-formed",
+    "well-framed shot of",
+    "well-lit scene of",
+    "well-composed image of",
+    "well-exposed photograph of",
+    "highly detailed rendering of",
+    "artistic interpretation of",
+    "vividly colored",
+    "softly lit portrait of",
+    "dramatically lit scene of",
+    "vibrantly colored",
+    "subtly lit",
+    "ethereal lighting of",
+    "dreamy atmosphere of",
+    "crisp focus on",
+    "sharp focus on",
+    "highly stylized",
+    "low-key lighting of",
+    "high-key lighting of",
+    "dramatic shadows in",
+    "soft shadows in",
+    "natural shadows in",
+    "dynamic lighting of",
+    "cinematic lighting of",
+    "artfully composed",
+    "artistic composition of",
+    "cinematic realism of",
+    "cinematic quality of",
+    "cinematic depth of field in",
+    "cinematic framing of",
+    "cinematic atmosphere of",
+    "perfectly balanced lighting of",
+    "perfectly balanced composition of",
+    "perfectly balanced exposure of",
+    "perfectly balanced shadows in",
+    "perfectly balanced highlights in",
+    "perfectly balanced colors in",
+    "perfectly balanced tones in",
 ]
 
 SUBJECT_TYPES = [
-    "person",
-    "humanoid",
-    "character",
-    "animal",
-    "plant",
-    "object",
-    "structure",
-    "tool",
-    "device",
-    "container",
-    "furniture",
-    "clothing",
-    "jewelry",
-    "footwear",
-    "material",
-    "texture",
-    "pattern",
-    "vehicle",
-    "building",
-    "appliance",
-    "food",
-    "fruit",
-    "vegetable",
-    "symbol",
-    "shape",
-    "surface",
-    "background",
-    "lighting",
-    "element",
-    "substance",
-    "liquid",
-    "gas",
-    "solid",
-    "artifact",
-    "environment",
-    "scenery",
-    "terrain",
-    "weather",
-    "natural formation",
-    "sky object",
-    "celestial body",
-    "structure part",
-    "body part",
-    "object part",
-    "decoration",
-    "equipment",
-    "instrument",
-    "artwork",
-    "mechanism",
-    "fabric",
-    "layer",
-    "feature",
-    "entity",
-    "component",
-    "field",
-    "zone",
-    "module",
-    "system",
-    "region",
-    "group",
-    "assembly",
-    "mass",
-    "unit",
-    "cluster",
-    "formation",
-    "phenomenon",
-    "effect",
-    "process",
-    "state",
-    "quality",
-    "condition",
-    "theme",
-    "scene",
-    "motif",
+    "person", "humanoid", "character", "animal", "plant", "object", "structure", "tool", "device",
+    "container", "furniture", "clothing", "jewelry", "footwear", "material", "texture",
+    "pattern", "vehicle", "building", "appliance", "food", "fruit", "vegetable", "symbol", "shape",
+    "surface", "background", "lighting", "element", "substance", "liquid", "gas", "solid",
+    "artifact", "environment", "scenery", "terrain", "weather", "natural formation", "sky object",
+    "celestial body", "structure part", "body part", "object part", "decoration", "equipment",
+    "instrument", "artwork", "mechanism", "fabric", "layer", "feature", "entity",
+    "component", "field", "zone", "module", "system", "region", "group", "assembly",
+    "mass", "unit", "cluster", "formation", "phenomenon", "effect", "process",
+    "state", "quality", "condition", "theme", "scene", "motif",
+
+    # Pragmatic and symbolic system expansions
+    "signal", "token", "vector", "fieldline", "anchor", "node",
+    "interface", "connector", "linkage", "carrier", "portal", "boundary",
+    "junction", "cascade", "burst", "cycle", "topology", "grid",
+    "trace", "signature", "layer set", "channel", "support", "bracket",
+    "text", "logo", "watermark",
+
+    # Abstract symbolic subject types
+    "language", "logic", "notation", "formula", "equation", "statement",
+    "concept", "idea", "rule", "constraint", "axiom", "heuristic",
+    "condition set", "framework", "model", "schema", "syntax", "parameter",
+    "variable", "operator", "predicate", "classifier", "proposition", "instruction"
 ]
 
 HUMANOID_TYPES = [
@@ -4445,101 +5767,147 @@ ANIMAL_TYPES = [
 ]
 
 OBJECT_TYPES = [
-    "object",
-    "vehicle",
-    "weapon",
-    "building",
-    "tool",
-    "device",
-    "appliance",
-    "furniture",
-    "clothing",
-    "accessory",
-    "jewelry",
-    "food",
-    "drink",
-    "toy",
-    "game",
-    "book",
-    "document",
-    "money",
-    "currency",
-    "coin",
-    "gem",
-    "arcade cabinet",
-    "arcade machine",
-    "arcade game",
-    "video game",
-    "computer",
-    "console",
-    "controller",
-    "keyboard",
-    "mouse",
-    "monitor",
-    "television",
-    "screen",
-    "chair",
-    "gaming chair",
-    "desk",
-    "table",
-    "couch",
-    "sofa",
-    "bed",
-    "mattress",
-    "pillow",
-    "blanket",
-    "sheet",
-    "curtain",
-    "drapes",
-    "window",
-    "door",
-    "closet",
-    "drawer",
-    "cabinet",
-    "shelf",
-    "bookshelf",
-    "wardrobe",
-    "dresser",
-    "mirror",
-    "lamp",
-    "light",
-    "light fixture",
-    "light bulb",
-    "light switch",
-    "light socket",
-    "light stand",
-    "light post",
-    "light pole",
-    "open door",
-    "closed door",
-    "sliding door",
-    "revolving door",
-    "automatic door",
-    "manual door",
-    "door handle",
-    "door knob",
-    "door lock",
-    "door hinge",
-    "door frame",
-    "door jamb",
-    "door stop",
-    "doorbell",
-    "door chime",
-    "door alarm",
-    "door sensor",
-    "collar",
-    "leash",
-    "muzzle",
-    "harness",
-    "saddle",
-    "bridle",
-    "bit",
-    "reins",
-    "whip",
-    "crop",
-    "spur",
-    "stirrup",
+    "object", "item", "thing", "entity", "artifact", "device", "instrument",
+    "gadget", "tool", "appliance", "machine", "equipment", "utensil",
+    "furniture", "fixture", "decoration", "accessory", "component",
+    "material", "substance", "product", "good", "commodity", "article",
+    "piece", "part", "element", "component", "unit", "module", "system",
+    "structure", "construction", "building", "vehicle", "transportation",
+    "transport", "conveyance", "conveyer", "conveyor", "conveyor belt",
+    "container", "receptacle", "holder", "vessel", "bottle", "jar", "can",
+    "box", "bag", "basket", "crate", "carton", "package", "parcel",
+    "wrapper", "envelope", "pouch", "satchel", "briefcase", "backpack",
+    "suitcase", "luggage", "trunk", "tote", "duffel bag", "shopping bag",
+    "purse", "wallet", "clutch", "handbag", "satchel", "messenger bag",
+    "backpack", "rucksack", "knapsack", "fanny pack", "hip bag",
+    "apple", "banana", "orange", "grape", "strawberry",
+    "blueberry", "raspberry", "blackberry", "kiwi", "pineapple",
+    "mango", "peach", "plum", "pear", "cherry",
+    "tomato", "cucumber", "carrot", "broccoli", "spinach",
+    "lettuce", "cabbage", "onion", "garlic", "pepper",
+    "potato", "sweet potato", "zucchini", "eggplant", "squash",
+    "fruit",
+    "vegetable",
+    "bowl", "plate", "cup",
+    "glass", "bottle", "jar", "can", "box", "bag",
+    "utensil", "cutlery", "knife", "fork", "spoon",
+    "appliance", "kitchen appliance", "electronic device",
+    "gadget", "tool", "machine", "equipment", "instrument",
+    "vehicle", "weapon", "building", "tool", "device", "appliance", "furniture", "clothing", "accessory",
+    "jewelry", "food", "drink", "toy", "game", "book", "document", "money", "currency", "coin", "gem", "arcade cabinet",
+    "arcade machine", "arcade game", "video game", "computer", "console", "controller", "keyboard", "mouse", "monitor",
+    "television", "screen", "chair", "gaming chair", "desk", "table", "couch", "sofa", "bed",
+    "mattress", "pillow", "blanket", "sheet", "curtain", "drapes", "window", "door",
+    "closet", "drawer", "cabinet", "shelf", "bookshelf", "wardrobe", "dresser", "mirror", "lamp",
+    "light", "light fixture", "light bulb", "light switch", "light socket", "light stand", "light post", "light pole",
+    "open door", "closed door", "sliding door", "revolving door", "automatic door", "manual door", "door handle",
+    "door knob", "door lock", "door hinge", "door frame", "door jamb", "door stop", "doorbell", "door chime",
+    "door alarm", "door sensor", "collar", "leash", "muzzle", "harness", "saddle", "bridle", "bit", "reins",
+    "whip", "crop", "spur", "stirrup",
+
+    "object", "item", "thing", "entity", "artifact", "device", "instrument",
+    "gadget", "tool", "appliance", "machine", "equipment", "utensil",
+    "component", "material", "substance", "product", "unit", "module",
+    "structure", "container", "vessel", "box", "bag", "bottle", "jar",
+    "can", "crate", "carton", "package", "wrapper", "envelope", "pouch",
+    "satchel", "receptacle", "holder", "case", "frame", "shell", "panel",
+    "casing", "unit block", "segment", "partition", "housing", "enclosure",
+    "platform", "support", "bracket", "base", "chassis", "tray",
+    "interface", "mount", "fixture", "pad", "hinge", "clamp", "clip",
+    "hook", "handle", "knob", "switch", "lever", "dial",
+    "button", "gear", "spring", "rod", "shaft", "plug", "socket",
+    "joint", "pipe", "valve", "filter", "bar", "strip",
+    "cable", "cord", "wire", "hose", "tube", "nozzle",
+    "fitting", "coupler", "link", "fastener", "bolt", "screw",
+    "nut", "pin", "washer", "bearing", "wheel", "pulley",
+    "belt", "disc", "plate", "grip", "tread", "rivet",
+
+    # Perceptual/object-detection triggers
+    "shape", "shadow", "outline", "mark", "trace", "residue", "impression",
+    "pattern", "footprint", "presence", "absence", "signal", "anomaly",
+    "artifact", "reflection", "signature", "echo", "glint", "silhouette",
+    "outline", "bulge", "contour", "traceable", "motion", "noise",
+    "signal patch", "fluctuation", "field mark", "heatprint", "blinkpoint",
+    "interference", "density shift", "light gap", "occlusion", "visible block",
+    "void", "distortion", "warp", "break", "ripple", "sensor return",
+    "trail", "lingering presence", "impact site", "scratch", "blink trace",
+
+    # Additional pragmatic object candidates
+    "panel joint", "interlock", "pivot ring", "shear point", "cut mark",
+    "material tear", "bend zone", "scorch mark", "crack line", "fracture point",
+    "reflection band", "contact patch", "stress line", "density plate",
+    "gap seam", "torque rod", "spring tab", "lever base", "tilt bracket",
+    "contact ridge", "tension line", "slip edge", "seal flap", "insert node",
+    "alignment tab", "clasp ring", "indent trace", "displacement marker",
+    "position anchor", "optic return", "sonic echo", "infra return",
+    "thermal bloom", "magnetic shift", "phase fluctuation", "glow edge",
+    "rebound path", "impact core", "acoustic gap", "force ridge",
+    "resonant patch", "drift edge", "anchor core", "hollow return",
+    "sensor dip", "contact cavity", "spatial tuck", "haptic fold"
 ]
+
+FRUIT_AND_VEGETABLE = [
+    "fruit", "apple", "banana", "orange", "grape", "strawberry",
+    "blueberry", "raspberry", "blackberry", "kiwi", "pineapple",
+    "mango", "peach", "plum", "pear", "cherry",
+    "tomato", "cucumber", "carrot", "broccoli", "spinach",
+    "lettuce", "cabbage", "onion", "garlic", "pepper",
+    "potato", "sweet potato", "zucchini", "eggplant", "squash",
+    "vegetable", "vegetables", "produce", "greens", "herbs",
+    "legumes", "beans", "peas", "lentils", "chickpeas",
+    "nuts", "seeds", "grains", "rice", "wheat",
+    "corn", "barley", "oats", "quinoa", "millet",
+    "pasta", "noodles", "bread", "flour", "sugar",
+    "salt", "pepper", "spices", "seasonings", "condiments",
+    "oil", "vinegar", "sauce", "dressing", "marinade",
+    "fruit and vegetable", "fruit & vegetable", "fruits and vegetables",
+    "fruits & vegetables", "fresh produce", "fresh fruit", "fresh vegetable",
+    "fresh fruits", "fresh vegetables", "organic produce",
+    "organic fruit", "organic vegetable", "organic fruits", "organic vegetables",
+    "seasonal produce", "seasonal fruit", "seasonal vegetable",
+    "seasonal fruits", "seasonal vegetables", "local produce",
+    "local fruit", "local vegetable", "local fruits", "local vegetables",
+    "exotic fruit", "exotic vegetable", "tropical fruit", "tropical vegetable",
+    "citrus fruit", "citrus vegetable", "stone fruit", "stone vegetable",
+    "root vegetable", "leafy green", "cruciferous vegetable",
+    "allium vegetable", "nightshade vegetable", "legume vegetable",
+    "squash vegetable", "gourd vegetable", "bulb vegetable",
+    "stem vegetable", "flower vegetable", "fruiting vegetable",
+    "seed vegetable", "pod vegetable", "tuber vegetable",
+    "herbaceous vegetable", "woody vegetable", "edible vegetable",
+    "edible fruit", "edible plant", "edible produce",
+    "edible greens", "edible herbs", "edible legumes",
+    "edible nuts", "edible seeds", "edible grains",
+    "edible rice", "edible wheat", "edible corn",
+    "edible barley", "edible oats", "edible quinoa",
+]
+
+CHAIR_TYPES = [
+    "chair", "seat", "stool", "bench", "armchair", "recliner",
+    "rocking chair", "folding chair", "bean bag", "lounge chair",
+    "gaming chair", "office chair", "dining chair", "bar stool",
+    "kitchen chair", "patio chair", "lawn chair", "beach chair",
+    "deck chair", "camping chair", "reclining chair", "swivel chair",
+    "executive chair", "task chair", "ergonomic chair", "high chair",
+    "baby chair", "stroller", "car seat", "booster seat",
+    "wheelchair", "scooter", "walker", "crutch", "cane",
+    "throne", "pew", "bleacher", "stadium seat", "auditorium chair",
+    "cinema seat", "theater chair", "lecture hall chair", "classroom chair",
+    "conference chair", "boardroom chair", "waiting room chair",
+    "lobby chair", "reception chair", "couch", "sofa",
+    "sectional sofa", "loveseat", "futon", "daybed", "sleeper sofa",
+    "chaise lounge", "ottoman", "pouf", "bean bag chair",
+    "papasan chair", "egg chair", "hammock chair", "hanging chair",
+    "swing chair", "hanging swing", "hanging seat", "hanging pod",
+    "hanging basket", "hanging cocoon", "hanging nest", "hanging hammock",
+    "hanging lounger", "hanging swing chair", "hanging egg chair",
+    "hanging pod chair", "hanging basket chair", "hanging cocoon chair",
+    "stacked chair", "chair pile", "stackable chair", "nesting chair",
+    "folding chair", "collapsible chair", "portable chair", "travel chair",
+    "inflatable chair", "bean bag chair", "reclining chair", "rocking chair",
+]
+
+
 
 CLOTHING_TYPES = [
     "clothing",
@@ -6408,6 +7776,109 @@ BACKGROUND_TYPES = [
     "street festival background",
 
     # Expand as needed...
+]
+
+PATTERN_TYPES = [
+    # metal patterns
+    "brushed metal", "polished metal", "rusty metal", "galvanized metal", "copper patina",
+    "brass", "bronze", "steel", "aluminum", "titanium", "zinc", "chrome", "nickel",
+    "pewter", "iron", "cast iron", "wrought iron", "galvanized steel", "stainless steel",
+    "corten steel", "anodized aluminum", "embossed metal", "perforated metal", "expanded metal",
+
+    # clothing patterns
+    "solid color", "striped", "plaid", "polka dot", "floral", "paisley", "geometric",
+    "herringbone", "argyle", "chevron", "animal print", "camouflage", "tie-dye", "batik",
+    "damask", "brocade", "jacquard", "tartan", "celtic knot", "tribal", "baroque",
+    "vintage", "retro", "bohemian", "art deco", "art nouveau", "minimalist", "modern",
+
+    # wall patterns
+    "brick", "stone", "concrete", "wood paneling", "shiplap", "wainscoting", "stucco",
+    "wallpaper", "textured paint", "mosaic tiles", "ceramic tiles", "glass tiles",
+    "metal tiles", "vinyl wallpaper", "fabric wallpaper", "peel and stick wallpaper",
+    "stencil patterns", "graffiti", "murals", "wall decals", "3D wall panels", "acoustic panels",
+
+    # geometric patterns
+    "triangles", "hexagons", "circles", "squares", "diamonds", "zigzags", "chevrons",
+    "waves", "spirals", "arcs", "lines", "dots", "grids", "honeycomb", "kaleidoscope",
+    "optical illusion", "fractals", "mandala", "sacred geometry", "tessellation",
+    "pixelated", "low-poly", "isometric", "3D cubes", "polyhedra", "Voronoi patterns",
+    "dotted lines", "crosshatch", "hatching", "stippling", "weaving patterns", "lattice",
+    "chain link", "interlocking shapes", "radial patterns", "concentric circles", "spiral patterns",
+
+    # painting strokes
+    "brush strokes", "splatter", "drip painting", "impasto", "watercolor wash", "oil paint texture",
+    "acrylic pour", "ink wash", "pastel smudge", "charcoal sketch", "pencil shading",
+    "gouache texture", "tempera", "spray paint", "airbrush", "finger painting", "palette knife",
+    "stencil art", "pointillism", "cross-hatching", "scribble", "doodle", "calligraphy",
+
+    # noise patterns
+    "static noise", "white noise", "pink noise", "brown noise", "salt and pepper noise",
+    "Gaussian noise", "Perlin noise", "fractal noise", "cellular noise", "thermal noise",
+    "random noise", "speckle noise", "impulse noise", "quantization noise", "shot noise",
+    "banding noise", "color noise", "digital noise", "analog noise", "visual noise",
+
+    # blur patterns
+    "motion blur", "radial blur", "zoom blur", "box blur", "gaussian blur", "lens blur",
+    "surface blur", "directional blur", "field blur", "smart blur", "median blur",
+    "bilateral blur", "fast blur", "zoom motion blur", "path blur", "shape blur",
+    "tilt-shift blur", "depth of field blur", "bokeh blur", "frosted glass blur", "fuzzy blur",
+
+    # depth association patterns
+    "foreground", "background", "midground", "depth of field", "3D perspective", "isometric view",
+    "vanishing point", "horizon line", "foreground elements", "background elements",
+    "layered composition", "foreground focus", "background blur", "depth cues", "atmospheric perspective",
+    "overlapping elements", "foreground interest", "background context", "midground details",
+    "foreground silhouette", "background scenery", "depth layering", "foreground action",
+    "background ambiance", "midground interaction", "foreground lighting", "background shadows",
+    "foreground texture", "background patterns", "midground colors", "foreground highlights",
+
+    # comic and anime line patterns
+    "inked lines", "cross-hatching", "screen tones", "halftone dots", "speed lines",
+    "action lines", "motion lines", "dynamic lines", "thick outlines", "thin outlines",
+    "contour lines", "shading lines", "dotted lines", "dashed lines", "scribbled lines",
+    "sketch lines", "pencil lines", "brush lines", "calligraphic lines", "stylized lines",
+
+    # comic division patterns
+    "panel borders", "speech bubbles", "thought bubbles", "action panels", "reaction panels",
+    "narration boxes", "caption boxes", "sound effect text", "motion effect lines",
+    "comic strip layout", "manga paneling", "grid layout", "dynamic panel arrangement",
+    "split panels", "full-page spread", "double-page spread", "asymmetrical layout",
+
+    # generic patterns
+    "striped", "checked", "floral", "geometric", "abstract", "paisley", "polka dot",
+    "camouflage", "plaid", "herringbone", "chevron", "argyle", "animal print",
+    "baroque", "tribal", "lacework", "zigzag", "marbled", "wave", "diamond", "leaf motif",
+    "gradient", "burnout", "fractal", "chainlink", "scale pattern", "radial", "ink blot", "maze",
+    "tartan", "celtic knot", "mandala", "kaleidoscope", "optical illusion", "pixelated",
+    "watercolor", "brush stroke", "splatter", "stained glass", "woven", "knitted", "crochet",
+    "quilted", "tapestry", "embroidery", "beaded", "sequin", "feathered", "fur-like",
+]
+
+FABRIC_TYPES = [
+    # primarily for clothing or armor
+    "cotton", "linen", "silk", "wool", "denim", "leather", "canvas", "polyester",
+    "nylon", "rayon", "spandex", "suede", "cashmere", "velvet", "satin", "tweed",
+    "mesh", "lace", "organza", "chiffon", "tulle", "fleece", "terrycloth", "corduroy",
+    "jacquard", "gabardine", "burlap", "neoprene", "lycra", "acrylic",
+    "modal", "viscose", "bamboo", "hemp", "ramie", "microfiber", "polypropylene",
+    "polyamide", "elastane", "olefin", "satin blend", "silk blend", "wool blend",
+    "cotton blend", "linen blend", "rayon blend", "spandex blend", "acrylic blend",
+    "faux leather", "faux fur", "suede blend", "denim blend", "canvas blend",
+    "tweed blend", "jersey", "interlock", "rib knit", "pique", "double knit",
+    "single knit", "cable knit", "fisherman knit", "stockinette", "garter stitch",
+    "purl stitch", "lace knit", "mesh knit", "tartan", "plaid", "herringbone",
+
+]
+
+TEXTURE_TAGS = [
+    # very specific texture tags for materials
+    "smooth", "rough", "glossy", "matte", "metallic", "velvet", "satin", "leather",
+    "wooden", "glass", "stone", "gritty", "bumpy", "pebbled", "cracked", "coarse",
+    "silky", "sticky", "greasy", "fibrous", "crystalline", "slick", "powdery", "chipped",
+    "ribbed", "brushed", "pitted", "etched", "polished", "weathered", "frosted",
+    "woven", "knitted", "embroidered", "quilted", "pleated", "crinkled", "wrinkled",
+    "latex", "rubberized", "plasticized", "ceramic", "porcelain", "terracotta",
+    "marble", "granite", "limestone", "slate", "concrete", "asphalt", "tar",
 ]
 
 MATERIAL_TYPES = [
@@ -10569,7 +12040,6 @@ LOWER_BODY_CLOTHES_TYPES = [
     "graphic jeans",
     "striped jeans",
     "checked jeans",
-    # Add more unique types as needed...
 ]
 
 FOOTWEAR_TYPES = [
@@ -10732,9 +12202,62 @@ FOOTWEAR_TYPES = [
     "urban sneakers",
     "retro high-tops",
     "modern low-tops",
+    "fashion boots",
+
+    "stiletto boots",
+    "ankle boots",
+    "knee-high boots",
+    "over-the-knee boots",
+    "long boots",
+    "platform boots",
+    "platform stilettos",
+    "stiletto sandals",
+    "high heels",
+    "high heel boots",
+    "high heel sandals",
 ]
 
 
+SOCK_TYPES = [
+    "ankle socks", "crew socks", "knee-high socks", "over-the-knee socks",
+    "thigh-high socks", "no-show socks", "footies", "boot socks", "compression socks",
+    "athletic socks", "running socks", "cycling socks", "hiking socks",
+    "dress socks", "casual socks", "wool socks", "cotton socks", "bamboo socks",
+    "silk socks", "thermal socks", "fuzzy socks", "slipper socks", "toe socks",
+    "diabetic socks", "moisture-wicking socks", "cushioned socks", "padded socks",
+    "seamless socks", "fun socks", "patterned socks", "printed socks", "striped socks",
+    "polka dot socks", "argyle socks", "floral socks", "animal print socks",
+    "holiday socks", "novelty socks", "character socks", "logo socks", "sports team socks",
+    "work socks", "outdoor socks", "waterproof socks", "windproof socks",
+    "reflective socks", "antimicrobial socks", "eco-friendly socks", "recycled socks",
+    "luxury socks", "designer socks", "fashion socks", "vintage socks", "retro socks",
+
+    # gamer girl socks
+    "knee-high gamer socks", "over-the-knee gamer socks", "thigh-high gamer socks",
+    "no-show gamer socks", "footies gamer socks", "boot gamer socks", "compression gamer socks",
+    "athletic gamer socks", "running gamer socks", "cycling gamer socks", "hiking gamer socks",
+
+    # programming socks
+    "ankle programming socks", "crew programming socks", "knee-high programming socks",
+    "over-the-knee programming socks", "thigh-high programming socks", "no-show programming socks",
+    "footies programming socks", "boot programming socks", "compression programming socks",
+
+    # meme socks that are popular in the gaming community and comedic
+    "meme socks", "funny socks", "gamer meme socks", "gaming meme socks", "comedic socks",
+
+    # striped thigh highs
+    "striped thigh-high socks", "striped knee-high socks", "striped over-the-knee socks",
+    "striped thigh-high stockings", "striped knee-high stockings", "striped over-the-knee stockings",
+    "striped thigh-high tights", "striped knee-high tights", "striped over-the-knee tights",
+    "striped thigh-high leggings", "striped knee-high leggings", "striped over-the-knee leggings",
+    "striped thigh-high pantyhose", "striped knee-high pantyhose", "striped over-the-knee pantyhose",
+    "striped thigh-high leg warmers", "striped knee-high leg warmers", "striped over-the-knee leg warmers",
+    "striped thighhigh boot socks", "striped knee-high boot socks", "striped over-the-knee boot socks",
+    "striped thighhigh footies", "striped knee-high footies", "striped over-the-knee footies",
+    "striped thighhigh compression socks", "striped knee-high compression socks", "striped over-the-knee compression socks",
+    "striped thighhigh athletic socks", "striped knee-high athletic socks", "striped over-the-knee athletic socks",
+    "striped thighhigh running socks", "striped knee-high running socks", "striped over-the-knee running socks",
+]
 
 MALE_TAGS = [
     "boy",
@@ -10770,15 +12293,76 @@ AMBIG_TAGS = [
 ]
 
 FEMALE_TAGS = [
-    "girl",
-    "woman",
-    "mature female",
-    "1girl",
-    "2girls",
-    "3girls",
-    "4girls",
-    "5girls",
-    "6+girls",
+    # generic
+    "girl", "woman", "adult female", "mature female", "female",
+    # specific
+    "lady", "mistress", "miss", "madam", "dame", "goddess",
+    "princess", "queen", "ms", "missy", "maiden", "damsel",
+    # affectionate and era terms
+    "babe", "chick", "doll", "honey", "sweetheart", "darling",
+    "sweetie", "cutie", "angel", "bunny", "kitten", "flower",
+    "babe", "bimbo", "dollface", "goddess", "honeybee", "sweet pea",
+    "darling", "cutie pie", "sugar", "pumpkin", "love", "dear",
+
+    "lass", "lassie", "wench", "wench", "wench", "wench",
+    "missy", "missus", "madam", "ma'am", "my lady", "my queen",
+    "my princess", "my darling", "my love", "my sweet", "my dear",
+    "my angel", "my sweetheart", "my cutie", "my honey", "my babe",
+
+
+    # specific roles
+    "angel", "goddess", "vixen", "siren", "nymph", "diva",
+    "witch", "fairy", "mermaid", "nymphomaniac", "vampire",
+    "succubus", "witch doctor", "priestess", "sorceress",
+    "enchantress", "goddess of love", "goddess of war", "goddess of wisdom",
+    "goddess of beauty", "goddess of fertility", "goddess of the hunt",
+    "goddess of the moon", "goddess of the sun", "goddess of the earth",
+
+    # cultural terms
+    "geisha", "maiko", "yokozuna", "kunoichi", "yurei",
+
+    "1girl", "2girls", "3girls", "4girls", "5girls", "6+girls",
+]
+
+HAIR_LENGTH_TYPES = [
+    # Ultra-short
+    "bald", "clean-shaven", "buzzed", "buzz cut", "micro-buzz", "shaved crown", "shaved nape", "high fade",
+
+    # Short styles
+    "very short", "pixie-short", "temple-cut", "ear-tip-length", "edge-tapered", "jaw-short", "choppy-short", "temple-sliced",
+
+    # Medium styles
+    "cheekbone-length", "chin-angled", "jawline-bob", "neck-length", "low-bob", "stacked-bob", "layered-bob", "curtain-bob",
+    "mid-neck", "half-neck-length", "neck-hugging", "textured-medium", "center-part-medium", "asymmetric-medium",
+
+    # Mid to long
+    "shoulder-tip", "collarbone-grazing", "upper-back-layered", "bra-line-length", "mid-back-even", "rib-split-length",
+    "over-shoulder", "side-pulled-length", "split-tail-length", "twist-fall-length",
+
+    # Long hair
+    "waist-drop", "hip-trace-length", "tailbone-straight", "hip-split", "lower-back-drop", "leg-line-length",
+    "strand-thigh-length", "ribbon-long", "tied-long", "over-arm-length",
+
+    # Extreme / Stylized
+    "ankle-drag", "floor-brushing", "calf-wrapped", "ground-trailing", "looped-long", "twin-coil-length",
+    "aerial-length", "vertical-flow", "sky-pull-length", "illusion-length",
+
+    # Fantasy / Anime-inspired
+    "demon-princess-length", "phantom-ribbon-length", "magic-flow-length", "summoned-length",
+    "wing-shadow-length", "moonlit-length", "galactic-length", "void-strand-length",
+
+    # Motion-based descriptors
+    "wind-cut-length", "momentum-swept", "arc-length", "spin-surge-length", "drape-pull-length",
+    "curve-flow-length", "spiral-wrap-length", "gust-pulled-length", "lunge-trace-length",
+
+    # Asymmetry / Side variants
+    "one-side-short", "side-clip-length", "left-angled-length", "right-heavy-length", "split-sweep-length",
+    "diagonal-length", "partial-drip-length", "asymmetric-fall-length", "over-eye-length", "half-face-length",
+
+    # Standard booru hair lengths
+    "bald", "very short hair", "short hair", "medium hair", "semi-long hair", "long hair",
+    "very long hair", "absurdly long hair", "floor length hair"
+
 ]
 
 HAIRSTYLES_TYPES = [
@@ -12385,4 +13969,210 @@ HEADWEAR_TYPES = [
     "encrypted comm headset",
     "stealth field generator hat",
     "bio-scanner visor",
+    # Common
+    "hat", "cap", "beanie", "beret", "headband", "visor", "scarf", "bandana",
+    "bucket hat", "snapback", "trucker hat", "fedora", "boater", "panama hat",
+    "newsboy cap", "flat cap", "sun hat", "cloche", "bowler hat", "top hat",
+    "bonnet", "balaclava", "hood", "earmuffs", "helmet", "turban",
+
+    # Military/Tactical
+    "combat helmet", "beret (military)", "shako", "bicorn", "tricorn", "pilot helmet",
+    "kevlar helmet", "riot helmet", "garrison cap",
+
+    # Cultural/Traditional
+    "kufi", "tam", "keffiyeh", "ghutrah", "fez", "sombrero", "cowboy hat",
+    "pith helmet", "sugegasa", "kasa", "pagri", "yarmulke", "shtreimel",
+    "ushanka", "papakha",
+
+    # Religious/Symbolic
+    "bishop's mitre", "pope's tiara", "nun's coif", "monk hood", "hijab", "niqab",
+    "veil", "priest biretta", "monastic hood",
+
+    # Fantasy / Sci-fi / Style
+    "tiara", "crown", "horned helmet", "wizard hat", "druid hood", "elven circlet",
+    "steampunk goggles", "cyber visor", "space helmet", "dragon helm", "antler crown",
+    "crystal crown", "halo", "digital interface helm", "energy visor",
+]
+
+COLORS = [
+    "red", "blue", "green", "yellow", "black", "white", "gray", "purple",
+    "pink", "orange", "brown", "gold", "silver", "bronze", "teal", "cyan",
+    "magenta", "lime", "navy", "maroon", "olive", "turquoise", "indigo",
+    "violet", "beige", "peach", "coral", "mint", "lavender", "charcoal",
+    "crimson", "emerald", "sapphire", "ruby", "amber", "pearl", "onyx",
+    "jade", "topaz", "aquamarine", "amethyst", "opal", "garnet", "peridot",
+    "tangerine", "mustard", "plum", "burgundy", "slate", "ash", "ivory",
+    "cream", "sepia", "taupe", "copper", "brass", "steel", "aluminum",
+    "chrome", "pewter", "zinc", "nickel", "lead", "tin", "iron", "bronze",
+    "brass", "cobalt", "platinum", "rhodium", "iridium", "titanium",
+    "zirconium", "beryllium", "lithium", "magnesium", "calcium", "sodium",
+    "potassium", "barium", "strontium", "thorium", "uranium", "plutonium",
+    "neon", "krypton", "xenon", "radon", "helium", "hydrogen", "oxygen",
+    "nitrogen", "carbon", "sulfur", "phosphorus", "chlorine", "fluorine",
+    "bromine", "iodine", "selenium", "arsenic", "antimony", "tellurium",
+    "bismuth", "cadmium", "mercury", "thallium", "lead", "tin", "gallium",
+    "indium", "thulium", "ytterbium", "holmium", "erbium", "dysprosium",
+    "neodymium", "praseodymium", "samarium", "lanthanum", "cerium",
+    "lanthanide", "actinide", "transition metal", "alkali metal", "alkaline earth metal",
+]
+
+VERBS = [
+    # Common verbs
+    "wear", "put on", "take off", "adjust", "style", "match", "coordinate",
+    "accessorize", "pair", "choose", "select", "buy", "sell", "trade",
+    "gift", "donate", "clean", "wash", "dry", "fold", "store", "display",
+    "hang", "organize", "pack", "unpack", "repair", "alter", "customize",
+    "design", "create", "craft", "make", "sew", "knit", "crochet", "weave",
+    "embroider", "print", "dye", "paint", "stitch", "glue", "attach",
+    "fasten", "secure", "clip", "pin", "tuck", "roll", "fold", "crumple",
+    "crush", "flatten", "stretch", "shrink", "expand", "resize", "tailor",
+    "fit", "size", "measure", "cut", "trim", "shave", "shape", "style",
+    "curl", "straighten", "wave", "braid", "twist", "plait", "pinch",
+    "tweak", "adjust", "refine", "polish", "shine", "buff", "cleanse",
+    "condition", "moisturize", "hydrate", "protect", "shield", "guard",
+    "defend", "fortify", "reinforce", "support", "boost", "enhance",
+    "improve", "upgrade", "revamp", "refresh", "renew", "restore", "revive",
+    "rejuvenate", "reinvigorate", "recharge", "replenish", "refuel",
+]
+
+ADVERBS = [
+    "gently", "firmly", "quickly", "slowly", "roughly", "carefully",
+    "clumsily", "gracefully", "angrily", "cheerfully", "nervously",
+    "automatically", "repeatedly", "meticulously", "accidentally",
+    "intentionally", "silently", "loudly", "deliberately", "hesitantly"
+,
+    "awkwardly", "smoothly", "mechanically", "urgently", "desperately", "frequently", "rarely", "methodically", "instinctively", "awkwardly",
+    "reluctantly", "predictably", "bitterly", "anxiously", "tentatively", "eerily", "vigorously", "passively", "casually", "obediently"
+,
+    "rigidly", "sloppily", "vividly", "quietly", "blankly", "urgently", "boldly", "recklessly", "feverishly", "gently",
+    "haltingly", "steadily", "chaotically", "hastily", "brutally", "sorrowfully", "bluntly", "cryptically", "noisily", "tactically",
+    "tensely", "subtly", "wearily", "dutifully", "eagerly", "uncertainly", "sternly", "wildly", "neatly", "gruffly",
+    "serenely", "robotically", "despondently", "fondly", "mockingly", "gleefully", "somberly", "carelessly", "sneakily", "curiously",
+    "relentlessly", "boldly", "painfully", "visibly", "half-heartedly", "mechanically", "abruptly", "consciously", "accusingly", "tentatively"
+]
+
+ADJECTIVES = [
+    "black", "shiny", "tight", "wrinkled", "frayed", "colorful", "dark",
+    "pale", "fuzzy", "embroidered", "patterned", "transparent", "smooth",
+    "torn", "oversized", "fitted", "double-breasted", "layered", "thick",
+    "light", "stretchy", "rigid", "soft", "cold", "warm"
+,
+    "grimy", "rigid", "bulky", "rusty", "loose", "stiff", "brittle", "angular", "opaque", "flimsy",
+    "distorted", "cracked", "molten", "inflated", "delicate", "scorched", "melted", "vivid", "muted", "severed"
+,
+    "matted", "gritty", "pulpy", "peeling", "frosted", "scarred", "charred", "grubby", "tarnished", "pebbled",
+    "sticky", "smeared", "bent", "creased", "burned", "melted", "patched", "patched-over", "jagged", "scuffed",
+    "pitted", "eroded", "shattered", "compressed", "sliced", "glassy", "fibrous", "pale-red", "blue-tinted", "off-white",
+    "shimmering", "dusty", "chalky", "rough-cut", "etched", "overlapping", "frostbitten", "coppery", "bruised", "waxy",
+    "greasy", "matte", "flickering", "glinting", "encrusted", "seeping", "caked", "damp", "flaking", "glimmering"
+]
+
+SIZE = [
+    "size", "small", "medium", "large", "extra small", "extra large", "tiny",
+    "gigantic", "colossal", "minuscule", "massive", "compact", "oversized",
+    "compressed", "expanded", "narrow", "broad", "tall", "short", "deep",
+    "shallow", "long", "stubby", "slim", "thick", "thin", "dense",
+    "lightweight", "heavyweight", "scaled", "modular", "fractional",
+    "scaled-down", "scaled-up", "macro", "micro", "nano", "pico",
+    "mega", "giga", "terra", "hypercompact", "hyperwide",
+    "bounded", "volumetric", "compressed-layer", "elongated", "flattened",
+    "squared", "tapered", "extended", "truncated", "uniform",
+    "ratio-bound", "dimensional", "magnitude-tied", "span-limited",
+    "metered", "quantized", "measured", "segmented", "modulated",
+    "intervalled", "bracketed", "packaged", "containerized", "framed",
+    "length-based", "width-based", "thickness-rated", "offset-aligned",
+    "tiered", "sized-incremental", "compactified", "bounded-volume",
+    "fixed-scale", "relative-scale", "elastic-metric", "bounded-metric",
+    "resized", "dimension-altered", "scope-adjusted", "volume-shaped",
+    "field-resized", "scaled-limited", "spatial-tier",
+    "block-scaled", "payload-size", "mass-tiered", "shell-volume",
+    "quant-frame", "scale-plate", "core-volume", "nano-tiered", "microzone",
+    "layer-mass", "metric-depth", "container-scale", "base-spread", "density-tier",
+    "fiber-thick", "spreadfield", "unit-bound", "compacted-core", "expanded-frame",
+    "modulated-band", "zone-packed", "bulk-metric", "scale-wrapped", "dim-wrapped",
+    "depth-gated", "subsize-unit", "focal-thickness", "band-width-class",
+    "measured-gate", "structural-thickness", "curvature-bound", "linear-span",
+    "volume-set", "offset-class", "dimensional-class", "alignment-thick"
+]
+
+SCOPE = [
+    "scope", "range", "reach", "extent", "span", "coverage", "area",
+    "field", "domain", "realm", "territory", "zone", "region", "sector",
+    "district", "locale", "network", "grid", "partition", "cluster", "node",
+    "context", "condition", "setting", "stage", "frame", "coordinate", "layer",
+    "surface", "boundary", "enclosure", "envelope", "channel", "linkage",
+    "vector", "pathway", "connection", "route", "junction",
+    "cascade", "overlap", "phase", "transition", "gradient", "alignment",
+    "coherence", "resonance", "interaction", "proximity", "density",
+    "structure", "pattern", "layout", "formation", "geometry", "orientation",
+    "facet", "module", "segment", "slot", "sequence", "cycle", "pulse",
+    "stream", "flow", "drift", "tide", "fieldline", "signal", "echo",
+    "thread", "strand", "knot", "bridge", "portal", "gate", "threshold",
+    "interface", "anchor", "pivot", "nodepoint", "locus", "inflection",
+    "derivation", "mapping", "trace", "marker", "register", "index", "vectorpoint", "domainlet",
+    "overlay", "gradientmap", "infostructure", "substrate", "alignmentband",
+    "cofactor", "nodalframe", "carrier", "subnode", "mesh",
+    "stencil", "patternlink", "manifold", "shell", "substrand",
+    "crosslink", "capillary", "threadpoint", "layerpoint", "pulseedge",
+    "fieldband", "encasement", "relay", "transitionpoint",
+    "embed", "interlace", "curvature", "edgepoint", "beacon",
+    "stack", "gridline", "streamlet", "vectorcore", "nodemap",
+    "coreframe", "signaturepath", "enclosurepoint", "midpoint",
+    "stratum", "periphery", "reticulation", "guideframe", "formline",
+    "reference", "gradientedge", "interform", "bandpass", "streamfold",
+    "width", "height", "depth", "length", "scale", "magnitude", "dimension",
+    "distance", "volume", "mass", "bulk", "capacity", "weight", "thickness",
+    "breadth", "spanwidth", "elevation", "radius", "diameter", "circumference",
+    "amplitude", "densityfield", "unitspace", "bandwidth", "metricframe",
+    "sizegate", "scalerange", "compressionzone", "expansionband", "perimeter",
+    "axislength", "contourframe", "boundaryscale", "tier", "quantumframe",
+    "dimensionalfold", "rangeband", "areazone", "blockspan", "angularframe",
+    "scalarpath", "volumeplate", "framesection", "marginlayer", "interzone",
+    "transframe", "thicknessrange", "volumetriclayer", "ratiofield", "nodecount",
+    "gridmass", "depthspan", "scalematrix", "ratioplane", "capacityring",
+    "layerfield", "axissweep", "envelopeband", "zonecut", "modularshell"
+]
+
+PREFIXES = [
+    "super", "ultra", "mega", "hyper", "maxi", "mini", "micro", "nano",
+    "pro", "anti", "de", "re", "pre", "post", "sub", "superior", "inferior",
+    # video game weapons
+    "legendary", "mythic", "epic", "rare", "common", "uncommon", "exotic",
+    "ancient", "fabled", "cursed", "enchanted", "divine", "holy", "demonic",
+    "arcane", "mystic", "celestial", "shadow", "void", "cosmic", "stellar",
+    # scifi weapons
+    "plasma", "laser", "ion", "photon", "quantum", "neutron", "dark matter",
+    "antimatter", "graviton", "tachyon", "black hole", "wormhole", "time",
+    "space", "gravity", "electromagnetic", "nuclear", "fusion", "fission",
+    # fantasy weapons
+    "dragon", "phoenix", "griffin", "unicorn", "centaur", "minotaur",
+    "golem", "hydra", "chimera", "sphinx", "basilisk", "kraken", "leviathan",
+    "werewolf", "vampire", "zombie", "ghost", "demon", "angel", "fairy",
+    # heroic attributes
+    "godly", "mythical", "legendary", "heroic", "valiant", "noble",
+    "brave", "courageous", "fearless", "undaunted", "intrepid", "gallant",
+    "chivalrous", "daring", "audacious", "bold", "dauntless", "unflinching",
+    "unwavering", "steadfast", "resolute", "determined", "tenacious",
+    "persistent", "relentless", "unyielding", "uncompromising", "indomitable",
+    # professional attributes
+    "expert", "skilled", "proficient", "adept", "talented", "gifted",
+    "accomplished", "experienced", "seasoned", "knowledgeable", "wise",
+    "astute", "shrewd", "savvy", "clever", "ingenious", "resourceful",
+    "innovative", "creative", "imaginative", "visionary", "inspired",
+    "brilliant", "genius", "masterful", "virtuoso", "maestro",
+    # negative attributes
+    "evil", "wicked", "malevolent", "malicious", "sinister", "nefarious",
+    "villainous", "diabolical", "devious", "cunning", "crafty", "sly",
+    "sneaky", "treacherous", "traitorous", "backstabbing", "duplicitous",
+    "conniving", "scheming", "manipulative", "calculating", "ruthless",
+    "merciless", "cruel", "heartless", "cold-blooded", "vicious",
+    "savage", "ferocious", "brutal", "barbaric", "inhumane", "monstrous",
+    "sadistic", "psychopathic", "sociopathic", "pathological", "deranged",
+    "insane", "mad", "lunatic", "psychotic", "delusional", "paranoid",
+    "obsessive", "compulsive", "neurotic", "hysterical", "manic",
+    "depressive", "bipolar", "schizophrenic", "borderline", "antisocial",
+    "narcissistic", "histrionic", "avoidant", "dependent", "obsessive-compulsive",
+    "paranoid personality", "schizoid", "schizotypal", "avoidant personality",
+    "dependent personality", "obsessive-compulsive personality", "narcissistic personality",
+    "histrionic personality", "borderline personality", "antisocial personality",
 ]

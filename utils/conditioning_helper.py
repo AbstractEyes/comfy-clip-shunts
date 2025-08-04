@@ -71,6 +71,7 @@ import torch
 from typing import List, Optional, Union, Iterator
 from collections.abc import MutableSequence
 
+
 class UsefulConditioning(MutableSequence):
     """
     Canonical, list-compatible wrapper for conditioning bundles:

@@ -7,6 +7,76 @@ import numpy as np
 
 from .symbolic_bulk_captions import *
 
+def extract_offset(token: str) -> str:
+    entry = random.choice(FULL_ASSOCIATIVE)
+    parts = entry.split()
+    if len(parts) >= 3:
+        return parts[1] if token == "left" else parts[-1]
+    return token
+
+FULL_TOKEN_MAP = {
+    # Gender and human attributes
+    "subject": lambda: random.choice(SUBJECT_TYPES),
+    "object": lambda: random.choice(OBJECT_TYPES),
+    "clothing": lambda: random.choice(CLOTHING_TYPES),
+    "humanoid": lambda: random.choice(HUMANOID_TYPES),
+    "gender": lambda: resolve_gender_token(random.choice(GENDER_TYPES)),
+    "male": lambda: random.choice(MALE_TAGS),
+    "female": lambda: random.choice(FEMALE_TAGS),
+    "ambiguous": lambda: random.choice(AMBIG_TAGS),
+    "pose": lambda: random.choice(HUMAN_POSES),
+    "animal": lambda: random.choice(ANIMAL_TYPES),
+    "produce": lambda: random.choice(FRUIT_AND_VEGETABLE),
+    "offset": lambda: random.choice(OFFSET_TAGS),
+    "zone": lambda: random.choice(ZONE_TAGS),
+    "grid": lambda: random.choice(GRID_TAGS),
+    "relation": lambda: random.choice(RELATION_TAGS),
+    "on_surface": lambda: random.choice(CLOTHING_SURFACE_LINKERS),
+    "human_angle": lambda: random.choice(HUMAN_PHOTOGRAPH_ANGLES),
+    "human_surface": lambda: random.choice(HUMAN_SURFACES),
+    "chair": lambda: random.choice(CHAIR_TYPES),
+    "human_pose": lambda: random.choice(HUMAN_POSES),
+    "human_interaction": lambda: random.choice(HUMAN_INTERACTIONS),
+    "human_expression": lambda: random.choice(HUMAN_EXPRESSIONS),
+    "human_action": lambda: random.choice(HUMAN_ACTIONS),
+    "clothes": lambda: random.choice(CLOTHING_TYPES),
+    "upper_clothing": lambda: random.choice(UPPER_BODY_CLOTHES_TYPES),
+    "lower_clothing": lambda: random.choice(LOWER_BODY_CLOTHES_TYPES),
+    "socks": lambda: random.choice(SOCK_TYPES),
+    "footwear": lambda: random.choice(FOOTWEAR_TYPES),
+    "accessory": lambda: random.choice(ACCESSORY_TYPES),
+    "jewelry": lambda: random.choice(JEWELRY_TYPES),
+    "headwear": lambda: random.choice(HEADWEAR_TYPES),
+    "hair_style": lambda: random.choice(HAIRSTYLES_TYPES),
+    "hair_length": lambda: random.choice(HAIR_LENGTH_TYPES),
+    "material": lambda: random.choice(MATERIAL_TYPES),
+    "fabric": lambda: random.choice(FABRIC_TYPES),
+    "texture": lambda: random.choice(TEXTURE_TAGS),
+    "pattern": lambda: random.choice(PATTERN_TYPES),
+    "surface": lambda: random.choice(HUMAN_SURFACES),
+    "lighting": lambda: random.choice(LIGHTING_TYPES),
+    "liquid": lambda: random.choice(LIQUID_TYPES),
+    "background": lambda: random.choice(BACKGROUND_TYPES),
+    "decoration": lambda: random.choice(DECORATION_TYPES),
+    "object_left": lambda: extract_offset("left"),
+    "object_right": lambda: extract_offset("right"),
+    "shape": lambda: random.choice(SHAPE_TYPES),
+    "style": lambda: random.choice(STYLE_TYPES),
+    "emotion": lambda: random.choice(EMOTION_TYPES),
+    "intent": lambda: random.choice(INTENT_TYPES),
+    "quality": lambda: random.choice(QUALITY_PREFIXES),
+    "prefix": lambda: random.choice(PREFIXES),
+    "logic": lambda: random.choice(SYMBOLIC_LOGIC_TAGS),
+    "associative": lambda: random.choice(ASSOCIATIVE_LOGICAL_TAGS),
+    "verb": lambda: random.choice(VERBS),
+    "adjective": lambda: random.choice(ADJECTIVES),
+    "adverb": lambda: random.choice(ADVERBS),
+    "color": lambda: random.choice(COLORS),
+    "size": lambda: random.choice(SIZE),
+    "scope": lambda: random.choice(SCOPE),
+}
+
+
 @dataclass
 class SegmentedCaption:
     """Represents a caption with its segments and masked versions"""
@@ -23,786 +93,16 @@ class SymbolicCaptionGenerator:
 
         # Initialize token mappings
         self.symbolic_tokens = BEATRIX_SPECIAL_TOKENS_AND_SHUNTS
-        self.category_templates = self._initialize_category_templates()
+        self.category_templates = CATEGORICAL_TEMPLATES
+
 
         # Masking parameters
         self.mask_prob = 0.30
         self.mask_token_id = self.tokenizer.mask_token_id
 
-    def _initialize_category_templates(self) -> Dict[str, List[str]]:
-        """Initialize templates for all 26 categories with expanded diversity"""
-        return {
-            # 1. Subject tokens (3 variations)
-            "<subject>": [
-                "a {gender} {pose} {offset}",
-                "a {gender} wearing {upper_clothing} while {pose}",
-                "a {gender} with {hair_style} hair, {pose} {offset}",
-                "{gender} in {zone} {pose}",
-                "a {gender} holding {object_right} while {pose}",
-                "detailed portrait of {gender} with {emotion} expression, {pose} near {surface}",
-                "{gender} dressed in {material} {upper_clothing}, {pose} under {lighting}",
-                "a {gender} with {hair_length} {hair_style} hair wearing {accessory}, {pose} {offset}",
-                "figure of {gender} {pose} on {surface}, wearing {footwear} and {jewelry}",
-                "{gender} displaying {emotion} while {pose}, {upper_clothing} made of {fabric}",
-                "compositional study of {gender} {pose} in {zone}, illuminated by {lighting}",
-                "a {gender} with {texture} {material} clothing, {pose} {relation} {object_right}",
-                "{gender} featuring {pattern} {upper_clothing} and {headwear}, {pose} on {surface}",
-                "artistic depiction of {gender} {pose}, wearing {jewelry} and {accessory}, {offset}",
-                "stylized {gender} with {hair_length} hair styled in {hair_style}, {pose} near {object_left}"
-            ],
-
-            "<subject1>": [
-                "first {gender} {pose} near {object_right}",
-                "primary {gender} wearing {upper_clothing} {offset}",
-                "main {gender} with {hair_style} hair on {surface}",
-                "foreground {gender} {pose} with {accessory}",
-                "leading {gender} in {material} clothing",
-                "central {gender} displaying {emotion} expression, {pose} under {lighting}",
-                "primary figure wearing {fabric} {upper_clothing} with {pattern}, {pose} in {zone}",
-                "main subject with {hair_length} {hair_style} hair and {jewelry}, {pose} on {surface}",
-                "first person dressed in {material} outfit with {footwear}, {pose} {relation} {object_right}",
-                "foreground {gender} with {headwear} and {accessory}, {pose} {offset}",
-                "primary {gender} showing {texture} clothing details, {pose} near {object_left}",
-                "leading figure in {pattern} {upper_clothing}, {pose} illuminated by {lighting}",
-                "main {gender} with {emotion} mood wearing {jewelry}, {pose} on {surface}",
-                "central subject featuring {fabric} garments and {footwear}, {pose} in {zone}",
-                "primary {gender} styled with {hair_style} and {accessory}, {pose} {offset}"
-            ],
-
-            "<subject2>": [
-                "second {gender} {pose} {relation} first person",
-                "another {gender} wearing {footwear} {offset}",
-                "background {gender} with {emotion} expression",
-                "accompanying {gender} holding {accessory}",
-                "secondary {gender} on {surface}",
-                "additional {gender} dressed in {material} {upper_clothing}, {pose} in {zone}",
-                "second figure with {hair_length} {hair_style} hair, {pose} under {lighting}",
-                "companion {gender} wearing {pattern} clothing and {jewelry}, {pose} {offset}",
-                "background person showing {emotion} while {pose}, dressed in {fabric} garments",
-                "secondary subject with {headwear} and {footwear}, {pose} near {object_right}",
-                "another figure displaying {texture} {upper_clothing}, {pose} on {surface}",
-                "accompanying {gender} with {accessory} and {jewelry}, {pose} {relation} main subject",
-                "second person featuring {hair_style} hairstyle and {emotion} expression, {pose} in {zone}",
-                "additional {gender} in {material} outfit with {pattern}, {pose} {offset}",
-                "secondary figure wearing {fabric} clothing and {footwear}, {pose} under {lighting}"
-            ],
-
-            # 2. Pose
-            "<pose>": [
-                "{gender} {pose} near {object_right}",
-                "person {pose} while wearing {upper_clothing}",
-                "{gender} {pose} on {surface}",
-                "figure {pose} under {lighting}",
-                "{pose} position with {accessory}",
-                "dynamic {pose} captured {offset}, wearing {material} clothing",
-                "expressive {pose} on {surface}, illuminated by {lighting}",
-                "{gender} demonstrating {pose} with {emotion} expression, near {object_left}",
-                "graceful {pose} position wearing {fabric} {upper_clothing} and {footwear}",
-                "athletic {pose} in {zone}, accessorized with {jewelry} and {accessory}",
-                "contemplative {pose} {relation} {object_right}, dressed in {pattern} garments",
-                "energetic {pose} under {lighting}, featuring {hair_style} hairstyle",
-                "relaxed {pose} on {surface} with {texture} surroundings",
-                "dramatic {pose} {offset}, wearing {headwear} and {upper_clothing}",
-                "subtle {pose} gesture with {emotion} mood, adorned with {jewelry}"
-            ],
-
-            # 3. Emotion
-            "<emotion>": [
-                "{gender} looking {emotion} while {pose}",
-                "a {emotion} {gender} {offset}",
-                "{gender} with {emotion} expression",
-                "{emotion} mood in {lighting}",
-                "displaying {emotion} near {object_right}",
-                "profound {emotion} expression captured on {gender}'s face while {pose}",
-                "subtle {emotion} mood enhanced by {lighting} on {surface}",
-                "{gender} conveying {emotion} through {pose}, wearing {upper_clothing}",
-                "intense {emotion} displayed {offset}, with {hair_style} hair flowing",
-                "nuanced {emotion} expression paired with {accessory} and {jewelry}",
-                "{emotion} atmosphere created by {gender} {pose} near {object_left}",
-                "complex {emotion} state shown through {pose} and {material} clothing",
-                "genuine {emotion} moment captured in {zone} under {lighting}",
-                "layered {emotion} expression with {pattern} {upper_clothing} and {footwear}",
-                "evocative {emotion} presence {relation} {object_right}, {pose} position"
-            ],
-
-            # 4. Surface
-            "<surface>": [
-                "{gender} {pose} on {surface}",
-                "{object_left} placed on {surface}",
-                "a {surface} with {texture}",
-                "{surface} supporting {object_right}",
-                "{material} {surface} in {zone}",
-                "weathered {surface} displaying {texture} beneath {gender} who {pose}",
-                "polished {surface} reflecting {lighting}, supporting {object_left} and {object_right}",
-                "textured {surface} with {pattern} details, {gender} {pose} upon it",
-                "sturdy {surface} made of {material}, decorated with {accessory}",
-                "elegant {surface} in {zone}, illuminated by {lighting} from above",
-                "rustic {surface} showing {texture} patterns, {relation} {object_right}",
-                "modern {surface} with {material} finish, supporting {gender} who {pose}",
-                "ancient {surface} bearing {pattern} markings, {offset} in composition",
-                "functional {surface} holding {object_left} and {accessory}, {lighting} enhanced",
-                "decorative {surface} with {fabric} covering, positioned in {zone}"
-            ],
-
-            # 5. Lighting
-            "<lighting>": [
-                "scene illuminated by {lighting}",
-                "{gender} under {lighting} while {pose}",
-                "{lighting} casting shadows on {surface}",
-                "{lighting} highlighting {texture}",
-                "ambient {lighting} in {zone}",
-                "dramatic {lighting} creating depth around {gender} who {pose} on {surface}",
-                "soft {lighting} filtering through, highlighting {material} {upper_clothing}",
-                "harsh {lighting} defining {texture} on {object_right} and {surface}",
-                "natural {lighting} bathing {gender} with {hair_style} hair in warm glow",
-                "artificial {lighting} emphasizing {pattern} on {fabric} clothing",
-                "moody {lighting} setting atmosphere for {emotion} expression {offset}",
-                "directional {lighting} sculpting {gender}'s {pose} near {object_left}",
-                "diffused {lighting} softening {texture} details on {accessory} and {jewelry}",
-                "contrasting {lighting} in {zone}, creating visual interest on {surface}",
-                "cinematic {lighting} enhancing {material} properties of {upper_clothing}"
-            ],
-
-            # 6. Material
-            "<material>": [
-                "{upper_clothing} made of {material}",
-                "a {material} {object_right}",
-                "{gender} wearing {material} clothing",
-                "{material} texture on {surface}",
-                "luxurious {material} {accessory}",
-                "refined {material} used in {upper_clothing} with {pattern} design",
-                "raw {material} forming {object_left} {relation} {object_right}",
-                "processed {material} creating {texture} on {surface} in {zone}",
-                "synthetic {material} in {footwear} and {accessory} combination",
-                "organic {material} draped as {upper_clothing}, {pose} enhancing flow",
-                "composite {material} with {fabric} blend in {jewelry} and {headwear}",
-                "traditional {material} worked into {pattern} for {gender}'s outfit",
-                "modern {material} treatment on {surface} under {lighting}",
-                "weathered {material} showing age on {object_right} {offset}",
-                "polished {material} reflecting {lighting} on {accessory} details"
-            ],
-
-            # 7. Accessory
-            "<accessory>": [
-                "{gender} wearing {accessory}",
-                "a {accessory} beside {object_right}",
-                "{gender} holding {accessory}",
-                "{accessory} made of {material}",
-                "decorative {accessory} {offset}",
-                "ornate {accessory} crafted from {material} with {pattern} details",
-                "functional {accessory} complementing {upper_clothing} on {gender}",
-                "vintage {accessory} paired with {jewelry} and {footwear}",
-                "modern {accessory} featuring {texture} finish under {lighting}",
-                "handcrafted {accessory} {relation} {object_left} in {zone}",
-                "designer {accessory} with {fabric} elements worn by {gender}",
-                "traditional {accessory} displaying {pattern} while {pose}",
-                "statement {accessory} contrasting with {material} {upper_clothing}",
-                "subtle {accessory} enhancing {emotion} expression {offset}",
-                "layered {accessory} arrangement with {jewelry} on {surface}"
-            ],
-
-            # 8. Footwear
-            "<footwear>": [
-                "{gender} wearing {footwear}",
-                "a pair of {footwear} {offset}",
-                "{footwear} placed near {object_left}",
-                "{material} {footwear} on {surface}",
-                "stylish {footwear} in {zone}",
-                "worn {footwear} made of {material} with {texture} details",
-                "pristine {footwear} complementing {upper_clothing} and {accessory}",
-                "custom {footwear} featuring {pattern} design under {lighting}",
-                "practical {footwear} suited for {pose} on {surface}",
-                "elegant {footwear} paired with {jewelry} and {fabric} garments",
-                "weathered {footwear} telling stories, {relation} {object_right}",
-                "designer {footwear} with {material} construction in {zone}",
-                "comfortable {footwear} supporting {gender} while {pose}",
-                "decorative {footwear} with {texture} embellishments {offset}",
-                "functional {footwear} contrasting with formal {upper_clothing}"
-            ],
-
-            # 9. Upper body clothing
-            "<upper_body_clothing>": [
-                "{gender} wearing {upper_clothing}",
-                "a {upper_clothing} {offset}",
-                "{upper_clothing} draped over {surface}",
-                "{fabric} {upper_clothing} with {pattern}",
-                "{upper_clothing} in {zone}",
-                "tailored {upper_clothing} made from {material} with {texture} finish",
-                "flowing {upper_clothing} adorned with {pattern} and {accessory}",
-                "structured {upper_clothing} paired with {jewelry} and {footwear}",
-                "casual {upper_clothing} in {fabric} displaying {emotion} mood",
-                "formal {upper_clothing} illuminated by {lighting} on {surface}",
-                "vintage {upper_clothing} with {pattern} details {relation} {object_left}",
-                "contemporary {upper_clothing} featuring {material} blend in {zone}",
-                "layered {upper_clothing} creating {texture} visual interest {offset}",
-                "embellished {upper_clothing} with {jewelry} accents under {lighting}",
-                "minimalist {upper_clothing} contrasting with ornate {headwear}"
-            ],
-
-            # 10. Hair style
-            "<hair_style>": [
-                "{gender} with {hair_style} {hair_length} hair",
-                "a {gender} sporting {hair_style}",
-                "{hair_style} hair styled with {accessory}",
-                "{hair_style} under {headwear}",
-                "elegant {hair_style} {offset}",
-                "intricate {hair_style} adorned with {jewelry} and {accessory}",
-                "natural {hair_style} flowing in {hair_length} waves under {lighting}",
-                "styled {hair_style} complementing {upper_clothing} and {emotion} expression",
-                "textured {hair_style} with {pattern} elements near {object_right}",
-                "classic {hair_style} updated with modern {accessory} in {zone}",
-                "windswept {hair_style} creating movement while {pose} on {surface}",
-                "polished {hair_style} contrasting with {texture} {material} clothing",
-                "casual {hair_style} paired with {headwear} and {jewelry}",
-                "dramatic {hair_style} enhanced by {lighting} effects {offset}",
-                "traditional {hair_style} with {hair_length} styling {relation} {object_left}"
-            ],
-
-            # 11. Hair length
-            "<hair_length>": [
-                "{gender} with {hair_length} {hair_style} hair",
-                "{hair_length} hair flowing {offset}",
-                "displaying {hair_length} locks",
-                "{hair_length} hair under {lighting}",
-                "{hair_length} strands with {texture}",
-                "luxurious {hair_length} hair styled in {hair_style} with {accessory}",
-                "natural {hair_length} tresses cascading over {upper_clothing}",
-                "precisely cut {hair_length} hair framing {emotion} expression",
-                "flowing {hair_length} locks enhanced by {lighting} on {surface}",
-                "textured {hair_length} hair adorned with {jewelry} and {headwear}",
-                "voluminous {hair_length} style creating silhouette in {zone}",
-                "sleek {hair_length} hair contrasting with {pattern} {fabric} clothing",
-                "windblown {hair_length} strands during {pose} {offset}",
-                "carefully maintained {hair_length} hair {relation} {object_right}",
-                "dramatic {hair_length} styling complementing {material} {upper_clothing}"
-            ],
-
-            # 12. Headwear
-            "<headwear>": [
-                "{gender} wearing {headwear}",
-                "a {headwear} {offset}",
-                "{headwear} placed on {surface}",
-                "{material} {headwear} with {pattern}",
-                "stylish {headwear} complementing {hair_style}",
-                "traditional {headwear} crafted from {material} with {texture} details",
-                "modern {headwear} adorned with {accessory} and {jewelry}",
-                "functional {headwear} protecting from {lighting} in {zone}",
-                "decorative {headwear} featuring {pattern} design on {fabric}",
-                "vintage {headwear} paired with {upper_clothing} and {footwear}",
-                "statement {headwear} creating focal point while {pose}",
-                "subtle {headwear} enhancing {hair_length} {hair_style} arrangement",
-                "weather-appropriate {headwear} on {surface} near {object_left}",
-                "ceremonial {headwear} with {material} construction {offset}",
-                "casual {headwear} contrasting formal {upper_clothing} ensemble"
-            ],
-
-            # 13. Texture
-            "<texture>": [
-                "{surface} with {texture} finish",
-                "{object_left} showing {texture}",
-                "a {texture} pattern on {material}",
-                "{texture} detail under {lighting}",
-                "rich {texture} in {zone}",
-                "complex {texture} created by {material} on {surface} under {lighting}",
-                "subtle {texture} variations on {upper_clothing} and {accessory}",
-                "pronounced {texture} contrasting smooth {object_right} in {zone}",
-                "layered {texture} effects on {fabric} {pattern} design",
-                "natural {texture} enhanced by weathering on {surface} {offset}",
-                "artificial {texture} mimicking organic patterns on {footwear}",
-                "varied {texture} creating visual interest {relation} {object_left}",
-                "uniform {texture} across {material} {headwear} and {jewelry}",
-                "rough {texture} juxtaposed with polished {accessory} details",
-                "delicate {texture} revealed by {lighting} on {upper_clothing}"
-            ],
-
-            # 14. Pattern
-            "<pattern>": [
-                "{upper_clothing} with {pattern} design",
-                "a {pattern} {material} {object_right}",
-                "{pattern} covering {surface}",
-                "intricate {pattern} on {fabric}",
-                "{pattern} motif {offset}",
-                "repeating {pattern} across {material} {upper_clothing} and {accessory}",
-                "organic {pattern} inspired by nature on {surface} in {zone}",
-                "geometric {pattern} creating rhythm on {fabric} {footwear}",
-                "traditional {pattern} updated for modern {headwear} design",
-                "abstract {pattern} enhanced by {lighting} on {texture} surface",
-                "cultural {pattern} adorning {jewelry} and {upper_clothing}",
-                "minimalist {pattern} contrasting busy {object_left} arrangement",
-                "bold {pattern} making statement on {material} garment {offset}",
-                "subtle {pattern} revealed under close inspection of {accessory}",
-                "layered {pattern} combinations creating depth {relation} {object_right}"
-            ],
-
-            # 15. Grid
-            "<grid>": [
-                "composition following {grid} layout",
-                "{gender} positioned on {grid}",
-                "elements arranged in {grid}",
-                "{grid} structure in {zone}",
-                "visual {grid} with {object_left} and {object_right}",
-                "precise {grid} alignment of {gender} {pose} with {surface} elements",
-                "dynamic {grid} breaking traditional rules in {zone} placement",
-                "harmonious {grid} balancing {object_left} and {object_right} {offset}",
-                "mathematical {grid} underlying {pattern} on {material} surface",
-                "intuitive {grid} guiding eye through {lighting} and shadow",
-                "classical {grid} proportions for {gender} wearing {upper_clothing}",
-                "modern {grid} interpretation with {accessory} as focal point",
-                "organic {grid} suggested by natural {texture} arrangements",
-                "rigid {grid} softened by {fabric} draping and {pose}",
-                "conceptual {grid} relating {emotion} to spatial {relation}"
-            ],
-
-            # 16. Zone
-            "<zone>": [
-                "{gender} positioned in {zone}",
-                "activity happening in {zone}",
-                "{object_left} located in {zone}",
-                "focus on {zone} area",
-                "{lighting} illuminating {zone}",
-                "primary action occurring in {zone} with {gender} {pose}",
-                "secondary elements arranged in {zone} around {object_right}",
-                "visual weight concentrated in {zone} through {lighting} placement",
-                "negative space defining {zone} boundaries near {surface}",
-                "compositional {zone} emphasized by {pattern} and {texture}",
-                "foreground {zone} featuring {upper_clothing} and {accessory} details",
-                "background {zone} providing context with {object_left} placement",
-                "transitional {zone} linking elements through {material} continuity",
-                "isolated {zone} creating focus on {emotion} expression {offset}",
-                "interconnected {zone} relating {footwear} to {surface} interaction"
-            ],
-
-            # 17. Offset
-            "<offset>": [
-                "{gender} {offset}",
-                "{object_right} placed {offset}",
-                "scene captured {offset}",
-                "composition {offset}",
-                "elements arranged {offset}",
-                "strategic placement {offset} creating visual tension with {object_left}",
-                "balanced arrangement {offset} despite asymmetrical {pose}",
-                "dramatic positioning {offset} enhanced by {lighting} direction",
-                "subtle shift {offset} revealing {texture} on {surface}",
-                "intentional framing {offset} emphasizing {pattern} details",
-                "dynamic capture {offset} showing movement in {upper_clothing}",
-                "classical placement {offset} following {grid} principles",
-                "unexpected angle {offset} revealing hidden {accessory} details",
-                "harmonious positioning {offset} uniting {zone} elements",
-                "thoughtful arrangement {offset} guiding viewer through {emotion}"
-            ],
-
-            # 18. Object left
-            "<object_left>": [
-                "{object_left} on the left side",
-                "{object_left} {relation} {object_right}",
-                "{object_left} made of {material}",
-                "prominent {object_left} in {zone}",
-                "{object_left} under {lighting}",
-                "carefully placed {object_left} with {texture} surface in {zone}",
-                "weathered {object_left} showing {pattern} from use over time",
-                "functional {object_left} serving purpose {relation} {gender}",
-                "decorative {object_left} crafted from {material} with {fabric} accents",
-                "symbolic {object_left} representing {emotion} in composition",
-                "vintage {object_left} contrasting modern {object_right} {offset}",
-                "organic {object_left} complementing structured {surface} geometry",
-                "illuminated {object_left} catching {lighting} dramatically",
-                "textured {object_left} providing tactile interest near {accessory}",
-                "minimal {object_left} balancing ornate {upper_clothing} details"
-            ],
-
-            # 19. Object right
-            "<object_right>": [
-                "{object_right} on the right side",
-                "{object_right} near {gender}",
-                "{object_right} with {texture}",
-                "decorative {object_right} {offset}",
-                "{object_right} on {surface}",
-                "significant {object_right} made from {material} in {zone}",
-                "artistic {object_right} displaying {pattern} under {lighting}",
-                "practical {object_right} used by {gender} while {pose}",
-                "antique {object_right} with {texture} patina on {surface}",
-                "contemporary {object_right} featuring {fabric} elements",
-                "natural {object_right} {relation} manufactured {object_left}",
-                "polished {object_right} reflecting surrounding {lighting} effects",
-                "weathered {object_right} telling story through wear {offset}",
-                "geometric {object_right} following {grid} placement rules",
-                "organic {object_right} softening rigid {pattern} arrangements"
-            ],
-
-            # 20. Relation
-            "<relation>": [
-                "{object_left} {relation} {object_right}",
-                "{gender} {relation} {surface}",
-                "{accessory} {relation} {object_right}",
-                "spatial {relation} between elements",
-                "{relation} positioning in {zone}",
-                "dynamic {relation} created between {gender} and {object_left} through {pose}",
-                "harmonic {relation} linking {upper_clothing} to {surface} textures",
-                "contrasting {relation} between {material} and {fabric} elements",
-                "subtle {relation} suggested by {lighting} connecting distant objects",
-                "physical {relation} demonstrated through {footwear} contact with {surface}",
-                "visual {relation} established via {pattern} continuity across {zone}",
-                "emotional {relation} between {emotion} expression and {object_right}",
-                "compositional {relation} following {grid} to link {accessory} placement",
-                "temporal {relation} implied between weathered {object_left} and new {jewelry}",
-                "conceptual {relation} uniting {texture} variations {offset}"
-            ],
-
-            # 21. Intent
-            "<intent>": [
-                "creating {intent} mood",
-                "{intent} purpose with {emotion}",
-                "conveying {intent} through {pose}",
-                "{intent} narrative in scene",
-                "artistic {intent} {offset}",
-                "deliberate {intent} expressed through {gender}'s {pose} and {emotion}",
-                "subtle {intent} woven into {pattern} and {material} choices",
-                "powerful {intent} communicated via {lighting} on {surface}",
-                "layered {intent} revealed through {upper_clothing} and {accessory} symbolism",
-                "cultural {intent} embedded in {jewelry} and {headwear} selection",
-                "personal {intent} manifested in {hair_style} and {footwear} styling",
-                "universal {intent} transcending specific {zone} placement",
-                "complex {intent} requiring contemplation of {object_left} {relation} {object_right}",
-                "immediate {intent} apparent in {texture} and {fabric} contrasts",
-                "evolving {intent} suggested by transitional {lighting} {offset}"
-            ],
-
-            # 22. Style
-            "<style>": [
-                "rendered in {style} aesthetic",
-                "{style} artistic approach",
-                "{style} treatment of {lighting}",
-                "distinctive {style} composition",
-                "{style} interpretation {offset}",
-                "refined {style} evident in {gender}'s {pose} and {upper_clothing} selection",
-                "bold {style} expressed through {pattern} and {material} combinations",
-                "subtle {style} nuances in {texture} treatment on {surface}",
-                "period {style} accuracy in {headwear} and {footwear} details",
-                "contemporary {style} merging with traditional {jewelry} elements",
-                "experimental {style} pushing boundaries of {lighting} and {zone}",
-                "classical {style} principles applied to modern {accessory} arrangement",
-                "signature {style} recognizable in {emotion} portrayal and {hair_style}",
-                "evolving {style} blending multiple influences in {fabric} choices",
-                "cohesive {style} unifying disparate elements through {grid} structure"
-            ],
-
-            # 23. Fabric
-            "<fabric>": [
-                "{upper_clothing} made from {fabric}",
-                "luxurious {fabric} {accessory}",
-                "{fabric} draped over {surface}",
-                "soft {fabric} with {pattern}",
-                "{fabric} material in {zone}",
-                "premium {fabric} woven with {material} threads creating {texture}",
-                "delicate {fabric} flowing around {gender} during {pose}",
-                "structured {fabric} maintaining form in {upper_clothing} design",
-                "vintage {fabric} showing {pattern} popular in past eras",
-                "innovative {fabric} blend combining natural and synthetic {material}",
-                "handwoven {fabric} displaying artisanal {texture} under {lighting}",
-                "sustainable {fabric} used in {footwear} and {accessory} construction",
-                "traditional {fabric} treatment creating unique {pattern} {offset}",
-                "modern {fabric} technology enabling {emotion} through drape",
-                "layered {fabric} creating depth {relation} {surface} backdrop"
-            ],
-
-            # 24. Jewelry
-            "<jewelry>": [
-                "{gender} wearing {jewelry}",
-                "elegant {jewelry} {offset}",
-                "{jewelry} paired with {upper_clothing}",
-                "sparkling {jewelry} under {lighting}",
-                "{material} {jewelry} as accent",
-                "heirloom {jewelry} crafted from {material} with {pattern} engravings",
-                "contemporary {jewelry} complementing traditional {upper_clothing} style",
-                "statement {jewelry} creating focal point against {fabric} backdrop",
-                "delicate {jewelry} catching {lighting} with subtle sparkle",
-                "layered {jewelry} arrangement enhancing {emotion} expression",
-                "cultural {jewelry} representing heritage worn with {headwear}",
-                "minimalist {jewelry} balancing ornate {accessory} details",
-                "vintage {jewelry} showing {texture} from years of wear",
-                "custom {jewelry} designed to match {footwear} embellishments",
-                "symbolic {jewelry} placed strategically in {zone} for meaning"
-            ],
-
-            ## 25. Lower body clothing (adding this as it seems to be missing)
-            #"<lower_body_clothing>": [
-            #    "{gender} wearing {lower_clothing} with {pattern}",
-            #    "flowing {lower_clothing} made of {fabric} {offset}",
-            #    "{material} {lower_clothing} paired with {footwear}",
-            #    "tailored {lower_clothing} in {zone} under {lighting}",
-            #    "casual {lower_clothing} with {texture} details on {surface}",
-            #    "formal {lower_clothing} complementing {upper_clothing} ensemble",
-            #    "vintage {lower_clothing} featuring {pattern} from bygone era",
-            #    "contemporary {lower_clothing} with innovative {material} blend",
-            #    "functional {lower_clothing} designed for {pose} flexibility",
-            #    "decorative {lower_clothing} adorned with {accessory} elements",
-            #    "layered {lower_clothing} creating visual interest through {fabric}",
-            #    "structured {lower_clothing} maintaining silhouette while {pose}",
-            #    "flowing {lower_clothing} enhanced by movement and {lighting}",
-            #    "traditional {lower_clothing} updated with modern {pattern}",
-            #    "minimalist {lower_clothing} allowing focus on {jewelry} details"
-            #],
-#
-            ## 26. Background (adding this for environmental context)
-            #"<background>": [
-            #    "atmospheric {background} setting enhancing {emotion}",
-            #    "{background} environment complementing {style} aesthetic",
-            #    "detailed {background} with {texture} elements in {zone}",
-            #    "minimal {background} focusing attention on {gender} {pose}",
-            #    "complex {background} incorporating {object_left} and {object_right}",
-            #    "natural {background} with organic {pattern} under {lighting}",
-            #    "architectural {background} providing {grid} structure",
-            #    "abstract {background} created through {material} and light",
-            #    "historical {background} context for period {upper_clothing}",
-            #    "futuristic {background} contrasting vintage {accessory} elements",
-            #    "textured {background} adding depth behind {surface} placement",
-            #    "gradient {background} transitioning through {zone} areas",
-            #    "patterned {background} echoing {fabric} design motifs",
-            #    "atmospheric {background} enhanced by {lighting} effects {offset}",
-            #    "contextual {background} supporting narrative {intent}"
-            #]
-        }
-
     def resolve_token(self, token: str, category: str) -> str:
         """Resolve a token placeholder with actual content from your lists"""
-        token_map = {
-            # Gender and human attributes
-            "gender": lambda: resolve_gender_token(random.choice(GENDER_TYPES)),
-            "pose": lambda: random.choice(HUMAN_POSES),
-            "emotion": lambda: random.choice([
-                # Core emotions
-                "happy", "sad", "thoughtful", "confident", "mysterious", "playful", "serene",
-                "intense", "melancholic", "joyful", "contemplative",
-
-                # Positive spectrum
-                "content", "grateful", "peaceful", "hopeful", "inspired", "excited", "ecstatic",
-                "relieved", "tender", "affectionate", "cheerful", "uplifted", "amused", "carefree",
-
-                # Negative spectrum
-                "angry", "anxious", "fearful", "ashamed", "bitter", "jealous", "regretful", "resentful",
-                "insecure", "lonely", "desperate", "guilty", "grieving", "disappointed", "frustrated",
-
-                # Neutral / Ambiguous
-                "neutral", "pensive", "stoic", "apathetic", "ambivalent", "indifferent", "tired",
-                "detached", "blank", "uncertain",
-
-                # Expressive or performative
-                "flirtatious", "sly", "defiant", "proud", "sarcastic", "smug", "teasing", "teary",
-                "bashful", "shy", "awkward", "curious", "startled", "embarrassed",
-
-                # Elevated / rare
-                "euphoric", "vindicated", "spiteful", "overwhelmed", "awe-struck", "tranquil",
-                "reverent", "haunted", "devoted", "wistful", "mournful", "cathartic"
-            ]),
-
-            # Positioning and composition
-            "offset": lambda: random.choice(OFFSET_TAGS).replace("*", random.choice(["viewed", "seen", "captured"])),
-            "zone": lambda: random.choice(ZONE_TAGS) if 'ZONE_TAGS' in globals() else random.choice([
-                "left side", "center", "right side", "foreground", "background",
-                "upper third", "lower third", "middle ground", 'depicted-up', 'depicted-down', 'depicted-left', 'depicted-right',
-                'left-up', 'left-down', 'left-left', 'left-right', 'right-up', 'right-down', 'right-left', 'right-right',
-                'center-up', 'center-down', 'center-left', 'center-right', 'middle-up', 'middle-down', 'middle-left', 'middle-right',
-                'top-left', 'top-right', 'bottom-left', 'bottom-right',
-                'top-center', 'bottom-center', 'left-center', 'right-center'
-
-            ]),
-            "grid": lambda: random.choice(GRID_TAGS) if 'GRID_TAGS' in globals() else random.choice([
-                "3x3 grid", "center point", "rule of thirds", "golden ratio",
-                "diagonal composition", "symmetrical layout", "asymmetrical balance",
-                "5x5 grid", "6x6 grid", "7x7 grid", "8x8 grid", "9x9 grid",
-                "grid", "rule of 3", "rule of 5", "rule of 7", "rule of 9",
-                "grid_a1", "grid_a2", "grid_a3", "grid_a4", "grid_a5",
-                "grid_b1", "grid_b2", "grid_b3", "grid_b4", "grid_b5",
-                "grid_c1", "grid_c2", "grid_c3", "grid_c4", "grid_c5",
-                "grid_d1", "grid_d2", "grid_d3", "grid_d4", "grid_d5",
-                "grid_e1", "grid_e2", "grid_e3", "grid_e4", "grid_e5",
-            ]),
-            "relation": lambda: random.choice([
-                # Basic spatial relationships
-                "next to", "beside", "on top of", "under", "to the right of", "to the left of",
-                "above", "below", "in front of", "behind", "adjacent to",
-
-                # Geometric / Directional
-                "diagonally above", "diagonally below", "centered over", "off-center from",
-                "between", "surrounding", "encircling", "aligned with", "opposite from", "mirrored by",
-
-                # Touching / Contact
-                "touching", "leaning against", "attached to", "stacked on", "resting against",
-                "embedded in", "hooked onto", "hanging from", "sitting on",
-
-                # Containment / Inclusion
-                "inside", "outside of", "within", "encased in", "covered by", "enclosed within",
-                "wrapped around", "nestled inside", "trapped under", "surrounded by",
-
-                # Positional intent
-                "leading", "following", "offset from", "hovering over", "drifting near",
-                "partially covering", "peeking from behind", "projected onto",
-
-                # Relational logic
-                "subordinate to", "dominant over", "supporting", "obscuring", "revealed by",
-
-                # Abstract / metaphorical (optional flair)
-                "echoing", "reflecting", "shadowing", "contrasting with", "mimicking",
-                "intertwined with", "linked to", "intersecting with"
-            ]),
-
-
-            # Clothing and accessories
-            "upper_clothing": lambda: random.choice(UPPER_BODY_CLOTHES_TYPES),
-            "footwear": lambda: random.choice(FOOTWEAR_TYPES),
-            "accessory": lambda: random.choice(ACCESSORY_TYPES),
-            "jewelry": lambda: random.choice(JEWELRY_TYPES),
-            "headwear": lambda: random.choice(HEADWEAR_TYPES) if 'HEADWEAR_TYPES' in globals() else random.choice([
-                # Common
-                "hat", "cap", "beanie", "beret", "headband", "visor", "scarf", "bandana",
-                "bucket hat", "snapback", "trucker hat", "fedora", "boater", "panama hat",
-                "newsboy cap", "flat cap", "sun hat", "cloche", "bowler hat", "top hat",
-                "bonnet", "balaclava", "hood", "earmuffs", "helmet", "turban",
-
-                # Military/Tactical
-                "combat helmet", "beret (military)", "shako", "bicorn", "tricorn", "pilot helmet",
-                "kevlar helmet", "riot helmet", "garrison cap",
-
-                # Cultural/Traditional
-                "kufi", "tam", "keffiyeh", "ghutrah", "fez", "sombrero", "cowboy hat",
-                "pith helmet", "sugegasa", "kasa", "pagri", "yarmulke", "shtreimel",
-                "ushanka", "papakha",
-
-                # Religious/Symbolic
-                "bishop's mitre", "pope's tiara", "nun's coif", "monk hood", "hijab", "niqab",
-                "veil", "priest biretta", "monastic hood",
-
-                # Fantasy / Sci-fi / Style
-                "tiara", "crown", "horned helmet", "wizard hat", "druid hood", "elven circlet",
-                "steampunk goggles", "cyber visor", "space helmet", "dragon helm", "antler crown",
-                "crystal crown", "halo", "digital interface helm", "energy visor"
-            ]),
-
-            # Hair attributes
-            "hair_style": lambda: random.choice(HAIRSTYLES_TYPES),
-            "hair_length": lambda: random.choice(HAIR_LENGTH_TYPES) if 'HAIR_LENGTH_TYPES' in globals() else random.choice([
-                # Ultra-short
-                "bald", "clean-shaven", "buzzed", "buzz cut", "stubble-length", "shaved sides", "crew cut", "fade cut",
-
-                # Short styles
-                "very short", "pixie-short", "pixie cut", "cropped", "ear-length", "temple-length", "sidecut short", "tapered",
-
-                # Medium styles
-                "chin-length", "jawline-length", "bob-length", "pageboy-length", "neck-length", "shoulder-length",
-                "inverted bob", "lob-length", "curtain-length", "medium-layered",
-
-                # Mid to long
-                "collarbone-length", "upper-back-length", "bra-strap-length", "mid-back-length", "ribcage-length",
-                "below-shoulder", "tied-back-length", "pulled-forward-length",
-
-                # Long hair
-                "waist-length", "belt-length", "hip-length", "tailbone-length", "thigh-length", "knee-length", "very long",
-
-                # Extreme / Stylized
-                "floor-length", "ankle-length", "calf-length", "dragging-length", "trailing-length",
-                "gravity-defying", "floating-length", "looped-length", "sculpted-length",
-
-                # Fantasy / Anime-inspired
-                "ethereal-length", "supernatural-length", "twin-dragon-length", "wind-wrapped-length",
-                "wing-length", "spellbound-length", "astral-length", "mythic-length",
-
-                # Motion-based descriptors
-                "swaying-length", "whipping-length", "flowing-length", "draped-length", "streaming-length",
-                "twisting-length", "spiraling-length", "billowing-length", "coiled-length",
-
-                # Cultural / ceremonial
-                "samurai-length", "ritual-length", "ancestral-length", "battle-worn-length", "monastic-length"
-            ]),
-
-
-            # Materials and textures
-            "material": lambda: random.choice(MATERIAL_TYPES),
-            "fabric": lambda: random.choice(FABRIC_TYPES) if 'FABRIC_TYPES' in globals() else random.choice([
-                "cotton", "linen", "silk", "wool", "denim", "leather", "canvas", "polyester",
-                "nylon", "rayon", "spandex", "suede", "cashmere", "velvet", "satin", "tweed",
-                "mesh", "lace", "organza", "chiffon", "tulle", "fleece", "terrycloth", "corduroy",
-                "jacquard", "gabardine", "burlap", "neoprene", "lycra", "acrylic"
-            ]),
-
-            "texture": lambda: random.choice(TEXTURE_TAGS) if 'TEXTURE_TAGS' in globals() else random.choice([
-                "smooth", "rough", "glossy", "matte", "metallic", "velvet", "satin", "leather",
-                "wooden", "glass", "stone", "gritty", "bumpy", "pebbled", "cracked", "coarse",
-                "silky", "sticky", "greasy", "fibrous", "crystalline", "slick", "powdery", "chipped",
-                "ribbed", "brushed", "pitted", "etched", "polished", "weathered", "frosted"
-            ]),
-
-            "pattern": lambda: random.choice(PATTERN_TAGS) if 'PATTERN_TAGS' in globals() else random.choice([
-                "striped", "checked", "floral", "geometric", "abstract", "paisley", "polka dot",
-                "camouflage", "plaid", "herringbone", "chevron", "argyle", "animal print",
-                "baroque", "tribal", "lacework", "zigzag", "marbled", "wave", "diamond", "leaf motif",
-                "gradient", "burnout", "fractal", "chainlink", "scale pattern", "radial", "ink blot", "maze"
-            ]),
-
-
-            # Environment and lighting
-            "surface": lambda: random.choice(HUMAN_SURFACES),
-            "lighting": lambda: random.choice(LIGHTING_TYPES),
-
-            # Objects
-            "object_left": lambda: self._extract_object_side("left"),
-            "object_right": lambda: self._extract_object_side("right"),
-
-            # Style and intent
-            "style": lambda: random.choice([
-                # Core
-                "photorealistic", "artistic", "minimalist", "dramatic", "cinematic", "vintage", "modern", "classical",
-                "experimental", "documentary", "portrait",
-
-                # Visual / Art Movement
-                "surreal", "baroque", "rococo", "futurist", "brutalist", "art nouveau", "art deco",
-                "postmodern", "constructivist", "expressionist", "impressionist", "cubist",
-                "dadaist", "symbolist", "realist", "hyperrealistic", "pop art", "graffiti",
-
-                # Medium-Based
-                "oil painting", "digital illustration", "charcoal sketch", "ink drawing",
-                "watercolor", "collage", "pastel", "pixel art", "low poly", "wireframe", "line art",
-
-                # Photography / Film
-                "noir", "monochrome", "sepia", "macro", "wide angle", "bokeh", "high contrast",
-                "low light", "vintage film", "ultra HD", "soft focus", "long exposure",
-
-                # Fashion / Editorial / Design
-                "editorial", "runway", "street fashion", "industrial", "futuristic", "gothic",
-                "cyberpunk", "steampunk", "biopunk", "dark academia", "light academia",
-                "y2k", "vaporwave", "aesthetic core", "cozy", "boho", "urban", "eco-modern",
-
-                # Genre-Fusion
-                "mythological", "post-apocalyptic", "dreamlike", "otherworldly", "ritualistic", "religious iconography"
-            ]),
-
-            "intent": lambda: random.choice([
-                # Core
-                "emotional", "narrative", "aesthetic", "conceptual", "documentary", "expressive", "symbolic", "atmospheric",
-
-                # Psychological / Emotional States
-                "melancholic", "nostalgic", "euphoric", "haunting", "serene", "tense",
-                "romantic", "tragic", "contemplative", "hopeful", "lonely", "reflective",
-                "anxious", "exuberant", "playful", "sentimental", "stoic", "wistful",
-
-                # Narrative Drivers
-                "heroic", "mythic", "epic", "ritualistic", "transformational", "origin-focused",
-                "coming of age", "rebirth", "sacrifice", "revelation", "mystery", "conflict-driven",
-                "internal journey", "spiritual awakening", "moral tension",
-
-                # Communication / Social
-                "provocative", "political", "satirical", "educational", "cautionary", "persuasive",
-                "journalistic", "testimonial", "allegorical", "activist",
-
-                # Visual / Compositional
-                "compositional study", "gesture-focused", "motion-driven", "light study", "texture-focused",
-                "character centric", "environmental", "perspective-driven", "minimal narrative",
-
-                # Conceptual / Meta
-                "meta-narrative", "simulation", "deconstructed", "ritual subversion", "symbol-dense",
-                "myth reimagined", "absurdist", "visual pun", "ontological reflection"
-            ]),
-
-        }
+        token_map = FULL_TOKEN_MAP
 
         resolver = token_map.get(token)
         if resolver:
@@ -811,12 +111,11 @@ class SymbolicCaptionGenerator:
 
     def _extract_object_side(self, side: str = "left") -> str:
         """Extract object from FULL_ASSOCIATIVE"""
-        if 'FULL_ASSOCIATIVE' in globals() and FULL_ASSOCIATIVE:
-            entry = random.choice(FULL_ASSOCIATIVE)
-            parts = entry.split()
-            if len(parts) >= 3:
-                return parts[1] if side == "left" else parts[-1]
-        return "object"
+        return extract_offset(side)
+
+
+
+
 
     def generate_category_focused_caption(self, primary_category: str,
                                         secondary_categories: Optional[List[str]] = None,
@@ -876,7 +175,7 @@ class SymbolicCaptionGenerator:
                 'start_idx': i,
                 'end_idx': min(i + self.segment_length, len(token_ids)),
                 'category': primary_category,
-                'shunt_id': primary_category
+                'shunt_id': primary_category, #todo make this function when we have shunt mapping
             })
 
         return segments

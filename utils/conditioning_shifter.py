@@ -32,6 +32,7 @@ class ShiftConfig:
     topk_mode: str = "attention"  # "attention", "gate", "combined", "tau_softmax"
     guidance_scale: float = 1.0,
     max_tokens: int = 77  # Maximum number of tokens to process
+    max_length: int = 77 # Maximum length of the input sequence
     # Optimization parameters for batch processing
     batch_size: int = 4 # use no more than 4 for now, as without this it causes ram explosions with pooled outputs
     ram_capacity: float = 0.1  # Percentage of RAM to use, we divide up the pipeline into slices of ram based on batches

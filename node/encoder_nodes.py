@@ -1321,6 +1321,7 @@ class EncoderLoader:
         model_source = local_path or model_config.get("repo_name", model_name)
         model_id = f"{model_type}_{model_name}_{hashlib.sha1(model_source.encode()).hexdigest()[:10]}"
 
+
         dtype = torch.get_default_dtype() if dtype == "default" else {
             "float64": torch.float64,
             "float32": torch.float32,
@@ -1344,7 +1345,7 @@ class EncoderLoader:
             raise RuntimeError(f"Failed to load encoder model: {model_name}")
         model, tokenizer = result
 
-        enable_rope_spiral: bool = ("2048" in model_type.lower() )  # Enable rope for BERT models
+        enable_rope_spiral: bool = ("2048" in model_name )  # Enable rope for BERT models
         rope_phase_offsets: List[int] = [1, 2, 4, 8, 16]
         spiral_probe_token: Optional[str] = None  # inject special token if needed
 

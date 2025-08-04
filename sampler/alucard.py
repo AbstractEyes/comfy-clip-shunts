@@ -67,8 +67,8 @@ class FieldWalkerConfig:
             window_managed_externally=self.window_managed_externally
         )
 
-we_running_it = True  # Flag to control whether the walker is running
-class SamplerCore(nn.Module):
+
+class Alucard(nn.Module):
 
     def sample(
             self,
@@ -161,7 +161,7 @@ class FieldWalker:
         self.kernel = get_folding_kernel(config.folding_mode)
         self.padding = FoldingModifier({"padding_mode":config.padding_mode,})
         self.pooling = WindowPooling({"pooling_mode": config.pooling_mode})
-        self.core = SamplerCore()
+        self.core = Alucard()
 
 
 

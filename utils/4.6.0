@@ -1,0 +1,18 @@
+Requirement already satisfied: torch in c:\users\abstr\miniconda3\lib\site-packages (2.5.1)
+Requirement already satisfied: filelock in c:\users\abstr\miniconda3\lib\site-packages (from torch) (3.15.4)
+Requirement already satisfied: typing-extensions>=4.8.0 in c:\users\abstr\miniconda3\lib\site-packages (from torch) (4.12.2)
+Collecting sympy==1.13.1 (from torch)
+  Downloading sympy-1.13.1-py3-none-any.whl.metadata (12 kB)
+Requirement already satisfied: networkx in c:\users\abstr\miniconda3\lib\site-packages (from torch) (3.0)
+Requirement already satisfied: jinja2 in c:\users\abstr\miniconda3\lib\site-packages (from torch) (3.1.2)
+Requirement already satisfied: fsspec in c:\users\abstr\miniconda3\lib\site-packages (from torch) (2024.12.0)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in c:\users\abstr\miniconda3\lib\site-packages (from sympy==1.13.1->torch) (1.2.1)
+Requirement already satisfied: MarkupSafe>=2.0 in c:\users\abstr\miniconda3\lib\site-packages (from jinja2->torch) (2.1.2)
+Downloading sympy-1.13.1-py3-none-any.whl (6.2 MB)
+   ---------------------------------------- 0.0/6.2 MB ? eta -:--:--   ------------------------- -------------- 3.9/6.2 MB 21.3 MB/s eta 0:00:01   ---------------------------------------- 6.2/6.2 MB 23.7 MB/s eta 0:00:00
+Installing collected packages: sympy
+  Attempting uninstall: sympy
+    Found existing installation: sympy 1.11.1
+    Uninstalling sympy-1.11.1:
+      Successfully uninstalled sympy-1.11.1
+Successfully installed sympy-1.13.1

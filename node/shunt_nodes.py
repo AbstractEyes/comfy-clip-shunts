@@ -13,6 +13,7 @@ from ..model.model_manager import get_model_manager
 from ..model.configs import ENCODER_CONFIGS, ShuntData, EncoderData
 
 from ..utils.conditioning_shifter import ShiftConfig, ConditioningShifter
+from ..utils.conditioning_helper import ConditioningHelper, UsefulConditioning
 
 class LoadShuntSimple:
     """Load a shunt adapter with simplified model management."""
@@ -308,11 +309,11 @@ class ShuntConditioning:
         logger.info(
             f"Adapting conditioning with {len(adapter_pipe)} adapters (pool_method={pool_method}, topk={use_topk})")
 
-        encoder_pipe = dict(encoder_pipe[0])  # Ensure we have a mutable copy
+        encoder_pipe = encoder_pipe.copy()  # Ensure we have a mutable copy
         adapter_pipe = list(adapter_pipe)  # Ensure we have a mutable copy
-        conditioning = conditioning.copy()  # Ensure we have a mutable copy
+        conditioning = UsefulConditioning(conditioning) if not isinstance(conditioning, UsefulConditioning) else conditioning
         device = torch.device(
-            encoder_pipe.get("config", {}).get("device", "cuda" if torch.cuda.is_available() else "cpu")
+            encoder_pipe[0].get("config", {}).get("device", "cuda" if torch.cuda.is_available() else "cpu")
         )
 
         # Create unified config with top-k parameters
@@ -333,11 +334,26 @@ class ShuntConditioning:
             tau_temperature=tau_temperature,
             topk_mode=topk_mode,
             guidance_scale=guidance_scale,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
+            max_length=max_tokens,
         )
 
         # Get encoder embeddings (extracted to shifter)
-        encoder_embeddings = ConditioningShifter.extract_encoder_embeddings(encoder_pipe, device, config)
+        all_embeddings = {}
+        #logger.info(f"Extracting encoder embeddings from pipeline {encoder_pipe}")
+        for encoder in encoder_pipe:
+            logger.info(f"Processing encoder {encoder.get("config", {}).get("model_type")}")
+            if encoder.get("clip") is not None:
+                # we are using a clip instead of an encoder, we extract from the clip.
+                clip_model = encoder["clip"]
+                tokens = clip_model.tokenize(prompt, max_length=max_tokens, truncation=True, padding="max_length")
+                extracted = clip_model.encode_from_tokens_scheduled(tokens)
+                extracted = extracted[0][0].to(device)  # Extract the first tensor
+            else:
+                extracted = ConditioningShifter.extract_encoder_embeddings(encoder, device, config)
+            if extracted is not None:
+                encoder_name = encoder.get("config", {}).get("model_type", "unknown")
+                all_embeddings.setdefault(encoder_name, []).append(extracted.clone().to(device))
 
         # Statistics tracking
         all_guidance_predictions = []
@@ -346,7 +362,11 @@ class ShuntConditioning:
 
         # Process each conditioning tensor
         adapted_conditioning = []
-        for cond_idx, (cond_tensor, cond_meta) in enumerate(conditioning):
+        logger.info(f"Processing {len(conditioning)} conditioning tensors")
+        for cond in conditioning:
+            logger.info(f"Processing conditioning tensor with shape {cond[0].shape}")
+            cond_tensor = cond[0].to(device)  # Move tensor to device
+            cond_meta = cond[1] if len(cond) > 1 else {}
             cond_tensor = cond_tensor.clone().to(device)
 
             # Collect adapter outputs by type for this conditioning
@@ -378,24 +398,30 @@ class ShuntConditioning:
                     # Get slice and run adapter
                     clip_slice = cond_tensor[:, :, slice_start:slice_end]
 
-                    output = ConditioningShifter.run_adapter(
-                        adapter_model, encoder_embeddings, clip_slice,
-                        guidance_scale, adapter_type, (slice_start, slice_end)
-                    )
+                    pooled_outputs = []
+                    #logger.info(f"Running adapter {adapter_info['adapter_id']} on slice {slice_start}:{slice_end} with type {adapter_type}")
+                    #logger.info(f"Adapter embeddings {all_embeddings} embeddings")
+                    for name, embedding_list in all_embeddings.items():
+                        for embedding in embedding_list:
+                            #logger.info(f"Running adapter on {embedding}")
+                            prepared_embedding = ConditioningShifter.run_adapter(
+                                adapter_model, embedding, clip_slice,
+                                guidance_scale, adapter_type, (slice_start, slice_end)
+                            )
 
-                    outputs_by_type[adapter_type].append(output)
+                            outputs_by_type[adapter_type].append(prepared_embedding)
 
-                    # Collect guidance predictions
-                    if output.g_pred is not None:
-                        all_guidance_predictions.append(float(output.g_pred.mean().item()))
+                            # Collect guidance predictions
+                            if prepared_embedding.g_pred is not None:
+                                all_guidance_predictions.append(float(prepared_embedding.g_pred.mean().item()))
 
-                    # Collect tau statistics if using top-k
-                    if use_topk and output.tau is not None:
-                        all_topk_stats.append({
-                            'adapter_type': adapter_type,
-                            'tau_mean': float(output.tau.mean().item()),
-                            'tau_std': float(output.tau.std().item()) if output.tau.numel() > 1 else 0.0,
-                        })
+                            # Collect tau statistics if using top-k
+                            if use_topk and prepared_embedding.tau is not None:
+                                all_topk_stats.append({
+                                    'adapter_type': adapter_type,
+                                    'tau_mean': float(prepared_embedding.tau.mean().item()),
+                                    'tau_std': float(prepared_embedding.tau.std().item()) if prepared_embedding.tau.numel() > 1 else 0.0,
+                                })
 
                 except Exception as e:
                     logger.error(f"Error running adapter: {e}")
@@ -403,6 +429,7 @@ class ShuntConditioning:
                     traceback.print_exc()
                     continue
 
+            #logger.info(f"Collected {outputs_by_type.items()} outputs by type for this conditioning")
             # Apply modifications by type
             for adapter_type, outputs in outputs_by_type.items():
                 if not outputs:
@@ -420,12 +447,12 @@ class ShuntConditioning:
                 cond_tensor[:, :, slice_start:slice_end] = clip_modified.type_as(cond_tensor)
 
                 # Track modifications
-                all_modifications.append({
-                    'adapter_type': adapter_type,
-                    'num_adapters': len(outputs),
-                    'slice_range': (slice_start, slice_end),
-                    'mean_change': float((clip_modified - clip_slice).abs().mean().item())
-                })
+                #all_modifications.append({
+                #    'adapter_type': adapter_type,
+                #    'num_adapters': len(outputs),
+                #    'slice_range': (slice_start, slice_end),
+                #    'mean_change': float((clip_modified - clip_slice).abs().mean().item())
+                #})
 
             adapted_conditioning.append([cond_tensor, cond_meta])
 
@@ -433,12 +460,13 @@ class ShuntConditioning:
             raise RuntimeError("No conditioning was successfully adapted")
 
         # Format statistics with top-k info
-        stats_str = self._format_statistics(
-            all_modifications, all_guidance_predictions,
-            conditioning, adapted_conditioning,
-            config, device, all_topk_stats
-        )
-        return (adapted_conditioning, stats_str)
+        #stats_str = self._format_statistics(
+        #    all_modifications, all_guidance_predictions,
+        #    conditioning, adapted_conditioning,
+        #    config, device, all_topk_stats
+        #)
+        logger.info(f"Conditioning adaptation complete; {len(adapted_conditioning)} ")
+        return (adapted_conditioning,) # stats_str)
 
     def _format_statistics(self, modifications, guidance_predictions,
                            orig_conditioning, adapted_conditioning,

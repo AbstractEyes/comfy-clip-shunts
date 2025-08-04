@@ -335,6 +335,7 @@ from comfy.utils import ProgressBar
 from ..embedding.embedding_manager import get_bank
 from ..text_encoders.symbolic_logic_manager import SymbolicLogicManager
 
+
 BEATRIX_CATEGORIES = [
     "<subject>","<subject1>","<subject2>",
     "<pose>","<emotion>","<surface>",
