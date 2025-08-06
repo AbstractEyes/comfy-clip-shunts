@@ -248,7 +248,7 @@ class ClipHyperConfigNode:
                 "tau":                  ("FLOAT", {"default": 5.00,  "min": 0.0, "max": 50.0}),
                 "walk_random":          ("FLOAT", {"default": 0.03, "step": 0.01, "tooltip": "Enable random walk during sampling."}),
                 "walk_speed":           ("FLOAT", {"default": 3.00, "tooltip": "Speed of random walk."}),
-                "surge_intensity":      ("FLOAT", {"default": 0.50, "min": 0.00, "max": 1.00, "tooltip": "Intensity of surge effect."}),
+                "surge_intensity":      ("FLOAT", {"default": 5.00, "min": 0.00, "max": 100.00, "tooltip": "Intensity of surge effect."}),
                 "cascade_steps":        ("FLOAT", {"default": 4.00}),
                 "shockwave_center":     ("FLOAT", {"default": 5.00}),
                 "shockwave_variance":   ("FLOAT", {"default": 0.01, "step": 0.01}),
