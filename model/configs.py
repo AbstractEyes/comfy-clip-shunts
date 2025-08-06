@@ -543,6 +543,7 @@ ENCODER_CONFIGS = {
     },
     "flan-t5-large": {
         "repo_name": "google/flan-t5-large",
+        "config_repo": "google/flan-t5-base",
         "name": "flan-t5-large",
         "type": "t5",
         "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
@@ -564,6 +565,156 @@ ENCODER_CONFIGS = {
         "name": "t5-small",
         "type": "t5",
         "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+    },
+    "t5-base": {
+        "repo_name": "google-t5/t5-base",
+        "name": "t5-base",
+        "type": "t5",
+        "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+    },
+    "t5-large": {
+        "repo_name": "google-t5/t5-large",
+        "name": "t5-large",
+        "type": "t5",
+        "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+    },
+    "t5-3b": {
+        "repo_name": "google-t5/t5-3b",
+        "name": "t5-3b",
+        "type": "t5",
+        "use_huggingface": True,
+        # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+    },
+    "t5-11b": {
+        "repo_name": "google-t5/t5-11b",
+        "name": "t5-11b",
+        "type": "t5",
+        "use_huggingface": True, # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+    },
+    "t5_small_human_attentive": {
+        "repo_name": "AbstractPhil/T5-Small-Human-Attentive",
+        "name": "t5_small_human_attentive",
+        "type": "t5",
+        "use_huggingface": True,
+        # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+        # the necessary config is present here for posterity in case it fails to load from HuggingFace.
+        "subfolder": "",
+        "tokenizer": "t5-small",
+        "file_name": "model.safetensors",
+        "config": {
+          "architectures": [
+            "T5ForConditionalGeneration"
+          ],
+          "classifier_dropout": 0.0,
+          "d_ff": 2048,
+          "d_kv": 64,
+          "d_model": 512,
+          "decoder_start_token_id": 0,
+          "dense_act_fn": "relu",
+          "dropout_rate": 0.1,
+          "eos_token_id": 1,
+          "feed_forward_proj": "relu",
+          "initializer_factor": 1.0,
+          "is_encoder_decoder": True,
+          "is_gated_act": False,
+          "layer_norm_epsilon": 1e-06,
+          "model_type": "t5",
+          "n_positions": 512,
+          "num_decoder_layers": 6,
+          "num_heads": 8,
+          "num_layers": 6,
+          "output_past": True,
+          "pad_token_id": 0,
+          "relative_attention_max_distance": 128,
+          "relative_attention_num_buckets": 32,
+          "task_specific_params": {
+            "summarization": {
+              "early_stopping": True,
+              "length_penalty": 2.0,
+              "max_length": 200,
+              "min_length": 30,
+              "no_repeat_ngram_size": 3,
+              "num_beams": 4,
+              "prefix": "summarize: "
+            },
+            "translation_en_to_de": {
+              "early_stopping": True,
+              "max_length": 300,
+              "num_beams": 4,
+              "prefix": "translate English to German: "
+            },
+            "translation_en_to_fr": {
+              "early_stopping": True,
+              "max_length": 300,
+              "num_beams": 4,
+              "prefix": "translate English to French: "
+            },
+            "translation_en_to_ro": {
+              "early_stopping": True,
+              "max_length": 300,
+              "num_beams": 4,
+              "prefix": "translate English to Romanian: "
+            }
+          },
+          "torch_dtype": "float32",
+          "transformers_version": "4.51.3",
+          "use_cache": True,
+          "vocab_size": 32128
+        }
+
+    },
+    "t5_small_human_attentive_try2_pass2": {
+        "repo_name": "AbstractPhil/T5-Small-Human-Attentive-Try2-Pass2",
+        "name": "t5_small_human_attentive_try2_pass2",
+        "type": "t5",
+        "use_huggingface": True,
+        # defaults to simple loading from HuggingFace, if False, will use repo_name and subfolder
+        # the necessary config is present here for posterity in case it fails to load from HuggingFace.
+        "subfolder": "",
+        "tokenizer": "t5-small",
+        "file_name": "model.safetensors",
+        "config": {
+            "config_file_name": "config.json",
+            "architectures": [
+                "T5ForConditionalGeneration"
+            ],
+            "attention_dropout": 0.0,
+            "classifier_dropout": 0.0,
+            "d_ff": 2048,
+            "d_kv": 64,
+            "d_model": 512,
+            "decoder_start_token_id": 0,
+            "dense_act_fn": "relu",
+            "dropout_rate": 0.0,  # 0.3,                  # disable for generation
+            "eos_token_id": 1,
+            "feed_forward_proj": "relu",
+            "initializer_factor": 1.0,
+            "is_encoder_decoder": True,
+            "is_gated_act": False,
+            "layer_norm_epsilon": 1e-06,
+            "model_type": "t5",
+            "n_positions": 512,
+            "num_decoder_layers": 6,
+            "num_heads": 8,
+            "num_layers": 6,
+            "output_past": True,
+            "pad_token_id": 0,
+            "relative_attention_max_distance": 128,
+            "relative_attention_num_buckets": 32,
+            "task_specific_params": {
+                "caption": {
+                    "early_stopping": True,
+                    "length_penalty": 1.0,
+                    "max_length": 64,
+                    "num_beams": 4,
+                    "prefix": "caption: "
+                }
+            },
+            "torch_dtype": "float32",
+            "transformers_version": "4.51.3",
+            "use_cache": True,
+            "vocab_size": 32128
+        }
     },
     "t5_small_human_attentive_try2_pass3": {
         "repo_name": "AbstractPhil/T5-Small-Human-Attentive-Try2-Pass3",
@@ -616,7 +767,8 @@ ENCODER_CONFIGS = {
               "use_cache": True,
               "vocab_size": 32128
         }
-    }
+    },
+
 }
 
 

@@ -89,7 +89,6 @@ class ABS_ConcatPrompts:
         """
         return (prompt1 + concatenation_style + prompt2, )
 
-
 class ABS_DebugNode:
     # takes in anything and outputs it as a debug message
     @classmethod

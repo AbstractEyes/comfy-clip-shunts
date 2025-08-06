@@ -2,6 +2,8 @@ import logging
 from typing import Optional
 
 import torch
+from transformers import AutoConfig
+
 from comfy.sd import CLIP
 from ..model.configs import ShuntUtil
 
@@ -12,9 +14,11 @@ from ..model.model_manager import get_model_manager
 from ..model.configs import ENCODER_CONFIGS, ShuntData, EncoderData
 from ..utils.conditioning_shifter import ConditioningShifter
 
+
 from ..sampler.formulas.folding import FoldingKernels
 from ..sampler.formulas.schedules import SchedulerModes
 from ..utils.conditioning_helper import ConditioningHelper, UsefulConditioning, ModelSlicer
+
 
 class EncoderStackerNode:
     """
@@ -1284,6 +1288,7 @@ class EncoderLoader:
                     list(ENCODER_CONFIGS.keys()),
                     {"default": "bert-beatrix-2048", "tooltip": "Select the encoder model to load."}
                 ),
+
                 "local_path": ("STRING", {"default": ""}),
                 "max_length": ("INT", {"default": 512, "min": 1, "max": 8192}),
                 "padding": (["max_length", "longest", "do_not_pad"], {"default": "max_length"}),
@@ -1324,7 +1329,13 @@ class EncoderLoader:
         model_type = model_config.get("type", "unknown")
         model_source = local_path or model_config.get("repo_name", model_name)
         model_id = f"{model_type}_{model_name}_{hashlib.sha1(model_source.encode()).hexdigest()[:10]}"
+        hf_config_dict = None
+        if "use_huggingface" in model_config.keys():
+            repo = model_config.get("config_repo", model_source)
+            hf_config_dict = AutoConfig.from_pretrained(repo, trust_remote_code=trust_remote_code).to_dict()
+            logger.info(f"Loaded HuggingFace config for {model_name} config repo of {repo}: {hf_config_dict}")
 
+        model_config.setdefault("config", {}).update(hf_config_dict or {})
 
         dtype = torch.get_default_dtype() if dtype == "default" else {
             "float64": torch.float64,
@@ -1358,6 +1369,7 @@ class EncoderLoader:
             "model_id": model_id,
             "model_type": model_type,
             "model_name": model_name,
+            "model_config": model_config,
             "source": model_source,
             "device": str(device),
             "trust_remote_code": trust_remote_code,

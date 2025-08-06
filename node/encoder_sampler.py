@@ -331,6 +331,7 @@ class ClipExperimentalConfigNode:
     def INPUT_TYPES(cls):
         return {
             "required": {
+                "use_entropy_scaling":   ("BOOLEAN", {"default": False}),
                 "use_rope_resonance":    ("BOOLEAN", {"default": False}),
                 "cfg_scale":             ("FLOAT",   {"default": 1.0, "min": 0.0, "max": 100.0}),
                 "guidance_scale":        ("FLOAT",   {"default": 5.0, "min": 0.0, "max": 100.0}),
@@ -348,12 +349,14 @@ class ClipExperimentalConfigNode:
     CATEGORY     = "encoder/config"
 
     def configure(self,
+                  use_entropy_scaling,
                   use_rope_resonance,
                   cfg_scale,
                   guidance_scale,
                   pos_embedding,
                   normalization_anchor):
         return ({
+            "use_entropy_scaling":    use_entropy_scaling,
             "use_rope_resonance":     use_rope_resonance,
             "cfg_scale":              cfg_scale,
             "guidance_scale":         guidance_scale,
@@ -760,7 +763,8 @@ class ClipSamplerConfigured:
         }
 
         experimental_cfg = experimental_cfg or {
-            "use_alpha_mask": True,
+            "use_entropy_scaling": False,
+            "use_alpha_mask": False,
             "cosine_similarity_gate": False,
             "use_rose_similarity": False,
             "use_rope_resonance": False,
@@ -799,4 +803,132 @@ class ClipSamplerConfigured:
         )
 
         return processor.run()
+
+
+
+
+import torch
+from typing import Optional, Tuple
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+import logging
+
+from ..model.model_manager import get_model_manager
+
+class T5SummarizeCaption:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "prompt": ("STRING", {"default": "", "multiline": True}),
+                "encoder_pipe": ("ENCODER_PIPE", {}),
+            },
+            "optional": {
+                "command": ("STRING", {"default": "Compress and keep visual clues and object positions:"}),
+                "max_tokens": ("INT", {"default": 512, "min": 8, "max": 512}),
+                "min_length": ("INT", {"default": 10, "min": 1, "max": 512}),
+                "do_sample": ("BOOLEAN", {"default": False, "tooltip": "Use sampling instead of greedy decoding."}),
+                "regen_on_short": ("BOOLEAN", {"default": True}),
+                "max_repeats": ("INT", {"default": 3, "min": 1, "max": 10, "tooltip": "Maximum number of times to repeat the generation."}),
+                "folding_repeats": ("BOOLEAN", {"default": False, "tooltip": "Use folding to repeat the generation."}),
+                "seed": ("INT", {"default": -1, "min": -1, "max": 2**32-1}),
+                "early_stopping": ( "BOOLEAN", {"default": True, "tooltip": "Stop generation early if the model predicts the end token."}),
+                "length_penalty": ( "FLOAT", {"default": 2.0, "min": 0.0, "max": 10.0, "tooltip": "Penalty for longer sequences."}),
+                "no_repeat_ngram_size": ( "INT", {"default": 3, "min": 1, "max": 10, "tooltip": "Prevent repetition of n-grams of this size."}),
+                "num_beams": ( "INT", {"default": 4, "min": 1, "max": 10, "tooltip": "Number of beams for beam search."}),
+                "device": (["cpu", "cuda", "mps"], { "default": "cuda" if torch.cuda.is_available() else "cpu" }),
+                "offload_device": (["cpu", "cuda", "mps"], { "default": "cpu" }),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("summary",)
+    FUNCTION = "summarize"
+    CATEGORY = "ABS/Captioning"
+
+    def summarize(self,
+                  prompt: str,
+                  encoder_pipe,
+                  command: str = "Compress and keep visual clues and object positions:",
+                  max_tokens: int = 512,
+                  min_length: int = 10,
+                  do_sample: bool = False,
+                  regen_on_short: bool = True,
+                  max_repeats: int = 3,
+                  folding_repeats: bool = False,
+                  seed: int = -1,
+                  early_stopping = True,
+                  length_penalty = 2.0,
+                  no_repeat_ngram_size = 3,
+                  num_beams = 4,
+                  device = "cuda",
+                  offload_device="cpu") -> Tuple[str]:
+
+        device_obj = torch.device(device)
+        model_manager = get_model_manager()
+
+        model_name = encoder_pipe[0].get("config", {}).get("source", "unknown")
+        logger.info(f"[T5SummarizeCaption] Using model: {model_name}")
+
+        tokenizer = encoder_pipe[0].get("tokenizer", None)
+        model = encoder_pipe[0].get("model", None)
+        model.to(device_obj)
+
+        tasks = encoder_pipe[0].get("config", {}).get("model_config", {}).get("config", {}).get("task_specific_params", {})
+        logger.info(f"[T5SummarizeCaption] Task-specific parameters: {tasks}")
+        task = tasks.get(command.strip().replace(":", ""), {})
+        logger.info(f"[T5SummarizeCaption] Using command: {command.strip()}")
+        if task is not None:
+            logger.info(f"[T5SummarizeCaption] Found task-specific parameters for command: {command.strip()}")
+            logger.info(f"[T5SummarizeCaption] Task parameters: {task}")
+
+        prompt_full = f"{command.strip()} {prompt.strip()}"
+        if seed != -1:
+            torch.manual_seed(seed)
+
+        input_ids = tokenizer(prompt_full, return_tensors="pt", truncation=True).input_ids.to(device_obj)
+
+        summary = ""
+        retries = 0
+
+        while retries < max_repeats:
+            output_ids = model.generate(
+                input_ids,
+                max_length=task.get("max_length", max_tokens),
+                min_length=task.get("min_length", min_length),
+                early_stopping=task.get("early_stopping", early_stopping),
+                length_penalty=task.get("length_penalty", length_penalty),
+                no_repeat_ngram_size=task.get("no_repeat_ngram_size", no_repeat_ngram_size),
+                num_beams=task.get("num_beams", num_beams),
+                do_sample=task.get("do_sample", do_sample),
+                num_return_sequences=1
+            )[0]
+
+            summary = tokenizer.decode(output_ids, skip_special_tokens=True).strip()
+            logger.info(f"[T5SummarizeCaption] Generated summary: {summary}")
+            logger.info(f"[T5SummarizeCaption]")
+
+            if not regen_on_short:
+                break
+            if len(summary.split()) >= min_length:
+                break
+
+            retries += 1
+            logger.info(f"[T5SummarizeCaption] Retry {retries}/{max_repeats} — Too short: {len(summary.split())} tokens")
+
+            # If using folding mode, concatenate original prompt
+            if folding_repeats:
+                length_penalty = length_penalty * 0.9  # Adjust length penalty for folding
+                no_repeat_ngram_size = no_repeat_ngram_size + 1  # Increase n-gram size to avoid repetition
+                num_beams = num_beams + 1  # Increase beams to explore more options
+                logger.info(f"[T5SummarizeCaption] Using folding mode, concatenating original prompt {prompt}")
+                summary = summary.replace(command.strip(), "").strip()
+                logger.info(f"[T5SummarizeCaption] Summary after folding: {summary}")
+                prompt_full = f"{command.strip()} {summary} {prompt*retries}"
+                logger.info(f"[T5SummarizeCaption] New prompt for next iteration: {prompt_full}")
+                input_ids = tokenizer(prompt_full, return_tensors="pt", truncation=False).input_ids.to(device_obj)
+
+        model_manager.unload_model(model_name)
+        model_manager.clear_all()
+
+        return (summary,)
 

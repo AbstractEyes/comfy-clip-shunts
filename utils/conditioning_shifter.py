@@ -129,7 +129,7 @@ class ConditioningShifter:
                 ).last_hidden_state
             else:
                 raise ValueError(f"Unsupported encoder type: {model_type}")
-            #model.to("cpu")
+            model.to("cpu")
 
         # 4) Optional projection to target dimensions
         if sampler_cfg and sampler_cfg.get("force_projection_in", False):

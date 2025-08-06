@@ -54,7 +54,9 @@ from .node.encoder_sampler import (
     ClipProjectionConfigNode,
     ClipExperimentalConfigNode,
     ClipSlidingWindowConfig,
-    ClipFoldingStackConfig
+    ClipFoldingStackConfig,
+    T5SummarizeCaption
+
 )
 
 
@@ -307,6 +309,8 @@ NODE_CLASS_MAPPINGS = {
     "ClipExperimentalConfigNode": ClipExperimentalConfigNode,
     "ClipSlidingWindowConfig": ClipSlidingWindowConfig,
     "ClipFoldingStackConfig": ClipFoldingStackConfig,
+
+    "T5SummarizeCaption": T5SummarizeCaption,  # Node for summarizing captions using T5
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -427,6 +431,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ClipSlidingWindowConfig": "🖼️ Clip Sliding Window Config",
     "ClipFoldingStackConfig": "📚 Clip Folding Stack Config",
 
+    "T5SummarizeCaption": "📝 T5 Summarize Caption",  # Node for summarizing captions using T5
 
 }
 
