@@ -45,7 +45,7 @@ class ZipperFolding(FoldingKernel):
 
 class RippleFolding(FoldingKernel):
     def apply(self, a, b, t, alpha=None, context=None):
-        freq = context.get("freq", 2.0) if context else 2.0
+        freq = context.get("ripple_freq", 2.0) if context else 2.0
         ripple = torch.sin(freq * torch.pi * t).unsqueeze(-1)
         return a + ripple * (b - a)
 
@@ -59,7 +59,7 @@ class SurgeFolding(FoldingKernel):
 
 class CollapseFolding(FoldingKernel):
     def apply(self, a, b, t, alpha=None, context=None):
-        rate = context.get("rate", 1.0) if context else 1.0
+        rate = context.get("collapse_rate", 1.0) if context else 1.0
         collapse = 1 - torch.exp(-rate * (1 - t))
         return b * collapse.unsqueeze(-1)
 
@@ -173,8 +173,10 @@ class HiveFolding(FoldingKernel):
 # -- 5. A_Walk: Dream‑based time walk ----------------------------------------
 class AWalkFolding(FoldingKernel):
     def apply(self, a, b, t, alpha=None, context=None):
-        drift = torch.sin(t * math.pi).unsqueeze(-1) ** 3
-        noise = torch.randn_like(a) * 0.03
+        walk_random = context.get("walk_random", 0.03) if context else 0.03
+        walk_speed = context.get("walk_speed", 3) if context else 3
+        drift = torch.sin(t * math.pi).unsqueeze(-1) ** walk_speed
+        noise = torch.randn_like(a) * walk_random
         return a + drift * (b - a + noise)
 
 

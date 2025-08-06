@@ -242,15 +242,23 @@ class ClipHyperConfigNode:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "top_k":                ("FLOAT", {"default": 50.0, "min": 0.0, "max": 10_000.0}),
-                "top_p":                ("FLOAT", {"default": 0.9,  "min": 0.0, "max": 1.0}),
-                "temperature":          ("FLOAT", {"default": 5.0,  "min": 0.0, "max": 50.0}),
-                "tau":                  ("FLOAT", {"default": 5.0,  "min": 0.0, "max": 50.0}),
-                "wave_freq":            ("FLOAT", {"default": 0.5}),
-                "pulse_freq":           ("FLOAT", {"default": 5.0}),
-                "cascade_rate":         ("FLOAT", {"default": 4.0}),
-                "shockwave_center":     ("FLOAT", {"default": 0.5}),
-                "shockwave_variance":   ("FLOAT", {"default": 0.01}),
+                "top_k":                ("FLOAT", {"default": 50.00, "min": 0.0, "max": 10_000.0}),
+                "top_p":                ("FLOAT", {"default": 0.90,  "min": 0.0, "max": 1.0}),
+                "temperature":          ("FLOAT", {"default": 5.00,  "min": 0.0, "max": 50.0}),
+                "tau":                  ("FLOAT", {"default": 5.00,  "min": 0.0, "max": 50.0}),
+                "walk_random":          ("FLOAT", {"default": 0.03, "step": 0.01, "tooltip": "Enable random walk during sampling."}),
+                "walk_speed":           ("FLOAT", {"default": 3.00, "tooltip": "Speed of random walk."}),
+                "surge_intensity":      ("FLOAT", {"default": 0.50, "min": 0.00, "max": 1.00, "tooltip": "Intensity of surge effect."}),
+                "cascade_steps":        ("FLOAT", {"default": 4.00}),
+                "shockwave_center":     ("FLOAT", {"default": 5.00}),
+                "shockwave_variance":   ("FLOAT", {"default": 0.01, "step": 0.01}),
+                "shiva_cool":           ("FLOAT", {"default": 4.00, "tooltip": "Enable shiva cool mode for folding."}),
+                "ifrit_freq":           ("FLOAT", {"default": 4.00, "tooltip": "Frequency for Ifrit mode."}),
+                "ifrit_amp":            ("FLOAT", {"default": 1.00, "tooltip": "Amplitude for Ifrit mode."}),
+                "gilgamesh_axes_count": ("INT",   {"default": 3, "min": 1, "max": 10, "tooltip": "Number of axes for Gilgamesh mode."}),
+                "collapse_rate":        ("FLOAT", {"default": 1.00, "tooltip": "Rate of collapse for Collapse mode."}),
+                "ripple_freq":          ("FLOAT", {"default": 2.00, "tooltip": "Frequency for Ripple mode."}),
+                "zeus_force":           ("FLOAT", {"default": 10.00, "tooltip": "Force of Zeus mode."}),
             }
         }
 
@@ -264,21 +272,37 @@ class ClipHyperConfigNode:
                   top_p,
                   temperature,
                   tau,
-                  wave_freq=0.5,
-                  pulse_freq=5.0,
-                  cascade_rate=4.0,
-                  shockwave_center=0.5,
-                  shockwave_variance=0.01):
+                    walk_random=0.03,
+                    walk_speed=3.0,
+                    surge_intensity=5.0,
+                    cascade_steps=4.0,
+                    shockwave_center=0.5,
+                    shockwave_variance=0.01,
+                    shiva_cool=4.0,
+                    ifrit_freq=4.0,
+                    ifrit_amp=2.0,
+                    gilgamesh_axes_count=5,
+                    collapse_rate=1.0,
+                    ripple_freq=2.0,
+                    zeus_force=10.0):
         return ({
             "top_k":      top_k,
             "top_p":      top_p,
             "temperature":temperature,
             "tau":        tau,
-            "wave_freq":  wave_freq,
-            "pulse_freq": pulse_freq,
-            "cascade_rate": cascade_rate,
+            "walk_random": walk_random,
+            "walk_speed": walk_speed,
+            "surge_intensity": surge_intensity,
+            "cascade_steps": cascade_steps,
             "shockwave_center": shockwave_center,
             "shockwave_variance": shockwave_variance,
+            "shiva_cool": shiva_cool,
+            "ifrit_freq": ifrit_freq,
+            "ifrit_amp":  ifrit_amp,
+            "gilgamesh_axes_count": gilgamesh_axes_count,
+            "collapse_rate": collapse_rate,
+            "ripple_freq": ripple_freq,
+            "zeus_force": zeus_force,
         },)
 
 
@@ -744,6 +768,15 @@ class ClipSamplerConfigured:
             "padding_mode": "sparse",
             "pooling_mode": "bilinear",
             "steps": 100,
+            "passes": 1,
+            "conv_dim": 2,
+            "similarity_threshold": 0.5,
+            "tree_linkage_method": "centroid",
+            "blur_sigma": 0.0,
+            "thresh": 0.5,
+            "bottom_k_frac": 0.25,
+            "hard_bottom_k": False,
+
         }
 
         scheduler_hyper_cfg = scheduler_hyper_cfg or {
@@ -751,6 +784,19 @@ class ClipSamplerConfigured:
             "top_p": 0.9,
             "temperature": 5.0,
             "tau": 5.0,
+            "walk_random": 0.03,
+            "walk_speed": 3.0,
+            "surge_intensity": 5.0,
+            "cascade_steps": 4.0,
+            "shockwave_center": 0.5,
+            "shockwave_variance": 0.01,
+            "shiva_cool": 4.0,
+            "ifrit_freq": 4.0,
+            "ifrit_amp": 1.0,
+            "gilgamesh_axes_count": 5,
+            "collapse_rate": 1.0,
+            "ripple_freq": 2.0,
+            "zeus_force": 10.0,
         }
 
         projection_cfg = projection_cfg or {
