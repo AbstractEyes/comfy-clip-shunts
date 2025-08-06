@@ -132,6 +132,24 @@ def make_clip_pipeline(clip, model_type: str = "unknown") -> dict:
 
 from ..abs_sd.CLIP import CLIPType, load_clip
 
+
+def attention_multiply(attn, model, q, k, v, out):
+    m = model.clone()
+    sd = model.model_state_dict()
+
+    for key in sd:
+        if key.endswith("{}.to_q.bias".format(attn)) or key.endswith("{}.to_q.weight".format(attn)):
+            m.add_patches({key: (None,)}, 0.0, q)
+        if key.endswith("{}.to_k.bias".format(attn)) or key.endswith("{}.to_k.weight".format(attn)):
+            m.add_patches({key: (None,)}, 0.0, k)
+        if key.endswith("{}.to_v.bias".format(attn)) or key.endswith("{}.to_v.weight".format(attn)):
+            m.add_patches({key: (None,)}, 0.0, v)
+        if key.endswith("{}.to_out.0.bias".format(attn)) or key.endswith("{}.to_out.0.weight".format(attn)):
+            m.add_patches({key: (None,)}, 0.0, out)
+
+    return m
+
+
 class ClipEncoderLoader:
     @classmethod
     def INPUT_TYPES(cls):
@@ -158,6 +176,12 @@ class ClipEncoderLoader:
                 ),
                 "clip_set_last_layer": ("INT", {"default": -2, "min": -69696, "max": -1, "step": -1,
                                                 "tooltip": "Set the last layer of the CLIP model to this value. 0 means no change."}),
+                "alpha_influence": ("FLOAT", {"default": 1.000, "min": -10000.000, "max": 10000.000, "step": 0.001,}),
+                "trajectory_impact": ("FLOAT", {"default": 1.000, "min": -10000.000, "max": 10000.000, "step": 0.001,}),
+                "low_attn_weight": ("FLOAT", {"default": 1.000, "min": -10000.000, "max": 10000.000, "step": 0.001,}),
+                "mid_attn_weight": ("FLOAT", {"default": 1.000, "min": -10000.000, "max": 10000.000, "step": 0.001,}),
+                "high_attn_weight": ("FLOAT", {"default": 1.000, "min": -10000.000, "max": 10000.000, "step": 0.001,}),
+                "out_attn_weight": ("FLOAT", {"default": 1.000, "min": -10000.000, "max": 10000.000, "step": 0.001,}),
             },
             "optional": {
                 "device": (
@@ -168,14 +192,25 @@ class ClipEncoderLoader:
             }
         }
 
-    RETURN_TYPES = ("CLIP", "ENCODER_PIPE")
-    RETURN_NAMES = ("clip", "encoder_pipe")
+    RETURN_TYPES = ("CLIP", "ENCODER_PIPE", "CLIP")
+    RETURN_NAMES = ("clip", "encoder_pipe", "attn_clip")
     FUNCTION = "load_clip_internal"
     CATEGORY = "advanced/loaders"
     DESCRIPTION = "[ABS] Loads a single CLIP and returns both CLIP and ENCODER_PIPE for symbolic pipeline use."
 
 
-    def load_clip_internal(self, clip_name, model_type, encoder_type, device="default", clip_set_last_layer=-1):
+    def load_clip_internal(self,
+                           clip_name,
+                           model_type,
+                           encoder_type,
+                           device="default",
+                           clip_set_last_layer=-1,
+                           alpha_influence=1.0,
+                           trajectory_impact=1.0,
+                           low_attn_weight=1.0,
+                           mid_attn_weight=1.0,
+                           high_attn_weight=1.0,
+                           out_attn_weight=1.0):
         clip_type = getattr(CLIPType, model_type.upper(), CLIPType.STABLE_DIFFUSION)
 
         model_options = {}
@@ -190,14 +225,31 @@ class ClipEncoderLoader:
             model_options=model_options
         )
         clip.clip_layer(clip_set_last_layer)  # Set to -1 by default, meaning no change
+        m = clip.clone()
+
+        sd = m.patcher.model_state_dict()
+
+        for key in sd:
+            if key.endswith("self_attn.q_proj.weight") or key.endswith("self_attn.q_proj.bias"):
+                m.add_patches({key: (None,)}, 0.0, low_attn_weight)
+            if key.endswith("self_attn.k_proj.weight") or key.endswith("self_attn.k_proj.bias"):
+                m.add_patches({key: (None,)}, 0.0, mid_attn_weight)
+            if key.endswith("self_attn.v_proj.weight") or key.endswith("self_attn.v_proj.bias"):
+                m.add_patches({key: (None,)}, 0.0, high_attn_weight)
+            if key.endswith("self_attn.out_proj.weight") or key.endswith("self_attn.out_proj.bias"):
+                m.add_patches({key: (None,)}, 0.0, out_attn_weight)
 
         encoder_pipe = [{
-            "clip": clip,
+            "clip": m,
             "type": encoder_type,
-            "tokenizer": clip.tokenizer,
+            "tokenizer": m.tokenizer,
+            "config": {
+                "alpha_influence": alpha_influence,
+                "trajectory_impact": trajectory_impact,
+            },
         }]
 
-        return clip, encoder_pipe
+        return clip, encoder_pipe, m
 
 
 

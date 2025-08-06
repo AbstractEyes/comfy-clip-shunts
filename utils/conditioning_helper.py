@@ -1,5 +1,6 @@
 import torch
 import logging
+from .conditioning_shifter import ConditioningShifter, ShiftConfig
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ MODEL_EXPECTATIONS = {
 
 
 import torch
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Tuple, Any
 import logging
 
 
@@ -166,6 +167,151 @@ class ConditioningHelper:
     This is a helper util meant to provide common functionality for conditioning nodes.
     """
 
+    # In conditioning_helper.py
+
+    @staticmethod
+    def pack_conditioning_bundle(
+            folded_outputs: Dict[str, List[torch.Tensor]],
+            cfg: Dict[str, Any],
+            device: torch.device,
+            mode: str = "sdxl"
+    ) -> List[List]:
+        """
+        Reconstructs the full conditioning list from folded outputs.
+        Each item: [cond_tensor, {"pooled_output": pooled_tensor}]
+        """
+        if not folded_outputs:
+            raise RuntimeError("No folded outputs to assemble.")
+
+        keys = {
+            "sdxl": ["clip_l", "clip_g"],
+            "sd1": ["clip_l"],
+            "flux": ["t5"],
+        }.get(mode, list(folded_outputs.keys()))
+
+        encoder_count = max(len(folded_outputs.get(k, [])) for k in keys)
+        result = []
+
+        for i in range(encoder_count):
+            parts = []
+            for key in keys:
+                if i < len(folded_outputs.get(key, [])):
+                    parts.append(folded_outputs[key][i])
+
+            if not parts:
+                continue
+
+            # Trim all slices to min token length
+            token_lengths = [p.shape[1] for p in parts]
+            target_T = min(token_lengths)
+            parts = [p[:, :target_T, :] for p in parts]
+
+            # Concatenate across feature dim
+            folded = torch.cat(parts, dim=-1)
+            B, T, D = folded.shape
+
+            # Patch start/end tokens with zero vectors
+            start = torch.zeros(B, 1, D, device=device)
+            end = torch.zeros(B, 1, D, device=device)
+            body = folded[:, 1:-1, :]
+            patched = torch.cat([start, body, end], dim=1)
+
+            # Extract pooled vector depending on mode
+            if mode == "sdxl":
+                pooled = patched[:, -1, 768:2048]
+            elif mode == "sd1":
+                pooled = patched[:, -1, :768]
+            elif mode == "flux":
+                pooled = patched[:, -1, :]
+            else:
+                pooled = patched[:, -1, :]
+
+            result.append([patched.cpu().clone(), {"pooled_output": pooled.cpu().clone()}])
+
+        return result
+    @staticmethod
+    def schedule_and_extract_clip_conditioning(
+            clip_model,
+            resolved_prompt: str,
+            config: dict,
+            device: str,
+            mode: str = "sdxl"
+    ) -> Tuple[torch.Tensor, Dict[str, Optional[torch.Tensor]]]:
+        """
+        Encodes prompt via tokenizer + scheduler path, returning cond tensor and optional pooled.
+        Pulls token limits and pooling from config dict.
+        """
+        features = None
+        pool = None
+
+        tokenizer_options = {
+            "padding": "max_length",
+            "truncation": True,
+            "max_tokens": config.get("context_window_size", 512),
+            "max_length": config.get("context_window_size", 512),
+            "min_length": config.get("context_window_size", 512),
+        }
+
+        if mode == "flux":
+            tokens = clip_model.tokenize(resolved_prompt, tokenizer_options=tokenizer_options)
+            full_cond = clip_model.encode_from_tokens_scheduled(tokens, use_full=True)
+            cond = full_cond.get("t5")
+            features = full_cond.get("clip_l")
+            pool = None
+
+        elif mode == "full_no_pool":
+            tokens = clip_model.tokenize(resolved_prompt)
+            raw = clip_model.encode_from_tokens_scheduled(tokens)
+            cond = raw[0][0]
+            return cond.to(device), {"pooled_output": None}
+
+        else:
+            tokens = clip_model.tokenize(resolved_prompt, tokenizer_options=tokenizer_options)
+            raw = clip_model.encode_from_tokens_scheduled(tokens)
+            cond = raw[0][0]
+            pool = raw[0][1]
+
+        return cond.to(device), {
+            "features": features,
+            "pooled_output": pool.get("pooled_output", None) if pool else None
+        }
+
+    @staticmethod
+    def extract_symbolic_field(pipe: dict, resolved_prompt: str, config: dict, device: str) -> torch.Tensor:
+        """
+        Extracts symbolic or CLIP-style embeddings from a given encoder pipe and prompt.
+        Uses config dict instead of ShiftConfig.
+        """
+        encoder_type = pipe.get("type", "unknown").lower()
+        clip_like = encoder_type in [
+            "clip_l", "clip_g", "clip_h", "clip_vision", "t5", "llama", "t5_unchained"
+        ]
+
+        if clip_like:
+            clip_model = pipe["clip"]
+            max_tokens = config.get("context_window_size", 77 if encoder_type != "t5" else 512)
+
+            tokens = clip_model.tokenize(resolved_prompt, tokenizer_options={
+                "padding": "max_length",
+                "truncation": True,
+                "max_tokens": max_tokens
+            })
+
+            with torch.no_grad():
+                full_cond = clip_model.encode_from_tokens_scheduled(tokens)
+                cond = full_cond[0][0]
+                if cond is None:
+                    raise ValueError("Could not extract CLIP condition from scheduled encoding.")
+            return cond.to(device)
+
+
+        else:
+            if "model" in pipe:
+                pipe["model"].to(device)
+
+            # Direct dict dispatch — no ShiftConfig
+            return ConditioningShifter.extract_encoder_embeddings(pipe, device, config).to(device)
+
     @staticmethod
     def convert_conditioning(conditioning: list):
         """
@@ -218,6 +364,7 @@ from typing import List, Dict, Union
 import logging
 
 
+
 class ModelSlicer:
     @staticmethod
     def slice(
@@ -231,6 +378,7 @@ class ModelSlicer:
         """
         uc = conds if isinstance(conds, UsefulConditioning) else UsefulConditioning(conds)
         expectation = MODEL_EXPECTATIONS.get(model_type)
+
 
         if not expectation:
             raise ValueError(f"[ModelSlicer] No expectations found for model type: {model_type}")
@@ -257,12 +405,14 @@ class ModelSlicer:
                     logger.warning(f"[ModelSlicer] Unknown scope: {scope}, skipping key: {key}")
                     continue
 
-                tagged_meta = dict(meta)  # full clone
+                tagged_meta = dict(meta)  # clone metadata
                 tagged_meta.setdefault("slicer_info", {})
                 tagged_meta["slicer_info"].update({
                     "key": key,
                     "origin": model_type,
                     "scope": scope,
+                    "start": start,
+                    "end": end,
                 })
 
                 if pooled is not None and "pooled_output" not in tagged_meta:

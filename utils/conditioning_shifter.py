@@ -70,77 +70,75 @@ class AdapterOutput:
     attn_m2c: Optional[torch.Tensor] = None
 
 
+
 class ConditioningShifter:
+
     @staticmethod
     def extract_encoder_embeddings(
-        encoder_pipe: Dict[str, Any],
-        device: torch.device,
-        shift_config: Optional[ShiftConfig | dict[str, Any]] = None,
-        sampler_cfg: Dict[str, Any] = None
+            encoder_pipe: Dict[str, Any],
+            device: torch.device,
+            config: Dict[str, Any],
+            sampler_cfg: Optional[Dict[str, Any]] = None
     ) -> torch.Tensor:
         """
-        1) Clean prompt of any shunt tokens
-        2) Tokenize + encode via T5/BERT
-        3) Optionally project to sampler_cfg['projection_dims_in']
+        Extracts encoder embeddings from a symbolic pipe.
+        1. Cleans prompt
+        2. Tokenizes and encodes via BERT/T5
+        3. Optionally projects to target dimensions
         """
-        # 1) prompt cleanup
-        if isinstance(shift_config, dict):
-            shift_config = ShiftConfig(**shift_config)
-        raw_prompt = shift_config.prompt
-        prompt = raw_prompt#RemoveSpecialTokens.remove_special_tokens(raw_prompt)
 
+        # 1) Prompt resolution and cleaning
+        prompt = config.get("context_window", "")
+        # NOTE: could call RemoveSpecialTokens.remove_special_tokens(prompt) here if needed
 
-        # 2) tokenize & encode
+        # 2) Tokenize & encode
         tokenizer = encoder_pipe["tokenizer"]
-        model     = encoder_pipe["model"]
-        cfg       = encoder_pipe["config"]["config"]  # your existing mini‐config
+        model = encoder_pipe["model"]
+        pipe_cfg = encoder_pipe["config"]["config"]
+        model_type = encoder_pipe["config"].get("model_type", "")
+        name = encoder_pipe.get("name", "").lower()
 
         tokens = tokenizer(
             prompt,
             return_tensors="pt",
-            padding=cfg.get("padding","max_length"),
+            padding=pipe_cfg.get("padding", "max_length"),
             truncation=False,
-            max_length=cfg.get("max_tokens",cfg.get("max_length", 512)),
+            max_length=pipe_cfg.get("max_tokens", pipe_cfg.get("max_length", 512)),
         )
 
-        if "bert" in encoder_pipe.get("name", ""):
-            # BERT tokenizers use special tokens like [CLS] and [SEP]
-            input_ids = ConditioningShifter.apply_gap_spacer(tokens["input_ids"], tokenizer, interval=77)
-        else:
-            input_ids = tokens["input_ids"]
+        input_ids = tokens["input_ids"]
+        if "bert" in name:
+            input_ids = ConditioningShifter.apply_gap_spacer(input_ids, tokenizer, interval=77)
 
         input_ids = input_ids.to(device)
         attention_mask = tokens["attention_mask"].to(device)
 
-
+        # 3) Encode via model
         with torch.no_grad():
             model.to(device)
-            mtype = encoder_pipe["config"].get("model_type","")
-            name = encoder_pipe.get("name", "").lower()
-            if "t5" in mtype:
-                embeddings = model.encoder(input_ids=input_ids,
-                                           attention_mask=attention_mask
+            if "t5" in model_type:
+                embeddings = model.encoder(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask
                 ).last_hidden_state
-            elif mtype in ("bert","nomic_bert"):
-                # --- Auto-enable RoPE spiral if RoPE-aware encoder is used ---
-
-                embeddings = model(input_ids=input_ids,
-                                   attention_mask=attention_mask,
-                                   return_dict=True
+            elif model_type in ("bert", "nomic_bert"):
+                embeddings = model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    return_dict=True
                 ).last_hidden_state
             else:
-                raise ValueError(f"Unsupported encoder type {mtype!r}")
-            model.to("cpu")  # free GPU memory
+                raise ValueError(f"Unsupported encoder type: {model_type}")
+            #model.to("cpu")
 
-        # 3) optional input‐projection to match CLIP dims
+        # 4) Optional projection to target dimensions
         if sampler_cfg and sampler_cfg.get("force_projection_in", False):
             target_dims = sampler_cfg["projection_dims_in"]
             embeddings = ConditioningShifter._project_embeddings(
-                embeddings, target_dims, sampler_cfg["interpolation_method_in"]
+                embeddings, target_dims, sampler_cfg.get("interpolation_method_in", "linear")
             )
 
         return embeddings.to(device)
-
 
     @staticmethod
     def apply_gap_spacer(input_ids: torch.Tensor, tokenizer, interval: int = 77) -> torch.Tensor:

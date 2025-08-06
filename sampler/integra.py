@@ -59,39 +59,35 @@ class IntegraOrchestrator:
         self.override_context_window = stack.override_context_window
         self.context_window_size = stack.context_window_size
 
-
-
-    def walk_encoder_field(self,
-                           a: torch.Tensor,
-                           b: torch.Tensor,
-                           d: torch.Tensor) -> Tuple[torch.Tensor, Dict]:
+    def walk_encoder_field(
+            self,
+            a: torch.Tensor,
+            b: torch.Tensor,
+            d: torch.Tensor,
+            context=None  # ✅ Accept context
+    ) -> Tuple[torch.Tensor, Dict]:
         """
         Walks a full symbolic encoder field via sliding windows, governed by Integra.
         Returns recombined tensor and orchestration report.
         """
-        # prepare pooling, padding, scheduler, and folding kernel
-
         with torch.autocast(device_type=a.device.type, enabled=a.device.type != 'cpu'):
-            a, b, d = upscale_trio(a, b, d)  # Ensure all tensors are in the same dtype
+            a, b, d = upscale_trio(a, b, d)
             B, T_full, D = a.shape
-            limit = self.context_window_size if self.override_context_window else T_full
-            limit = min(limit, self.max_length)
+            limit = min(T_full, self.max_length)
             T = min(limit, T_full)
 
-            # Slice the initial context window (if override is active)
             a = a[:, :T, :]
             b = b[:, :T, :]
             d = d[:, :T, :]
 
             folds = []
             starts = self._compute_window_starts(T, a.squeeze(0))
-            # get alucard's t_steps
             steps = self.config.walker_config.t_steps
             pbar = ProgressBar(len(starts * steps))
+
             for i, start in enumerate(starts):
                 model_management.throw_exception_if_processing_interrupted()
                 end = start + self.window_size
-                # Clip bounds to avoid overrun
                 if end > T:
                     end = T
                     start = max(0, end - self.window_size)
@@ -99,25 +95,14 @@ class IntegraOrchestrator:
                 a_win = a[:, start:end, :].clone()
                 b_win = b[:, start:end, :].clone()
                 d_win = d[:, start:end, :].clone()
-                # mask the first and last token if the window to see but not utilize them
-                #if self.override_context:
-                #    a_win[:, 0, :] = -100.0  # Mask first token
-                #    a_win[:, -1, :] = -100.0
-                #    b_win[:, 0, :] = -100.0
-                #    b_win[:, -1, :] = -100.0
-                #    d_win[:, 0, :] = -100.0
-                #    d_win[:, -1, :] = -100.0
 
-                #logger.info(f"Window slice [{start}:{end}] a_win shape: {a_win.shape}")
-                folded = self.walker.walk(a_win, b_win, d_win, pbar=pbar)
-                #logger.info(f"Folded shape: {folded.shape}")
+                # ✅ Now passes context to walker
+                folded = self.walker.walk(a=a_win, b=b_win, d=d_win, pbar=pbar, context=context)
+
                 pbar.update(1)
                 folds.append((start, end, folded))
 
-            # Aggregate windowed output
-            #logger.info(f"Aggregating {len(folds)} folds with total tokens: {T_full}")
-            aggregated = self.aggregate(folds, T)
-
+            aggregated = self.aggregate(folds, T, config=context)
 
             return aggregated, {
                 "tokens_processed": T,
@@ -128,9 +113,9 @@ class IntegraOrchestrator:
                 "override_context_window": self.override_context_window
             }
 
-    def aggregate(self, folds, _) -> torch.Tensor:
+    def aggregate(self, folds, _, config=None) -> torch.Tensor:
         collapsed = [chunk.mean(0) for _, _, chunk in folds]
-        return self.pooling.apply(self, collapsed)
+        return self.pooling.apply(self, collapsed, config=config)
 
     # --- helper: build pad-mask for one window ----------------------------
     def _build_pad_mask(self,

@@ -27,10 +27,10 @@ def cosine_similarity(a: torch.Tensor, b: torch.Tensor, eps: float = 1e-8) -> to
 
 
 
-#def entropy(tensor: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-#    prob = F.softmax(tensor, dim=-1)
-#    log_prob = torch.log(prob + eps)
-#    return -(prob * log_prob).sum(dim=-1)
+def entropy(tensor: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    prob = F.softmax(tensor, dim=-1)
+    log_prob = torch.log(prob + eps)
+    return -(prob * log_prob).sum(dim=-1)
 
 
 import torch
@@ -57,7 +57,9 @@ def rose_score(
     relation: torch.Tensor,
     purpose: torch.Tensor,
     eps: float = 1e-8,
-    full: bool = False
+    full: bool = False,
+    magnitude: float = 1.0,
+    entropy_weight: float = 1.0,
 ) -> Union[torch.Tensor, Dict[str, Union[torch.Tensor, List[torch.Tensor]]]]:
     eps = max(eps, 1e-8)
     x =         legacy_normalize(x, eps)
@@ -107,6 +109,37 @@ def rose_score(
 
 import torch
 from typing import List, Dict, Union, Optional
+
+def rose_score_magnitude(
+    x: torch.Tensor,
+    need: torch.Tensor,
+    relation: torch.Tensor,
+    purpose: torch.Tensor,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """
+    Computes a magnitude-only Rose similarity score between `x` and `need`,
+    modulated by triadic reference vectors `relation` and `purpose`.
+
+    Output: [B, T]
+    """
+    # Normalize all inputs
+    x_n = F.normalize(x, dim=-1, eps=eps)
+    n_n = F.normalize(need, dim=-1, eps=eps)
+    r_n = F.normalize(relation, dim=-1, eps=eps)
+    p_n = F.normalize(purpose, dim=-1, eps=eps)
+
+    # Core directional cosine components
+    a_n = torch.cosine_similarity(x_n, n_n, dim=-1)     # similarity to need
+    a_r = torch.cosine_similarity(x_n, r_n, dim=-1)     # similarity to relation
+    a_p = torch.cosine_similarity(x_n, p_n, dim=-1)     # similarity to purpose
+
+    # Triadic magnitude score (no entropy)
+    r7 = (a_n + a_r + a_p) / 3.0                        # resonance magnitude average
+    r8 = x.norm(dim=-1)                                 # magnitude of symbolic field
+
+    return r7 * r8                                       # final score [B, T]
+
 
 def rose_score_flow(
     x: torch.Tensor,

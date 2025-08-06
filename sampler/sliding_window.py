@@ -25,7 +25,7 @@ from .formulas.modes import (
 @dataclass
 class ShuntStackConfig:
     # capitalize
-    context_window: bool = True
+    context_window: str = ""
     override_context_window: bool = True
     fold_steps: int = 4  # Number of folds to apply to the context window, cannot exceed number of windows
     padding_mode: str = "max_length"  # Padding mode for sequences
@@ -38,6 +38,7 @@ class ShuntStackConfig:
     folding: str = "sliding_window"
     padding: str = "max_length"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
+
 
     def __copy__(self):
         return ShuntStackConfig(

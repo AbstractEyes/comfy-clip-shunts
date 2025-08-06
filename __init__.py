@@ -45,8 +45,19 @@ from .node.encoder_nodes import (
 )
 
 from .node.encoder_sampler import (
+    # Importing the ClipSampler node for sampling encoders
     ClipSampler,
+    # now the configs
+    ClipSamplerConfigured,
+    ClipPromptConfig,
+    ClipHyperConfigNode,
+    ClipProjectionConfigNode,
+    ClipExperimentalConfigNode,
+    ClipSlidingWindowConfig,
+    ClipFoldingStackConfig
 )
+
+
 
 from .node.embedding_nodes import (
     ABS_LoadEmbedding,
@@ -287,6 +298,15 @@ NODE_CLASS_MAPPINGS = {
     # Testing and debugging nodes
     #"TestNewCondTypeNode": ConditioningSetDeviceNode,  # Unused, but ready for future use
     "ConditioningSelector": ConditioningSelector,  # Unused, but ready for future use
+
+    # Finalized CLIP nodes for production release
+    "ClipSamplerConfigured": ClipSamplerConfigured,
+    "ClipPromptConfig": ClipPromptConfig,
+    "ClipHyperConfigNode": ClipHyperConfigNode,
+    "ClipProjectionConfigNode": ClipProjectionConfigNode,
+    "ClipExperimentalConfigNode": ClipExperimentalConfigNode,
+    "ClipSlidingWindowConfig": ClipSlidingWindowConfig,
+    "ClipFoldingStackConfig": ClipFoldingStackConfig,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -398,6 +418,15 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     #"TestNewCondTypeNode": "🔍 Test New Conditioning Type",  # Unused, but ready for future use
     "ConditioningSelector": "🔍 Conditioning Selector",  # Unused, but ready for future use
 
+    # finalized CLIP nodes for production release
+    "ClipSamplerConfigured": "🎲 Clip Sampler Configured",
+    "ClipPromptConfig": "📝 Clip Prompt Config",
+    "ClipHyperConfigNode": "🎛️ Clip Hyper Config",
+    "ClipProjectionConfigNode": "📊 Clip Projection Config",
+    "ClipExperimentalConfigNode": "🔬 Clip Experimental Config",
+    "ClipSlidingWindowConfig": "🖼️ Clip Sliding Window Config",
+    "ClipFoldingStackConfig": "📚 Clip Folding Stack Config",
+
 
 }
 
@@ -427,6 +456,7 @@ try:
 except ImportError:
     logger.error("❌ platform is not installed. Please install it to use ABS Shunt Suite.")
     raise
+
 
 
 def print_system_summary():

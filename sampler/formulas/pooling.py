@@ -12,14 +12,6 @@ from .modes import FoldingPaddingTypes, FoldingPoolingTypes
 
 from scipy.cluster.hierarchy import linkage, leaves_list
 
-class WindowPoolingConfig:
-    """
-    Configuration class for WindowPooling.
-    This class defines the pooling mode and other parameters for the WindowPooling process.
-    """
-    def __init__(self, pooling_mode: FoldingPoolingTypes = FoldingPoolingTypes.AVERAGE):
-        self.pooling_mode = pooling_mode
-
 
 class WindowPooling:
     # takes in and aggregates the pooled embeddings from the folding process from alucard
@@ -74,58 +66,109 @@ class WindowPooling:
             return weighted.sum(dim=0) / (weights.sum() + 1e-6)
 
         elif self.pooling_mode == FoldingPoolingTypes.CONV2:
-            # 2D convolution pooling
+            # 2D convolution over symbolic steps × tokens
             steps, A, B, D = stack.shape
-            stack = stack.unsqueeze(1)
-            kernel = torch.ones(1, 1, 2, 2, device=stack.device) / 4.0
-            pooled = F.conv2d(stack, kernel, padding=1, groups=B)
-            return pooled.squeeze(1).mean(dim=0)
-        elif self.pooling_mode == FoldingPoolingTypes.CONV3:
-            # 3D convolution pooling
 
+            # Rearrange to [B, steps, A * D]
+            reshaped = stack.permute(2, 0, 1, 3)  # [B, steps, A, D]
+            B, S, A, D = reshaped.shape
+            reshaped = reshaped.reshape(B, S, A * D)  # [B, steps, flat]
+            reshaped = reshaped.unsqueeze(1)  # [B, 1, steps, flat]
+
+            # Convolution kernel
+            kernel = torch.ones(1, 1, 2, 1, device=stack.device) / 2.0
+
+            # Apply 2D convolution over (steps, features)
+            conv_out = F.conv2d(reshaped, kernel, padding=(1, 0))  # [B, 1, steps+1, A*D]
+
+            # Pad flat feature dim if needed
+            flat = conv_out.shape[-1]
+            pad = (D - (flat % D)) % D
+            if pad != 0:
+                conv_out = F.pad(conv_out, (0, pad), mode="constant", value=0.0)
+                flat += pad
+
+            # Restore shape
+            A_out = flat // D
+            conv_out = conv_out.squeeze(1).reshape(B, -1, A_out, D)  # [B, steps+1, A, D]
+
+            # Average across steps, then permute to [A, B, D]
+            return conv_out.mean(dim=1).permute(1, 0, 2)
+
+        elif self.pooling_mode == FoldingPoolingTypes.CONV3:
+            # 3D convolution across (steps, tokens, features)
             steps, A, B, D = stack.shape
-            stack = stack.unsqueeze(1)  # [B, 1, T, A, B, D]
-            kernel = torch.ones(1, 1, 2, 2, 2, device=stack.device) / 8.0
-            pooled = F.conv3d(stack, kernel, padding=1, groups=B)
-            return pooled.squeeze(1).mean(dim=0)
+
+            # Rearrange: [steps, A, B, D] → [B, 1, steps, A, D]
+            reshaped = stack.permute(2, 0, 1, 3).unsqueeze(1)  # [B, 1, steps, A, D]
+
+            # 3D kernel over (steps × A), leave D untouched
+            kernel = torch.ones(1, 1, 3, 3, 1, device=stack.device) / 9.0
+            padded = F.pad(reshaped, (0, 0, 1, 1, 1, 1))  # pad steps and A
+
+            conv_out = F.conv3d(padded, kernel)  # [B, 1, steps, A, D]
+
+            result = conv_out.squeeze(1).mean(dim=1)  # [B, A, D]
+            return result.permute(1, 0, 2)  # → [A, B, D]
+
         elif self.pooling_mode == FoldingPoolingTypes.CONV4:
             # 4D convolution pooling
+            # Simulated 4D convolution over (steps, tokens, features)
             steps, A, B, D = stack.shape
-            stack = stack.unsqueeze(1)
-            kernel = torch.ones(1, 1, 2, 2, 2, 2, device=stack.device) / 16.0
-            pooled = F.conv3d(stack, kernel, padding=1, groups=B)
-            return pooled.squeeze(1).mean(dim=0)
+
+            reshaped = stack.permute(2, 0, 1, 3).unsqueeze(1)  # [B, 1, steps, A, D]
+            padded = F.pad(reshaped, (1, 1, 1, 1, 1, 1))  # pad D, A, steps
+
+            kernel = torch.ones(1, 1, 3, 3, 3, device=stack.device) / 27.0
+
+            conv_out = F.conv3d(padded, kernel)  # [B, 1, steps, A, D]
+            result = conv_out.squeeze(1).mean(dim=1)  # [B, A, D]
+            return result.permute(1, 0, 2)  # → [A, B, D]
+
 
         elif self.pooling_mode == FoldingPoolingTypes.SIMILARITY_O: # similarity overlap pooling
             # overlap pooling based on similarity
             steps, A, B, D = stack.shape
-            out = torch.zeros(B, D, device=stack.device)
+            pool = torch.zeros(A, B, D, device=stack.device)
             for i in range(steps):
-                sim = F.cosine_similarity(stack[:, :, i].unsqueeze(1), stack[:, :, :i+1], dim=-2)
-                out += sim.mean(dim=2) * stack[:, :, i]
-            T = steps * (steps + 1) // 2  # total number of steps
-            return out / T
+                ref = stack[i]  # [A, B, D]
+                sim = torch.zeros_like(ref)
+                for j in range(i + 1):
+                    sim += F.cosine_similarity(ref, stack[j], dim=-1).unsqueeze(-1) * stack[j]
+                pool += sim / (i + 1)
+            return pool / steps  # [A, B, D]
 
         elif self.pooling_mode == FoldingPoolingTypes.SIMILARITY_X: # cross-similarity pooling
             # cross similarity pooling, reorders based on the highest similarity before merging
             steps, A, B, D = stack.shape
-            pool = torch.zeros(B, D, device=stack.device)
-            for i in range(steps):
-                sim = F.cosine_similarity(stack[:, :, i].unsqueeze(1), stack, dim=-1)
-                idx = sim.argmax(dim=2)
-                pool += stack[torch.arange(B), idx, :]
-            sorted = sort(pool, dim=1, descending=True)
-            return sorted.values.mean(dim=2)
+            pool = torch.zeros(A, B, D, device=stack.device)
+            for s in range(steps):
+                ref = stack[s].mean(dim=0, keepdim=True)  # [1, B, D]
+                sim = F.cosine_similarity(stack[s], ref.expand_as(stack[s]), dim=-1)  # [A, B]
+                idx = sim.argmax(dim=0)  # [B]
+                gathered = torch.stack([
+                    stack[s, idx[b], b] for b in range(B)
+                ])  # [B, D]
+                pool[:, torch.arange(B)] += gathered.unsqueeze(0).expand(A, -1, -1)
+            return pool / steps  # [A, B, D]
+
 
         elif self.pooling_mode == FoldingPoolingTypes.SIMILARITY_MASK: # similarity mask pooling
             # determines the feature similarity based on the delta masks
             steps, A, B, D = stack.shape
-            out = torch.zeros(B, D, device=stack.device)
-            for i in range(steps):
-                sim = F.cosine_similarity(stack[:, :, i].unsqueeze(1), stack[:, :, :i+1], dim=-1)
-                mask = (sim > 0.5).float()
-                out += (mask * stack[:, :, i]).mean(dim=2)
-            return out / steps
+            pool = torch.zeros(A, B, D, device=stack.device)
+
+            for s in range(steps):
+                ref = stack[s]  # [A, B, D]
+                sim_sum = torch.zeros_like(ref)
+                for t in range(s + 1):
+                    sim = F.cosine_similarity(ref, stack[t], dim=-1)  # [A, B]
+                    mask = (sim > 0.5).float().unsqueeze(-1)  # [A, B, 1]
+                    sim_sum += mask * stack[t]  # [A, B, D]
+                pool += sim_sum / (s + 1)
+
+            return pool / steps  # → [A, B, D]
+
 
         elif self.pooling_mode == FoldingPoolingTypes.BILINEAR:
             # bilinear pooling
@@ -135,12 +178,13 @@ class WindowPooling:
                 out += stack[:, :, i] * stack[:, :, :i+1].mean(dim=2)
             return out / steps
         elif self.pooling_mode == FoldingPoolingTypes.FLOOD:
-            # flood fill pooling
+            # cumulative mean fill over steps
             steps, A, B, D = stack.shape
-            flood = torch.zeros(B, steps, D, device=stack.device)
-            for i in range(steps):
-                flood[:, :, i] = stack[:, :, :i+1].mean(dim=2)
-            return flood
+            flood = torch.zeros(steps, A, B, D, device=stack.device)
+
+            for s in range(steps):
+                flood[s] = stack[:s + 1].mean(dim=0)  # mean over previous steps
+            return flood.mean(dim=0)  # final output: [A, B, D]
         elif self.pooling_mode == FoldingPoolingTypes.SIMILARITY_TREE:
             """
             Tree-based pooling: reorders segments via pairwise cosine similarity

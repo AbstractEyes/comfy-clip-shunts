@@ -7,11 +7,6 @@ from ..model.configs import ShuntUtil
 
 logger = logging.getLogger(__name__)
 
-import hashlib
-from ..model.model_manager import get_model_manager
-from ..model.configs import ENCODER_CONFIGS, ShuntData, EncoderData
-from ..utils.conditioning_shifter import ConditioningShifter
-
 from ..sampler.formulas.folding import FoldingKernels
 from ..sampler.formulas.schedules import SchedulerModes
 from ..sampler.formulas.modes import FoldingPoolingTypes, FoldingPaddingTypes
@@ -23,10 +18,11 @@ import torch.nn.functional as F
 from ..sampler.alucard import FieldWalkerConfig
 from ..sampler.integra import IntegraConfig, IntegraOrchestrator
 from ..sampler.sliding_window import ShuntStackConfig
-from ..utils.conditioning_shifter import ConditioningShifter, ShiftConfig
+from ..utils.conditioning_shifter import ConditioningShifter
 from ..sampler.formulas.schedules import FormulaScheduler
 from ..utils.alignment import match_feature_dims, match_tokens, match_project
 from ..sampler.alucard_exceptions import AlucardShapeError
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -83,17 +79,30 @@ def remove_special_tokens(prompt, remove_for_clip=False):
             prompt = prompt.replace(token, "")
     return (prompt,)
 
-class CorePromptConfig:
+
+class ClipPromptConfig:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
+                # Positive prompt
                 "override_context_window": ("BOOLEAN", {"default": True}),
                 "context_window": ("STRING", {
                     "default": "a photo of a robot.",
                     "multiline": True
                 }),
-                "context_window_size": ("INT", {"default": 2048, "min": 77, "max": 8192}),
+                "context_window_size": ("INT", {
+                    "default": 77, "min": 1, "max": 8192
+                }),
+
+                # Negative prompt (mirrored fields)
+                "override_negative_context_window": ("BOOLEAN", {"default": False}),
+                "negative_context_window": ("STRING", {
+                    "default": "",
+                    "multiline": True
+                }),
+
+                # Device routing
                 "device": (["cpu", "cuda", "mps"], {
                     "default": "cuda" if torch.cuda.is_available() else "cpu"
                 }),
@@ -102,34 +111,42 @@ class CorePromptConfig:
 
     RETURN_TYPES = ("CORE_PROMPT_CONFIG",)
     RETURN_NAMES = ("core_prompt_cfg",)
-    FUNCTION     = "configure"
-    CATEGORY     = "encoder/config"
+    FUNCTION = "configure"
+    CATEGORY = "encoder/config"
 
-    def configure(self,
-                  override_context_window,
-                  context_window,
-                  context_window_size,
-                  device):
+    def configure(
+        self,
+        override_context_window,
+        context_window,
+        context_window_size,
+        override_negative_context_window,
+        negative_context_window,
+        device,
+    ):
         return ({
             "override_context_window": override_context_window,
-            "context_window":          context_window,
-            "context_window_size":     context_window_size,
-            "device":                  device,
+            "context_window": context_window,
+            "context_window_size": context_window_size,
+            "override_negative_context_window": override_negative_context_window,
+            "negative_context_window": negative_context_window,
+            "device": device,
         },)
 
 
-
 # ─────────────────────────────────────────────────────────────────────────────
-#  SlidingWindowConfig – three shunt-stack controls
+#  ClipSlidingWindowConfig – three shunt-stack controls
 # ─────────────────────────────────────────────────────────────────────────────
-class SlidingWindowConfig:
+class ClipSlidingWindowConfig:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "max_windows":          ("INT", {"default": 64, "min": 1, "max": 2048}),
-                "sliding_window_size":  ("INT", {"default": 77, "min": 1, "max": 8192}),
-                "sliding_window_stride":("INT", {"default": 77, "min": 1, "max": 2048}),
+                "max_windows":              ("INT", {"default": 32, "min": 1, "max": 2048}),
+                "sliding_window_size":      ("INT", {"default": 77, "min": 1, "max": 8192}),
+                "sliding_window_stride":    ("INT", {"default": 77, "min": 1, "max": 2048}),
+                "use_alpha_mask":           ("BOOLEAN", {"default": True}),
+                "cosine_similarity_gate":   ("BOOLEAN", {"default": False}),
+                "use_rose_similarity":      ("BOOLEAN", {"default": False}),
             }
         }
 
@@ -141,28 +158,42 @@ class SlidingWindowConfig:
     def configure(self,
                   max_windows,
                   sliding_window_size,
-                  sliding_window_stride):
+                  sliding_window_stride,
+                  use_alpha_mask=True,
+                  cosine_similarity_gate=False,
+                  use_rose_similarity=False):
         return ({
-            "max_windows":          max_windows,
-            "sliding_window_size":  sliding_window_size,
-            "sliding_window_stride":sliding_window_stride,
+            "max_windows":              max_windows,
+            "sliding_window_size":      sliding_window_size,
+            "sliding_window_stride":    sliding_window_stride,
+            "use_alpha_mask":           use_alpha_mask,
+            "cosine_similarity_gate":   cosine_similarity_gate,
+            "use_rose_similarity":      use_rose_similarity,
         },)
 
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  FoldingStackConfig – folding / padding / pooling + steps
+#  ClipFoldingStackConfig – folding / padding / pooling + steps
 # ─────────────────────────────────────────────────────────────────────────────
-class FoldingStackConfig:
+class ClipFoldingStackConfig:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "folding_formula":   (FoldingKernels.to_list(), {"default": FoldingKernels.shiva}),
-                "folding_scheduler": (SchedulerModes.to_list(), {"default": SchedulerModes.TAU}),
-                "padding_mode":      (FoldingPaddingTypes.to_list(), {"default": FoldingPaddingTypes.SPARSE}),
-                "pooling_mode":      (FoldingPoolingTypes.to_list(), {"default": FoldingPoolingTypes.BILINEAR}),
-                "steps":             ("INT", {"default": 100, "min": 1, "max": 100_000}),
+                "folding_formula":      ( FoldingKernels.to_list(), {"default": FoldingKernels.shiva} ),
+                "folding_scheduler":    ( SchedulerModes.to_list(), {"default": SchedulerModes.TAU} ),
+                "padding_mode":         ( FoldingPaddingTypes.to_list(), {"default": FoldingPaddingTypes.SPARSE} ),
+                "pooling_mode":         ( FoldingPoolingTypes.to_list(), {"default": FoldingPoolingTypes.BILINEAR} ),
+                "steps":                ( "INT", {"default": 100, "min": 1, "max": 100_000} ),
+                "passes":               ( "INT", {"default": 1, "min": 1, "max": 10} ),
+                "conv_dim":             ( "INT", {"default": 2, "min": 2, "max": 4} ),
+                "similarity_threshold": ( "FLOAT", {"default": 0.5} ),
+                "tree_linkage_method":  ( ["centroid", "single", "complete"], {"default": "centroid"} ),
+                "blur_sigma":           ( "FLOAT", {"default": 0.0} ),
+                "thresh":               ( "FLOAT", {"default": 0.5} ),
+                "bottom_k_frac":        ( "FLOAT", {"default": 0.25} ),
+                "hard_bottom_k":        ( "BOOLEAN", {"default": False} ),
             }
         }
 
@@ -176,30 +207,50 @@ class FoldingStackConfig:
                   folding_scheduler,
                   padding_mode,
                   pooling_mode,
-                  steps):
+                  steps,
+                  passes=1,
+                  conv_dim=2,
+                  similarity_threshold=0.5,
+                  tree_linkage_method="centroid",
+                  blur_sigma=0.0,
+                  thresh=0.5,
+                  bottom_k_frac=0.25,
+                  hard_bottom_k=False):
         return ({
-            "folding":           folding_formula,
-            "folding_scheduler": folding_scheduler,
-            "padding_mode":      padding_mode,
-            "pooling_mode":      pooling_mode,
-            "steps":             steps,
+            "folding":              folding_formula,
+            "folding_scheduler":    folding_scheduler,
+            "padding_mode":         padding_mode,
+            "pooling_mode":         pooling_mode,
+            "steps":                steps,
+            "passes":               passes,
+            "conv_dim":             conv_dim,
+            "similarity_threshold": similarity_threshold,
+            "tree_linkage_method":  tree_linkage_method,
+            "blur_sigma":           blur_sigma,
+            "thresh":               thresh,
+            "bottom_k_frac":        bottom_k_frac,
+            "hard_bottom_k":        hard_bottom_k,
         },)
 
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  SchedulerHyperConfig – top-k / top-p / temp / tau / beams
+#  ClipHyperConfig – top-k / top-p / temp / tau / beams
 # ─────────────────────────────────────────────────────────────────────────────
-class SchedulerHyperConfig:
+class ClipHyperConfigNode:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "top_k":      ("FLOAT", {"default": 50.0, "min": 0.0, "max": 10_000.0}),
-                "top_p":      ("FLOAT", {"default": 0.9,  "min": 0.0, "max": 1.0}),
-                "temperature":("FLOAT", {"default": 5.0,  "min": 0.0, "max": 50.0}),
-                "tau":        ("FLOAT", {"default": 5.0,  "min": 0.0, "max": 50.0}),
-                "beams":      ("INT",   {"default": 4,    "min": 1,   "max": 32}),
+                "top_k":                ("FLOAT", {"default": 50.0, "min": 0.0, "max": 10_000.0}),
+                "top_p":                ("FLOAT", {"default": 0.9,  "min": 0.0, "max": 1.0}),
+                "temperature":          ("FLOAT", {"default": 5.0,  "min": 0.0, "max": 50.0}),
+                "tau":                  ("FLOAT", {"default": 5.0,  "min": 0.0, "max": 50.0}),
+                "wave_freq":            ("FLOAT", {"default": 0.5}),
+                "pulse_freq":           ("FLOAT", {"default": 5.0}),
+                "cascade_rate":         ("FLOAT", {"default": 4.0}),
+                "shockwave_center":     ("FLOAT", {"default": 0.5}),
+                "shockwave_variance":   ("FLOAT", {"default": 0.01}),
             }
         }
 
@@ -213,21 +264,29 @@ class SchedulerHyperConfig:
                   top_p,
                   temperature,
                   tau,
-                  beams):
+                  wave_freq=0.5,
+                  pulse_freq=5.0,
+                  cascade_rate=4.0,
+                  shockwave_center=0.5,
+                  shockwave_variance=0.01):
         return ({
             "top_k":      top_k,
             "top_p":      top_p,
             "temperature":temperature,
             "tau":        tau,
-            "beams":      beams,
+            "wave_freq":  wave_freq,
+            "pulse_freq": pulse_freq,
+            "cascade_rate": cascade_rate,
+            "shockwave_center": shockwave_center,
+            "shockwave_variance": shockwave_variance,
         },)
 
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  ProjectionConfig – projection + interpolation
+#  ClipProjectionConfigNode – projection + interpolation
 # ─────────────────────────────────────────────────────────────────────────────
-class ProjectionConfig:
+class ClipProjectionConfigNode:
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -265,16 +324,13 @@ class ProjectionConfig:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  ExperimentalFlags – all remaining feature-flags
+#  ClipExperimentalConfigNode – all remaining feature-flags
 # ─────────────────────────────────────────────────────────────────────────────
-class ExperimentalFlags:
+class ClipExperimentalConfigNode:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "use_alpha_mask":        ("BOOLEAN", {"default": True}),
-                "cosine_similarity_gate":("BOOLEAN", {"default": False}),
-                "use_rose_similarity":   ("BOOLEAN", {"default": False}),
                 "use_rope_resonance":    ("BOOLEAN", {"default": False}),
                 "cfg_scale":             ("FLOAT",   {"default": 1.0, "min": 0.0, "max": 100.0}),
                 "guidance_scale":        ("FLOAT",   {"default": 5.0, "min": 0.0, "max": 100.0}),
@@ -292,18 +348,12 @@ class ExperimentalFlags:
     CATEGORY     = "encoder/config"
 
     def configure(self,
-                  use_alpha_mask,
-                  cosine_similarity_gate,
-                  use_rose_similarity,
                   use_rope_resonance,
                   cfg_scale,
                   guidance_scale,
                   pos_embedding,
                   normalization_anchor):
         return ({
-            "use_alpha_mask":         use_alpha_mask,
-            "cosine_similarity_gate": cosine_similarity_gate,
-            "use_rose_similarity":    use_rose_similarity,
             "use_rope_resonance":     use_rope_resonance,
             "cfg_scale":              cfg_scale,
             "guidance_scale":         guidance_scale,
@@ -432,13 +482,13 @@ class ClipSampler:
 
         # ── 1. raw encoder embeddings ───────────────────────────────────────
         a_raws = [
-            (encoder, self.__extract_symbolic(encoder, prompt, device, config))
+            (encoder, ConditioningHelper.extract_symbolic_field(encoder, prompt, device, config))
             for encoder in encoders
         ]
 
         # ── 2. baseline CLIP conditioning + pooled ──────────────────────────
         encoder_prompt = remove_special_tokens(prompt, remove_for_clip=True)[0] if prompt else None
-        clip_tensor, clip_meta = self.__schedule_and_extract_conds(
+        clip_tensor, clip_meta = ConditioningHelper.schedule_and_extract_clip_conditioning(
             clip, encoder_prompt, device, mode=mode
         )
         orig_clip_full = clip_tensor.clone()
@@ -467,89 +517,12 @@ class ClipSampler:
         logger.info(f"[EncoderSampler] Folded outputs: {list(folded_outputs.keys())}")
 
         # ── 5. assemble final conditioning bundle ───────────────────────────
-        conditioning = self._pack_conditioning_from_registry(
+        conditioning = ConditioningHelper.pack_conditioning_bundle(
             folded_outputs, cfg=config, device=device, mode=mode
         )
         raw_conditioning = [[orig_clip_full, {"pooled_output": orig_pool_full}]]
 
         return conditioning, raw_conditioning, {}
-
-    def __extract_symbolic(self, pipe, prompt, device, config=None):
-        encoder_type = pipe.get("type", "unknown").lower()
-        clip_like = encoder_type in ENCODER_SUPPORTED_CLIP_TYPES
-        # a small set of tests to run, so far showing promise
-
-        if clip_like:
-            prepared_prompt = remove_special_tokens(prompt, remove_for_clip=False)[0] if prompt else None
-            clip_model = pipe["clip"]
-            if encoder_type == "t5":
-                max_tokens = 512
-            else:
-                max_tokens = 77
-            #clip_model.load_model()
-            tokens = clip_model.tokenize(prepared_prompt, tokenizer_options={
-                "padding": "max_length",
-                "truncation": True,
-                "max_tokens": max_tokens
-            })
-
-
-            with torch.no_grad():
-                full_cond = clip_model.encode_from_tokens_scheduled(tokens)
-                cond = full_cond[0][0]  # Extract the first element which is the condition tensor
-                if cond is None:
-                    raise ValueError("Could not extract CLIP condition from scheduled encoding.")
-            return cond.to(device)
-
-
-        else:
-            # model isn't clip like, we need to extract special tokens leaving the rest to the model
-            if "model" in pipe:
-                pipe["model"].to(device)
-            #prepared_prompt = remove_special_tokens(prompt, remove_clip=True)[0] if prompt else None
-            shift_cfg = ShiftConfig(prompt=prompt, **config if config is dict else {})
-            return ConditioningShifter.extract_encoder_embeddings(pipe, device, shift_cfg).to(device)
-
-    def __schedule_and_extract_conds(self, clip, prompt, device, mode):
-        clip_l_tokens = None
-        if mode == "flux":
-            tokens = clip.tokenize(
-                prompt,
-                tokenizer_options={
-                    "padding": "max_length",
-                    "truncation": True,
-                    "max_tokens": 512
-                }
-            )
-            full_cond = clip.encode_from_tokens_scheduled(tokens, use_full=True)
-
-            # Extract known-good tensors
-            cond = full_cond.get("t5")  # ← symbolic field
-            features = full_cond.get("clip_l")  # ← clip_l token stream
-
-            # Place upstream pool in the pool dict - it's the clip_l features without the tokens
-            logger.info(f"[EncoderSampler] Using Flux mode, cond shape: {cond.shape if cond is not None else 'None'}")
-            pool = None
-        elif mode == "full_no_pool": # many models use this mode, so we can assume it is a full model without pooling
-            # extract from the clip and return a pool with "pool": None
-            # assume the tokenizer already knows the max length and whatever else
-            tokens = clip.tokenize(prompt)
-            raw = clip.encode_from_tokens_scheduled(tokens)
-            cond = raw[0][0]
-            # no features either, we don't need them
-            return cond.to(device), { "pooled_output": None }
-        else:
-            tokens = clip.tokenize(
-                prompt,
-                tokenizer_options={"padding": "max_length", "min_length": 512, "max_length": 512, "max_tokens": 512, "truncation": True}
-            )
-
-            raw = clip.encode_from_tokens_scheduled(tokens)
-            cond = raw[0][0]
-            pool = raw[0][1]
-            features = None #raw[0][2] if len(raw[0]) > 2 else None
-
-        return cond.to(device), {"features": features, "pooled_output": pool.get("pooled_output", None) if pool else None}
 
 
     def _run_integra(self, a_raw, cond_name, clip_slice, cfg, device, encoder):
@@ -559,6 +532,7 @@ class ClipSampler:
             a_proj = a_raw
 
         a_feat = match_feature_dims(a_proj, clip_slice)
+
         b = match_tokens(clip_slice, a_feat.shape[1])
         delta = b - a_proj
 
@@ -572,8 +546,6 @@ class ClipSampler:
             raise RuntimeError(f"[EncoderSampler] Shape error: {e}") from e
 
         return match_tokens(raw_folded, clip_slice.shape[1]).to(device)
-
-
 
     def _build_integra(self, encoder, cfg):
         #logger.info(f"[EncoderSampler] Building Integra with config: {cfg}")
@@ -590,6 +562,7 @@ class ClipSampler:
                 "top_k": cfg["top_k"],
                 "top_p": cfg["top_p"],
             },
+
 
             context_overrides={
                 "encoder_name": encoder.get("config", {}).get("model_name", "unknown").lower(),
@@ -672,7 +645,6 @@ class ClipSampler:
             end = torch.zeros(B, 1, D, device=device)
             body = folded[:, 1:-1, :]
             patched = torch.cat([start, body, end], dim=1)
-
             # Pooled strategy
             if mode == "sdxl":
                 pooled = patched[:, -1, 768:2048]
@@ -686,4 +658,145 @@ class ClipSampler:
             conditioning.append([patched.cpu().clone(), {"pooled_output": pooled.cpu().clone()}])
 
         return conditioning
+
+
+
+
+from ..sampler.processor import ClipSamplerProcessor
+
+
+class ClipSamplerConfigured:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "encoders": ("ENCODER_PIPE", {}),
+                "clip": ("CLIP", {}),
+                "prompt_override": ("STRING", {"default": "", "multiline": True}),
+                "negative_prompt": ("STRING", {"default": "", "multiline": True}),
+                "mode": (
+                    ["sdxl", "sd1", "flux", "full_no_pool", "full_pool"],
+                    {"default": "sdxl"}
+                ),
+            },
+            "optional": {
+                "prompt_config": ("CORE_PROMPT_CONFIG", {}),
+                "sliding_window_cfg": ("SLIDING_WINDOW_CONFIG", {}),
+                "folding_stack_cfg": ("FOLDING_STACK_CONFIG", {}),
+                "scheduler_hyper_cfg": ("SCHEDULER_HYPER_CONFIG", {}),
+                "projection_cfg": ("PROJECTION_CONFIG", {}),
+                "experimental_cfg": ("EXPERIMENTAL_FLAGS", {}),
+            }
+        }
+
+
+    RETURN_TYPES = (
+        "CONDITIONING", "CONDITIONING", "DICT",
+        "CONDITIONING", "CONDITIONING", "DICT"
+    )
+    RETURN_NAMES = (
+        "pos_sampled_conditioning", "pos_raw_conditioning", "pos_debug",
+        "neg_sampled_conditioning", "neg_raw_conditioning", "neg_debug"
+    )
+    FUNCTION = "sample"
+    CATEGORY = "encoder/sampler"
+
+    def sample(
+        self,
+        encoders,
+        clip,
+        prompt_override,
+        negative_prompt,
+        mode,
+        prompt_config=None,
+        sliding_window_cfg=None,
+        folding_stack_cfg=None,
+        scheduler_hyper_cfg=None,
+        projection_cfg=None,
+        experimental_cfg=None,
+    ):
+        # ─────────────────────────────────────────────────────────────
+        # Ensure config defaults
+        # ─────────────────────────────────────────────────────────────
+        prompt_config = prompt_config or {
+            "override_context_window": False,
+            "context_window": prompt_override,
+            "context_window_size": 2048,
+            "override_negative_context_window": False,
+            "negative_context_window": negative_prompt,
+            "device": "cuda" if torch.cuda.is_available() else "cpu",
+        }
+        logger.info(f"[EncoderSampler] Using prompt config: {prompt_config}")
+
+
+        sliding_window_cfg  = sliding_window_cfg or {
+            "max_windows": 64,
+            "sliding_window_size": 77,
+            "sliding_window_stride": 77,
+        }
+
+        folding_stack_cfg = folding_stack_cfg or {
+            "folding": "shiva",
+            "folding_scheduler": "tau",
+            "padding_mode": "sparse",
+            "pooling_mode": "bilinear",
+            "steps": 100,
+        }
+
+        scheduler_hyper_cfg = scheduler_hyper_cfg or {
+            "top_k": 50.0,
+            "top_p": 0.9,
+            "temperature": 5.0,
+            "tau": 5.0,
+        }
+
+        projection_cfg = projection_cfg or {
+            "force_projection_in": False,
+            "projection_dims_in": 768,
+            "interpolation_method_in": "linear",
+            "force_projection_out": False,
+            "projection_dims_out": 768,
+            "interpolation_method_out": "linear",
+        }
+
+        experimental_cfg = experimental_cfg or {
+            "use_alpha_mask": True,
+            "cosine_similarity_gate": False,
+            "use_rose_similarity": False,
+            "use_rope_resonance": False,
+            "cfg_scale": 1.0,
+            "guidance_scale": 5.0,
+            "pos_embedding": "none",
+            "normalization_anchor": "none",
+        }
+
+        # ─────────────────────────────────────────────────────────────
+        # Prompt resolution logic
+        # ─────────────────────────────────────────────────────────────
+        pos_prompt = (
+            prompt_override if prompt_config.get("override_context_window", False)
+            else prompt_config.get("context_window", "")
+        )
+
+
+        neg_prompt = (
+            negative_prompt if prompt_config.get("override_negative_context_window", False)
+            else prompt_config.get("negative_context_window", "")
+        )
+
+        processor = ClipSamplerProcessor(
+            prompt=pos_prompt,
+            negative_prompt=neg_prompt or None,
+            encoders=encoders,
+            clip=clip,
+            prompt_config=prompt_config,
+            sliding_window_cfg=sliding_window_cfg,
+            folding_cfg=folding_stack_cfg,
+            scheduler_hyper_cfg=scheduler_hyper_cfg,
+            projection_cfg=projection_cfg,
+            experimental_cfg=experimental_cfg,
+            mode=mode,
+        )
+
+        return processor.run()
 

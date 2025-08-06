@@ -39,7 +39,7 @@ from .alucard_exceptions import validate_shapes  # Ensure alucard_error.py is in
 logger = logging.getLogger(__name__)
 
 from ..utils.conditioning_shifter import ConditioningShifter
-
+from ..utils.rose_util import rose_score_magnitude, legacy_entropy as compute_entropy
 
 @dataclass
 class FieldWalkerConfig:
@@ -69,6 +69,7 @@ class FieldWalkerConfig:
 
 
 class Alucard(nn.Module):
+
 
     def sample(
             self,
@@ -137,7 +138,17 @@ class Alucard(nn.Module):
 
                 # -- Step 3: Apply Padding Policy
                 if pad_mask is not None:
-                    folded = padding.apply_padding(a, folded, pad_mask)
+                    #logger.info(f"[Alucard] Applying padding with mask shape: {pad_mask.shape}")
+                    temp_pad_mask = pad_mask.clone().to(a.device)
+
+                    entropy = compute_entropy(temp_pad_mask)  # [B, T]
+                    entropy_scalar = entropy.mean(dim=-1, keepdim=True)  # [B, 1]
+
+                    entropy_weight = torch.sigmoid((entropy_scalar - 0.5) * 5.0)  # sharpen center around 0.5
+                    temp_pad_mask = temp_pad_mask * entropy_weight.unsqueeze(1)  # [B, T, 1] scaled
+
+                    folded = padding.apply_padding(a, folded, temp_pad_mask)
+
 
                 folds.append(folded)
                 if pbar is not None:
@@ -163,22 +174,46 @@ class FieldWalker:
         self.pooling = WindowPooling({"pooling_mode": config.pooling_mode})
         self.core = Alucard()
 
+    from ..utils.rose_util import rose_score_magnitude, entropy
 
-
-    def walk(self,
-             a: torch.Tensor,
-             b: torch.Tensor,
-             pad_mask: Optional[torch.Tensor] = None,
-             d: Optional[torch.Tensor] = None,
-             pbar: Optional[ProgressBar] = None,
-             context: dict = None) -> torch.Tensor:
-        #logger.info(
-        #    f"[Alucard] Walking: a {a.shape}, b {b.shape}, d {d.shape if d is not None else 'computed'}, t_steps={self.config.t_steps}")
-
+    def walk(
+            self,
+            a: torch.Tensor,
+            b: torch.Tensor,
+            pad_mask: Optional[torch.Tensor] = None,
+            d: Optional[torch.Tensor] = None,
+            pbar: Optional = None,
+            context: dict = None,
+    ) -> torch.Tensor:
+        """
+        Walks symbolic delta from `a` to `b` using Rose magnitude-based masking.
+        Will auto-inject pad_mask using rose_score_magnitude(a, b, d, purpose).
+        """
         d = d if d is not None else (b - a)
-        context = self.config.context_overrides or {}
+        context = context or {}
+
+        if pad_mask is None and context.get("use_alpha_mask", False):
+            try:
+                relation = d
+                purpose = context.get("rose_purpose", torch.ones_like(a))  # fallback = identity purpose
+
+                pad_mask = rose_score_magnitude(
+                    x=a,
+                    need=b,
+                    relation=relation,
+                    purpose=purpose,
+                ).unsqueeze(-1)  # shape: [B, T, 1]
+                pad_mask = pad_mask.clamp(0.0, 1.0)
+
+            except Exception as e:
+                import logging
+                logging.warning(f"[FieldWalker] Rose magnitude mask failed: {e}")
+                pad_mask = None
+
         return self.core.sample(
-            a=a, b=b, d=d,
+            a=a,
+            b=b,
+            d=d,
             t_steps=self.config.t_steps,
             scheduler=self.scheduler,
             kernel=self.kernel,
@@ -187,5 +222,6 @@ class FieldWalker:
             pad_mask=pad_mask,
             context=context,
             pbar=pbar,
-            config=self.config
+            config=self.config,
         )
+

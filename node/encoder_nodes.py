@@ -1293,6 +1293,8 @@ class EncoderLoader:
                     "default": True,
                     "tooltip": "Allow execution of remote model code. Use only with trusted sources."
                 }),
+                "alpha_strength": ("FLOAT", { "default": 1.0, "min": -10000.000, "max": 10000.000, "step": 0.001,} ),
+                "trajectory_strength": ("FLOAT", { "default": 1.0, "min": -10000.000, "max": 10000.000, "step": 0.001,} ),
             }
         }
 
@@ -1310,7 +1312,9 @@ class EncoderLoader:
              padding,
              dtype,
              device,
-             trust_remote_code):
+             trust_remote_code,
+             alpha_strength,
+             trajectory_strength):
 
         model_manager = get_model_manager()
         device_obj = torch.device(device)
@@ -1359,6 +1363,8 @@ class EncoderLoader:
             "trust_remote_code": trust_remote_code,
             #"context_window": context_window,
             "config": {
+                "alpha_strength": alpha_strength,
+                "trajectory_strength": trajectory_strength,
                 "enable_rope_spiral": enable_rope_spiral,
                 "rope_phase_offsets": rope_phase_offsets,
                 "spiral_probe_token": spiral_probe_token,
