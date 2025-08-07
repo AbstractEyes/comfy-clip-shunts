@@ -146,8 +146,8 @@ def attention_multiply(attn, model, q, k, v, out):
             m.add_patches({key: (None,)}, 0.0, v)
         if key.endswith("{}.to_out.0.bias".format(attn)) or key.endswith("{}.to_out.0.weight".format(attn)):
             m.add_patches({key: (None,)}, 0.0, out)
-
     return m
+
 
 
 class ClipEncoderLoader:

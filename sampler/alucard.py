@@ -204,7 +204,7 @@ class FieldWalker:
                     relation=relation,
                     purpose=purpose,
                 ).unsqueeze(-1)  # shape: [B, T, 1]
-                pad_mask = pad_mask.clamp(0.0, 1.0)
+                #pad_mask = pad_mask.clamp(0.0, 1.0)
 
             except Exception as e:
                 import logging

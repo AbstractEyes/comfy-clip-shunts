@@ -18,6 +18,8 @@ from .formulas.folding import FoldingKernels
 from .formulas.schedules import SchedulerModes
 from .alucard_exceptions import validate_shapes  # Ensure alucard_error.py is in same directory or adjust import
 
+from ..utils.rose_util import rose_score
+
 from comfy.utils import ProgressBar
 
 logger = logging.getLogger(__name__)
@@ -83,24 +85,26 @@ class IntegraOrchestrator:
             folds = []
             starts = self._compute_window_starts(T, a.squeeze(0))
             steps = self.config.walker_config.t_steps
-            pbar = ProgressBar(len(starts * steps))
+            passes = context.get("passes", 1) if context else 1
+            pbar = ProgressBar(len(starts * steps * passes))
 
-            for i, start in enumerate(starts):
-                model_management.throw_exception_if_processing_interrupted()
-                end = start + self.window_size
-                if end > T:
-                    end = T
-                    start = max(0, end - self.window_size)
+            for p in range(passes):
+                for i, start in enumerate(starts):
+                    model_management.throw_exception_if_processing_interrupted()
+                    end = start + self.window_size
+                    if end > T:
+                        end = T
+                        start = max(0, end - self.window_size)
 
-                a_win = a[:, start:end, :].clone()
-                b_win = b[:, start:end, :].clone()
-                d_win = d[:, start:end, :].clone()
+                    a_win = a[:, start:end, :].clone()
+                    b_win = b[:, start:end, :].clone()
+                    d_win = d[:, start:end, :].clone()
 
-                # ✅ Now passes context to walker
-                folded = self.walker.walk(a=a_win, b=b_win, d=d_win, pbar=pbar, context=context)
+                    # ✅ Now passes context to walker
+                    folded = self.walker.walk(a=a_win, b=b_win, d=d_win, pbar=pbar, context=context)
 
-                pbar.update(1)
-                folds.append((start, end, folded))
+                    pbar.update(1)
+                    folds.append((start, end, folded))
 
             aggregated = self.aggregate(folds, T, config=context)
 
@@ -166,7 +170,6 @@ class IntegraOrchestrator:
         if embeddings is not None:
             with torch.no_grad():
                 if self.config.use_rose_similarity:
-                    from ..utils.rose_util import rose_score
                     if embeddings.ndim == 3:
                         need = embeddings.mean(dim=1)
                         relation = embeddings[:, 1:, :].mean(dim=1)

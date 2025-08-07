@@ -185,8 +185,9 @@ class ClipFoldingStackConfig:
                 "folding_scheduler":    ( SchedulerModes.to_list(), {"default": SchedulerModes.TAU} ),
                 "padding_mode":         ( FoldingPaddingTypes.to_list(), {"default": FoldingPaddingTypes.SPARSE} ),
                 "pooling_mode":         ( FoldingPoolingTypes.to_list(), {"default": FoldingPoolingTypes.BILINEAR} ),
-                "steps":                ( "INT", {"default": 100, "min": 1, "max": 100_000} ),
-                "passes":               ( "INT", {"default": 1, "min": 1, "max": 10} ),
+                "steps":                ( "INT", {"default": 10, "min": 1, "max": 100_000} ),
+                "passes":               ( "INT", {"default": 10, "min": 1, "max": 100_000} ),
+                "pool_frozen":          ( "BOOLEAN", {"default": False, "tooltip": "This enables returning only one frozen pool."} ),
                 "conv_dim":             ( "INT", {"default": 2, "min": 2, "max": 4} ),
                 "similarity_threshold": ( "FLOAT", {"default": 0.5} ),
                 "tree_linkage_method":  ( ["centroid", "single", "complete"], {"default": "centroid"} ),
@@ -209,6 +210,7 @@ class ClipFoldingStackConfig:
                   pooling_mode,
                   steps,
                   passes=1,
+                  pool_frozen=False,
                   conv_dim=2,
                   similarity_threshold=0.5,
                   tree_linkage_method="centroid",
@@ -223,6 +225,7 @@ class ClipFoldingStackConfig:
             "pooling_mode":         pooling_mode,
             "steps":                steps,
             "passes":               passes,
+            "pool_frozen":          pool_frozen,
             "conv_dim":             conv_dim,
             "similarity_threshold": similarity_threshold,
             "tree_linkage_method":  tree_linkage_method,
@@ -563,7 +566,6 @@ class ClipSampler:
         b = match_tokens(clip_slice, a_feat.shape[1])
         delta = b - a_proj
 
-
         integra = self._build_integra(encoder, cfg)
         try:
             raw_folded, _ = integra.walk_encoder_field(
@@ -776,7 +778,7 @@ class ClipSamplerConfigured:
             "thresh": 0.5,
             "bottom_k_frac": 0.25,
             "hard_bottom_k": False,
-
+            "pool_frozen": False,
         }
 
         scheduler_hyper_cfg = scheduler_hyper_cfg or {

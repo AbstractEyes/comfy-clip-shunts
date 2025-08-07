@@ -433,6 +433,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 
     "T5SummarizeCaption": "📝 T5 Summarize Caption",  # Node for summarizing captions using T5
 
+
 }
 
 

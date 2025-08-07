@@ -436,7 +436,7 @@ class ModelManager:
 
             if config.get("type", "t5") == "t5":
                 logger.info(f"Loading T5ForConditionalGeneration model from {model_name_or_path}")
-                model = AutoModelForSeq2SeqLM.from_pretrained(
+                model = T5EncoderModel.from_pretrained(
                     model_name_or_path,
                     torch_dtype=dtype,
                     trust_remote_code=trust_remote_code  # Use the global flag for remote code execution

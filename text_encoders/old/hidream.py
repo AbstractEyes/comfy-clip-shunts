@@ -81,6 +81,7 @@ class HiDreamTEModel(torch.nn.Module):
         else:
             self.t5xxl = None
 
+
         if llama:
             logger.debug("Using LLAMA3 text encoder from hidream TEModel")
             dtype_llama = comfy.model_management.pick_weight_dtype(dtype_llama, dtype, device)
@@ -171,12 +172,15 @@ class HiDreamTEModel(torch.nn.Module):
             return self.llama.load_sd(sd)
 
 
-def hidream_clip(clip_l=True, clip_g=True, t5=True, llama=True, dtype_t5=None, dtype_llama=None, t5xxl_scaled_fp8=None, llama_scaled_fp8=None, unchained_t5=False):
+def hidream_clip(clip_l=True, clip_g=True, t5=True, llama=True, dtype_t5=None, dtype_llama=None, t5xxl_scaled_fp8=None, llama_scaled_fp8=None, unchained_t5=False, distilled_t5=False):
     class HiDreamTEModel_(HiDreamTEModel):
         def __init__(self, device="cpu", dtype=None, model_options={}):
             if t5 and unchained_t5:
                 model_options = model_options.copy()
                 model_options["unchained_t5"] = True
+            if t5 and distilled_t5:
+                model_options = model_options.copy()
+                model_options["distilled_t5"] = True
             if t5xxl_scaled_fp8 is not None and "t5xxl_scaled_fp8" not in model_options:
                 model_options = model_options.copy()
                 model_options["t5xxl_scaled_fp8"] = t5xxl_scaled_fp8

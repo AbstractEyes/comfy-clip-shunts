@@ -138,8 +138,13 @@ class ClipSamplerProcessor:
 
             # 5. Assemble conditioning output
             conditioning = ConditioningHelper.pack_conditioning_bundle(
-                folded_outputs, cfg=self.config, device=self.device, mode=self.mode
+                folded_outputs, cfg=self.config, device=self.device, mode=self.mode,
             )
+            if self.config.get("pool_frozen", False):
+                del conditioning[0][1]["pooled_output"]  # Use pooled output directly
+                conditioning[0][1]["pooled_output"] = orig_pooled.clone()  # Attach original pooled output
+
+
             raw = [[orig_clip, {"pooled_output": orig_pooled}]]
 
             output[role] = (conditioning, raw, {})  # TODO: attach debug if needed
