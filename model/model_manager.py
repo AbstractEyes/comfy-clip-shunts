@@ -436,23 +436,36 @@ class ModelManager:
 
             if config.get("type", "t5") == "t5":
                 logger.info(f"Loading T5ForConditionalGeneration model from {model_name_or_path}")
-                # Disable fused kernels to avoid apex dependency
+
+                # Load config first and disable fused operations
+                from transformers import AutoConfig
+                t5_config = AutoConfig.from_pretrained(
+                    model_name_or_path,
+                    trust_remote_code=trust_remote_code
+                )
+
+                # Disable all fused/optimized operations
+                if hasattr(t5_config, 'use_cache'):
+                    t5_config.use_cache = False
+                if hasattr(t5_config, 'feed_forward_proj'):
+                    t5_config.feed_forward_proj = 'relu'  # Use standard relu instead of gated-gelu
+
                 try:
                     model = T5EncoderModel.from_pretrained(
                         model_name_or_path,
+                        config=t5_config,  # Use modified config
                         torch_dtype=dtype,
                         trust_remote_code=trust_remote_code,
-                        attn_implementation="eager",  # Use standard attention
-                        use_cache=False  # Disable KV cache optimizations
                     ).to(device)
                 except Exception as e:
-                    logger.warning(f"Failed with optimizations, retrying without: {e}")
-                    # Fallback: force CPU load then move to device
+                    logger.warning(f"Failed with standard load: {e}")
+                    # Ultimate fallback - load on CPU with float32
                     model = T5EncoderModel.from_pretrained(
                         model_name_or_path,
+                        config=t5_config,
                         torch_dtype=torch.float32,
                         trust_remote_code=trust_remote_code,
-                        low_cpu_mem_usage=True
+                        device_map="cpu"
                     )
                     model = model.to(device=device, dtype=dtype)
             elif config.get("type", "t5") == "t5_encoder_with_projection":
