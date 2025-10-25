@@ -436,11 +436,25 @@ class ModelManager:
 
             if config.get("type", "t5") == "t5":
                 logger.info(f"Loading T5ForConditionalGeneration model from {model_name_or_path}")
-                model = T5EncoderModel.from_pretrained(
-                    model_name_or_path,
-                    torch_dtype=dtype,
-                    trust_remote_code=trust_remote_code  # Use the global flag for remote code execution
-                ).to(device)
+                # Disable fused kernels to avoid apex dependency
+                try:
+                    model = T5EncoderModel.from_pretrained(
+                        model_name_or_path,
+                        torch_dtype=dtype,
+                        trust_remote_code=trust_remote_code,
+                        attn_implementation="eager",  # Use standard attention
+                        use_cache=False  # Disable KV cache optimizations
+                    ).to(device)
+                except Exception as e:
+                    logger.warning(f"Failed with optimizations, retrying without: {e}")
+                    # Fallback: force CPU load then move to device
+                    model = T5EncoderModel.from_pretrained(
+                        model_name_or_path,
+                        torch_dtype=torch.float32,
+                        trust_remote_code=trust_remote_code,
+                        low_cpu_mem_usage=True
+                    )
+                    model = model.to(device=device, dtype=dtype)
             elif config.get("type", "t5") == "t5_encoder_with_projection":
                 # Load T5EncoderModel with projection layer
                 logger.info(f"Loading T5EncoderWithProjection model from {model_name_or_path}")
