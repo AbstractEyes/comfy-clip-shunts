@@ -296,6 +296,7 @@ class ConditioningHelper:
                 "truncation": True,
                 "max_tokens": max_tokens
             })
+            logger.info(f"Tokenized prompt to {tokens}")
 
             with torch.no_grad():
                 full_cond = clip_model.encode_from_tokens_scheduled(tokens)

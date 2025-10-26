@@ -1,429 +1,447 @@
 # embedding_manager.py
-# =============================================================
-"""
-ABS Embedding Manager - Fixed for Windows file locking issues
-"""
-import hashlib, json, os
+# ============================================================
+from __future__ import annotations
+
+import json
+import os
 import threading
-import tempfile
-import shutil
+import hashlib
+import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Any
 
 import torch
-import torch.nn.functional as F
-from safetensors.torch import load_file, save_file
+from safetensors.torch import save_file as st_save_file, load_file as st_load_file
 from folder_paths import get_folder_paths
-
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 
 from ..utils.conditioning_helper import ConditioningHelper, UsefulConditioning
 
 
-class SingletonMeta(type):
-    """Thread-safe singleton metaclass implementation."""
-    _instances = {}
-    _lock: threading.Lock = threading.Lock()
+# ============================================================
+# Constants / paths
+# ------------------------------------------------------------
+_EMBED_ROOT = Path(get_folder_paths("embeddings")[0])
 
-    def __call__(cls, *args, **kwargs):
-        if cls not in cls._instances:
-            with cls._lock:
-                if cls not in cls._instances:
-                    instance = super().__call__(*args, **kwargs)
-                    cls._instances[cls] = instance
-        return cls._instances[cls]
+SCHEMA_VERSION = 1
+CORE_KEY_FMT = "conditioning_{i}"
+POOLED_SUFFIX = "_pooled"
+COMBINED_POOLED_KEY = "pooled_output"
 
 
-class EmbeddingManager(metaclass=SingletonMeta):
+# ============================================================
+# Helpers
+# ------------------------------------------------------------
+def _cpu_clone(t: torch.Tensor, dtype: Optional[torch.dtype] = None) -> torch.Tensor:
+    """Distinct CPU storage for safetensors: detach → cpu → dtype → contiguous → clone."""
+    if dtype is not None:
+        return t.detach().to("cpu", dtype=dtype).contiguous().clone()
+    return t.detach().to("cpu").contiguous().clone()
+
+
+def _json_safe_meta(meta: dict) -> dict:
+    """Remove tensors / non-serializables; keep plain Python types only."""
+    out = {}
+    for k, v in meta.items():
+        if torch.is_tensor(v):
+            continue
+        out[k] = v
+    return out
+
+
+class EmbeddingManager:
     """
-    Thread-safe singleton embedding manager with Windows file handling fixes.
+    Disk-backed store for conditioning bundles:
+      • tensors in <bundle_id>.safetensors
+      • sidecar metadata in <bundle_id>.json
+    Correctness guarantees:
+      - Bundle ID is derived from (tensor structure + trigger + prompt) → no overwrites
+      - All tensors are CPU-cloned for safetensors (Windows-safe; no shared storage)
+      - Loads return list[[tensor, meta], ...] where pooled is meta['pooled_output']
+      - In-memory indices/caches update immediately after save
     """
-    _initialized = False
-    _init_lock = threading.Lock()
+
+    # ----- schema & keying -----
+    SCHEMA_VERSION: int = 1
+    CORE_KEY_FMT: str = "conditioning_{i}"
+    POOLED_SUFFIX: str = "_pooled"
+    COMBINED_POOLED_KEY: str = "pooled_output"
 
     def __init__(
-            self,
-            dtype: torch.dtype = torch.float16,
-            device: str = "cuda",
+        self,
+        dtype: torch.dtype = torch.float16,
+        device: str = "cpu",
+        subdir: str = "cached_embeddings",
     ):
-        with self._init_lock:
-            if self._initialized:
-                return
+        self.dtype: torch.dtype = dtype
+        self.device: torch.device = torch.device(device)
 
-            root = Path(get_folder_paths("embeddings")[0])
-            self.path = str(root / "cached_embeddings")
+        # paths
+        root = Path(get_folder_paths("embeddings")[0])
+        self.paths = type("Paths", (), {})()
+        self.paths.root = root
+        self.paths.dir = root / subdir
+        self.paths.dir.mkdir(parents=True, exist_ok=True)
 
-            self.cache: Dict[str, UsefulConditioning] = {}
-            self.meta: Dict[str, dict] = {}
-            self.dtype = dtype
-            self.device = torch.device(device if torch.cuda.is_available() else "cpu")
+        # indices/caches
+        self.meta: Dict[str, dict] = {}                               # bundle_id -> sidecar
+        self.cache: Dict[str, List[List[Union[torch.Tensor, dict]]]] = {}  # bundle_id -> list[[tensor, meta], ...]
+        self._loaded_tensors: Dict[str, Dict[str, torch.Tensor]] = {} # bundle_id -> {key: tensor}
+        self._trigger_to_id: Dict[str, List[str]] = {}                # trigger -> [bundle_id,...]
 
-            self.prompt_keys = []
-            self.prompt_index = []
-            self.prompt_matrix = None
-            self.prompt_vectorizer = None
+        # derived/search artifacts (if you use them)
+        self._prompt_matrix: Optional[torch.Tensor] = None
+        self._bundle_ids_for_matrix: List[str] = []
+        self._vectorizer: Any = None
 
-            # Locks for thread safety
-            self._cache_lock = threading.RLock()
-            self._matrix_lock = threading.Lock()
-            self._file_locks: Dict[str, threading.Lock] = {}
-            self._file_lock_manager = threading.Lock()
+        self._cache_lock = threading.RLock()
+        self._prime_from_disk()
 
-            # Track loaded tensors to avoid memory-mapped file issues
-            self._loaded_tensors: Dict[str, Dict[str, torch.Tensor]] = {}
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+    def load_dir(self, path: Union[str, Path]) -> None:
+        """Switch working directory and re-index."""
+        p = Path(path)
+        p.mkdir(parents=True, exist_ok=True)
+        with self._cache_lock:
+            self.paths.dir = p
+        self._prime_from_disk()
 
-            self._initialized = True
+    def reload(self, dir_path: Optional[Union[str, Path]] = None) -> None:
+        """Re-index current (or new) directory."""
+        if dir_path:
+            self.load_dir(dir_path)
+        else:
+            self._prime_from_disk()
 
-    def _get_file_lock(self, filepath: str) -> threading.Lock:
-        """Get or create a lock for a specific file."""
-        with self._file_lock_manager:
-            if filepath not in self._file_locks:
-                self._file_locks[filepath] = threading.Lock()
-            return self._file_locks[filepath]
-
-    @staticmethod
-    def _sanitize(obj):
-        """Convert anything that JSON can't handle into a lightweight stub."""
-        import torch
-        if isinstance(obj, torch.Tensor):
-            return f"<tensor:{tuple(obj.shape)}>"
-        if isinstance(obj, torch.device):
-            return str(obj)
-        if isinstance(obj, dict):
-            return {k: EmbeddingManager._sanitize(v) for k, v in obj.items()}
-        if isinstance(obj, (list, tuple)):
-            return [EmbeddingManager._sanitize(x) for x in obj]
-        return obj
-
-    def _safe_save_file(self, tensors: Dict[str, torch.Tensor], filepath: str):
-        """
-        Save tensors to file safely, handling Windows file locking issues.
-        Uses atomic write with temporary file.
-        """
-        # Clear any cached tensors for this file to release memory maps
-        bundle_id = Path(filepath).stem
-        if bundle_id in self._loaded_tensors:
-            del self._loaded_tensors[bundle_id]
-
-        # Create temporary file in same directory for atomic move
-        temp_fd, temp_path = tempfile.mkstemp(
-            dir=os.path.dirname(filepath),
-            prefix='.tmp_',
-            suffix='.safetensors'
-        )
-
-        try:
-            os.close(temp_fd)  # Close the file descriptor
-
-            # Save to temporary file
-            save_file(tensors, temp_path)
-
-            # Atomic move (on Windows, this might fail if target exists)
-            if os.path.exists(filepath):
-                # On Windows, we need to remove the target first
-                try:
-                    os.remove(filepath)
-                except OSError:
-                    # If removal fails, try backup approach
-                    backup_path = f"{filepath}.backup"
-                    if os.path.exists(backup_path):
-                        os.remove(backup_path)
-                    os.rename(filepath, backup_path)
-
-            # Now move temp file to target
-            shutil.move(temp_path, filepath)
-
-        except Exception as e:
-            # Clean up temp file on error
-            if os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except:
-                    pass
-            raise e
-
-    def _safe_load_file(self, filepath: str) -> Dict[str, torch.Tensor]:
-        """
-        Load tensors from file safely, caching to avoid repeated memory mapping.
-        """
-        bundle_id = Path(filepath).stem
-
-        # Check if already loaded
-        if bundle_id in self._loaded_tensors:
-            # Return copies to avoid modifications affecting cache
-            return {k: v.clone().detach().contiguous() for k, v in self._loaded_tensors[bundle_id].items()}
-
-        # Load and cache
-        tensors = load_file(filepath)
-
-        # Store CPU copies to avoid device issues
-        cpu_tensors = {k: v.cpu().clone().detach().contiguous() for k, v in tensors.items()}
-        self._loaded_tensors[bundle_id] = cpu_tensors
-
-        # Return copies
-        return {k: v.clone().detach().contiguous() for k, v in cpu_tensors.items()}
-
-    def load_dir(self, folder: str):
-        """Thread-safe directory loading."""
+    def clear_cache(self) -> None:
+        """Drop RAM caches (sidecars remain)."""
         with self._cache_lock:
             self.cache.clear()
-            self.meta.clear()
             self._loaded_tensors.clear()
+            self._prompt_matrix = None
+            self._bundle_ids_for_matrix = []
+            self._vectorizer = None
 
-        for meta_path in Path(folder).glob("*.json"):
-            sha_id = meta_path.stem
-            try:
-                self.load_bundle(sha_id, folder_override=folder, _priming=True)
-            except Exception as e:
-                print(f"[EmbeddingManager] ⇢ skip {sha_id[:8]}  ({e})")
+    def list_bundles(self) -> List[str]:
+        """Return bundle_ids newest-first by sidecar created_at."""
+        with self._cache_lock:
+            items = list(self.meta.items())
+        def _k(it):
+            return it[1].get("created_at", "")
+        return [bid for bid, _ in sorted(items, key=_k, reverse=True)]
 
-        if self.cache:
-            print(f"[EmbeddingManager] loaded {len(self.cache)} bundles.")
-            self.build_prompt_matrix()
+    def info(self, ident: str) -> dict:
+        """Return a copy of the sidecar for id/trigger/prefix."""
+        bid = self._resolve_ident(ident)
+        with self._cache_lock:
+            return dict(self.meta[bid])
 
     def save_bundle(
-            self,
-            trigger: str,
-            conditioning: Union[List[Tuple[torch.Tensor, dict]], UsefulConditioning],
-            *,
-            prompt_text: Optional[str] = None,
-            folder: Optional[str] = None,
-            meta_extra: Optional[dict] = None,
+        self,
+        trigger: str,
+        conditioning,
+        *,
+        prompt_text: str = "",
+        folder: Optional[Union[str, Path]] = None,
+        meta_extra: Optional[dict] = None,
+        notes: Optional[str] = None,
     ) -> str:
-        """Thread-safe bundle saving with Windows file handling."""
-        # Normalize input
-        if not isinstance(conditioning, UsefulConditioning):
-            if not ConditioningHelper.verify(conditioning, silent=True):
-                raise ValueError("Conditioning input is invalid.")
-            conditioning = ConditioningHelper.convert_conditioning(conditioning)
-        conditioning = conditioning.clone(device="cpu")
-        folder = Path(folder or self.path)
-        folder.mkdir(parents=True, exist_ok=True)
+        """
+        Save a bundle atomically. ID = sha256(structure + trigger + prompt).
+        Returns: bundle_id (hex).
+        """
+        # Normalize to your canonical format
+        try:
+            uc = conditioning if isinstance(conditioning, UsefulConditioning) \
+                 else ConditioningHelper.convert_conditioning(conditioning)
+        except Exception as e:
+            raise TypeError(f"[EmbeddingManager.save_bundle] invalid conditioning: {e}")
+        if len(uc) == 0:
+            raise ValueError("Empty conditioning")
 
-        # Collect tensors and metadata
         tensors: Dict[str, torch.Tensor] = {}
-        extras: Dict[str, dict] = {}
-        pooled_collect: List[torch.Tensor] = []
+        extras: List[dict] = []
+        pooled_entries: List[torch.Tensor] = []
 
-        for idx in range(len(conditioning)):
-            core_key = f"conditioning_{idx}"
-            pooled_key = f"{core_key}_pooled"
+        # Build tensors/extras payload
+        for i in range(len(uc)):
+            core = uc.get_tensor(i)
+            meta = dict(uc.get_all_metadata()[i])
 
-            core_tensor = conditioning.get_tensor(idx).clone().detach().to(self.dtype).cpu().contiguous()
-            meta = conditioning.get_all_metadata()[idx]
+            core_key = self.CORE_KEY_FMT.format(i=i)
+            core_cpu = core.detach().to("cpu", dtype=self.dtype).contiguous().clone()
+            tensors[core_key] = core_cpu
 
-            pooled_tensor = conditioning.get_pooled(idx)
-            if pooled_tensor is not None:
-                pooled_tensor = pooled_tensor.clone().detach().to(self.dtype).cpu().contiguous()
-                tensors[pooled_key] = pooled_tensor
-                pooled_collect.append(pooled_tensor)
+            pooled = meta.get("pooled_output", None)
+            if isinstance(pooled, torch.Tensor):
+                pooled_key = f"{core_key}{self.POOLED_SUFFIX}"
+                pooled_cpu = pooled.detach().to("cpu", dtype=self.dtype).contiguous().clone()
+                tensors[pooled_key] = pooled_cpu
+                pooled_entries.append(pooled_cpu)
 
-            tensors[core_key] = core_tensor
-            extras[core_key] = self._sanitize(meta)
+            # strip tensors from meta → JSON-safe
+            clean_meta = {k: (None if torch.is_tensor(v) else v)
+                          for k, v in meta.items() if k != "pooled_output"}
+            extras.append(clean_meta)
 
-        if pooled_collect:
-            if len(pooled_collect) == 1:
-                # Clone to avoid shared memory reference
-                tensors["pooled_output"] = pooled_collect[0].clone()
-            else:
-                try:
-                    tensors["pooled_output"] = torch.cat(pooled_collect, dim=1)
-                except Exception:
-                    # Clone in fallback case too
-                    tensors["pooled_output"] = pooled_collect[0].clone()
+        # Combined pooled (clone again → no shared storage with per-entry pooled)
+        if pooled_entries:
+            tensors[self.COMBINED_POOLED_KEY] = pooled_entries[0].clone().contiguous()
 
-        # Generate bundle ID
-        ref_bytes = tensors[next(iter(tensors))].contiguous().view(-1)[:256_000].numpy().tobytes()
-        sha256_id = hashlib.sha256(ref_bytes).hexdigest()
+        # Deterministic id: structure + trigger + prompt
+        h = hashlib.sha256()
+        for k in sorted(tensors.keys()):
+            t = tensors[k]
+            h.update(str((k, tuple(t.shape), str(t.dtype))).encode("utf-8"))
+        h.update((trigger or "").encode("utf-8"))
+        h.update((prompt_text or "").encode("utf-8"))
+        bundle_id = h.hexdigest()
 
-        # File paths
-        tensor_path = str(folder / f"{sha256_id}.safetensors")
-        meta_path = str(folder / f"{sha256_id}.json")
+        # Resolve target paths; guard against accidental on-disk collision
+        base = Path(folder or self.paths.dir)
+        base.mkdir(parents=True, exist_ok=True)
+        tpath = base / f"{bundle_id}.safetensors"
+        jpath = base / f"{bundle_id}.json"
+        if tpath.exists() or jpath.exists():
+            salt = uuid.uuid4().hex[:8]
+            h.update(salt.encode("utf-8"))
+            bundle_id = h.hexdigest()
+            tpath = base / f"{bundle_id}.safetensors"
+            jpath = base / f"{bundle_id}.json"
 
-        # Get file-specific locks
-        tensor_lock = self._get_file_lock(tensor_path)
-        meta_lock = self._get_file_lock(meta_path)
+        # Atomic writes
+        self._atomic_safetensors_write(tpath, tensors)
 
-
-        # Write tensor file with safe method
-        with tensor_lock:
-            self._safe_save_file(tensors, tensor_path)
-
-        # Prepare metadata
-        meta = {
-            "prompt_trigger": trigger,
-            "tensor_keys": list(tensors.keys()),
-            "dims": {k: list(v.shape) for k, v in tensors.items()},
-            "dtype": str(self.dtype),
-            "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        sidecar = {
+            "schema_version": self.SCHEMA_VERSION,
+            "bundle_id": bundle_id,
+            "created_at": datetime.utcnow().isoformat(timespec="seconds"),
+            "prompt_trigger": trigger or "",
             "prompt_text": prompt_text or "",
-            "conditioning_extras": extras,
+            "tensor_keys": list(tensors.keys()),
+            "dtype": str(self.dtype),
+            "device": str(self.device),
+            "conditioning_extras": extras,   # index-aligned to conditioning_{i}
+            "notes": notes or "",
         }
         if meta_extra:
-            meta.update(meta_extra)
+            # keep user extras separate to avoid key collisions
+            sidecar["user_meta"] = {k: v for k, v in meta_extra.items()
+                                    if not torch.is_tensor(v)}
 
-        # Write metadata with atomic write
-        with meta_lock:
-            temp_meta = f"{meta_path}.tmp"
-            Path(temp_meta).write_text(json.dumps(meta, indent=2))
-            if os.path.exists(meta_path):
-                os.remove(meta_path)
-            os.rename(temp_meta, meta_path)
+        self._atomic_json_write(jpath, sidecar)
 
-        # Update cache
+        # Update in-memory indices/caches
         with self._cache_lock:
-            self.cache[sha256_id] = UsefulConditioning(conditioning.clone(device="cpu"))
-            self.meta[sha256_id] = meta
+            self.meta[bundle_id] = sidecar
+            self.cache.pop(bundle_id, None)
+            self._loaded_tensors.pop(bundle_id, None)
 
-        self.build_prompt_matrix()
-        return sha256_id
+        self._rebuild_trigger_index()
+        self.build_prompt_matrix(force=True)
+        return bundle_id
 
-    def load_bundle(
-            self,
-            ident: str,
-            *,
-            folder_override: Optional[str] = None,
-            _priming: bool = False,
-    ) -> UsefulConditioning:
-        """Thread-safe bundle loading with Windows file handling."""
-        sha_id = self._resolve_md5(ident) if not _priming else ident
+    def load_by_id(
+        self,
+        ident: str,
+        to_device: Optional[Union[str, torch.device]] = None,
+        to_dtype: Optional[torch.dtype] = None,
+    ) -> List[List[Union[torch.Tensor, dict]]]:
+        """
+        Load a bundle and return list[[tensor, meta], ...] with pooled in meta.
+        """
+        bid = self._resolve_ident(ident)
+        return self._load_core(bid, to_device=to_device, to_dtype=to_dtype)
 
-        # Check cache first
+    def load_by_trigger(
+        self,
+        trigger: str,
+        to_device: Optional[Union[str, torch.device]] = None,
+        to_dtype: Optional[torch.dtype] = None,
+    ) -> List[List[Union[torch.Tensor, dict]]]:
+        bids = self._trigger_to_id.get(trigger) or []
+        if not bids:
+            raise KeyError(f"No bundle for trigger '{trigger}'")
+        return self.load_by_id(bids[0], to_device=to_device, to_dtype=to_dtype)
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+    def _prime_from_disk(self) -> None:
+        """Scan sidecars into self.meta (tensors are lazy)."""
         with self._cache_lock:
-            if sha_id in self.cache:
-                return self.cache[sha_id]
+            self.meta.clear()
+            self.cache.clear()
+            self._loaded_tensors.clear()
+            self._trigger_to_id.clear()
+            self._prompt_matrix = None
+            self._bundle_ids_for_matrix = []
+            self._vectorizer = None
 
-        base_dir = Path(folder_override or self.path)
-        meta_path = base_dir / f"{sha_id}.json"
-        tensor_path = base_dir / f"{sha_id}.safetensors"
+            for p in self.paths.dir.glob("*.json"):
+                try:
+                    side = json.loads(p.read_text(encoding="utf-8"))
+                    if int(side.get("schema_version", 0)) != self.SCHEMA_VERSION:
+                        continue
+                    bid = side.get("bundle_id") or p.stem
+                    self.meta[bid] = side
+                except Exception:
+                    continue
 
-        if not meta_path.exists() or not tensor_path.exists():
-            raise FileNotFoundError(f"Missing bundle files for {sha_id}")
+        self._rebuild_trigger_index()
 
-        # Thread-safe file reading
-        meta_lock = self._get_file_lock(str(meta_path))
-        tensor_lock = self._get_file_lock(str(tensor_path))
-
-        with meta_lock:
-            meta = json.loads(meta_path.read_text())
-
-        with tensor_lock:
-            raw_tensors = self._safe_load_file(str(tensor_path))
-
-        # Reconstruct UsefulConditioning
-        extras = meta.get("conditioning_extras", {})
-        out_entries: List[List[Union[torch.Tensor, dict]]] = []
-
-        core_keys = [k for k in meta["tensor_keys"] if k.startswith("conditioning_") and not k.endswith("_pooled")]
-        core_keys.sort(key=lambda k: int(k.split("_")[1]))
-
-        for core_key in core_keys:
-            pooled_key = f"{core_key}_pooled"
-            core_tensor = raw_tensors[core_key].cpu().to(self.dtype)
-
-            meta_dict = extras.get(core_key, {})
-            if pooled_key in raw_tensors:
-                meta_dict = dict(meta_dict)
-                meta_dict["pooled_output"] = raw_tensors[pooled_key].cpu().to(self.dtype)
-
-            out_entries.append([core_tensor, meta_dict])
-
-        if "pooled_output" in raw_tensors and out_entries:
-            combined = raw_tensors["pooled_output"].cpu().to(self.dtype)
-            for entry in out_entries:
-                if "pooled_output" not in entry[1]:
-                    entry[1]["pooled_output"] = combined
-
-        useful = UsefulConditioning(out_entries)
-
-        # Update cache
+    def _rebuild_trigger_index(self) -> None:
         with self._cache_lock:
-            self.cache[sha_id] = useful
-            self.meta[sha_id] = meta
+            self._trigger_to_id.clear()
+            for bid, side in self.meta.items():
+                trig = side.get("prompt_trigger") or ""
+                if trig:
+                    self._trigger_to_id.setdefault(trig, []).append(bid)
 
-        if not _priming:
-            self.build_prompt_matrix()
-
-        return useful
-
-    def _resolve_md5(self, ident: str) -> str:
-        """Thread-safe bundle resolution."""
+    def _resolve_ident(self, ident: str) -> str:
+        """Support exact id, exact trigger, or id prefix."""
         with self._cache_lock:
             if ident in self.meta:
                 return ident
-            for md5, meta in self.meta.items():
-                if ident == meta.get("prompt_trigger") or md5.startswith(ident):
-                    return md5
-        raise KeyError(f"[EmbeddingManager] bundle '{ident}' not found")
+            if ident in self._trigger_to_id and self._trigger_to_id[ident]:
+                return self._trigger_to_id[ident][0]
+            for bid in self.meta.keys():
+                if bid.startswith(ident):
+                    return bid
+        raise KeyError(f"bundle '{ident}' not found")
+
+    def _lazy_load_tensors(self, bundle_id: str) -> Dict[str, torch.Tensor]:
+        with self._cache_lock:
+            if bundle_id in self._loaded_tensors:
+                return self._loaded_tensors[bundle_id]
+        tpath = self.paths.dir / f"{bundle_id}.safetensors"
+        if not tpath.exists():
+            raise FileNotFoundError(f"Missing tensor file for {bundle_id}")
+        td = st_load_file(str(tpath))  # CPU tensors
+        with self._cache_lock:
+            self._loaded_tensors[bundle_id] = td
+        return td
+
+    def _load_core(
+        self,
+        bundle_id: str,
+        to_device: Optional[Union[str, torch.device]] = None,
+        to_dtype: Optional[torch.dtype] = None,
+    ) -> List[List[Union[torch.Tensor, dict]]]:
+        """
+        Materialize list[[tensor, meta], ...]; pooled restored into meta['pooled_output'].
+        """
+        with self._cache_lock:
+            side = self.meta.get(bundle_id)
+        if not side:
+            raise FileNotFoundError(f"Missing sidecar for {bundle_id}")
+
+        tensors = self._lazy_load_tensors(bundle_id)
+        device = torch.device(to_device) if to_device is not None else self.device
+        dtype = to_dtype if to_dtype is not None else self.dtype
+
+        # Keep original order by conditioning_{i}
+        keys = [k for k in side.get("tensor_keys", [])
+                if k.startswith("conditioning_") and not k.endswith(self.POOLED_SUFFIX)]
+        def idx(k: str) -> int:
+            try: return int(k.split("_")[1])
+            except Exception: return 0
+        keys.sort(key=idx)
+
+        extras_list: List[dict] = side.get("conditioning_extras", [])
+        out: List[List[Union[torch.Tensor, dict]]] = []
+
+        for i, core_key in enumerate(keys):
+            if core_key not in tensors:
+                continue
+            core = tensors[core_key].to(device=device, dtype=dtype, non_blocking=True).contiguous()
+            meta: dict = {}
+
+            pooled_key = f"{core_key}{self.POOLED_SUFFIX}"
+            if pooled_key in tensors:
+                meta["pooled_output"] = tensors[pooled_key].to(device=device, dtype=dtype, non_blocking=True).contiguous()
+
+            if i < len(extras_list) and isinstance(extras_list[i], dict):
+                for k, v in extras_list[i].items():
+                    if not torch.is_tensor(v):
+                        meta[k] = v
+
+            out.append([core, meta])
+
+        # Backfill pooled from combined if per-entry pooled missing
+        if self.COMBINED_POOLED_KEY in tensors and out:
+            combined = tensors[self.COMBINED_POOLED_KEY].to(device=device, dtype=dtype, non_blocking=True).contiguous()
+            for _, m in out:
+                m.setdefault("pooled_output", combined)
+
+        with self._cache_lock:
+            self.cache[bundle_id] = out
+        return out
+
+    # ------------------------------------------------------------------
+    # Atomic writers
+    # ------------------------------------------------------------------
+    def _atomic_safetensors_write(self, path: Union[str, Path], tensors: Dict[str, torch.Tensor]) -> None:
+        path = Path(path)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        st_save_file(tensors, str(tmp))
+        os.replace(str(tmp), str(path))
+
+    def _atomic_json_write(self, path: Union[str, Path], payload: dict) -> None:
+        path = Path(path)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(str(tmp), str(path))
+
+    # ------------------------------------------------------------------
+    # Optional search/index (no-op unless you use it)
+    # ------------------------------------------------------------------
+    def build_prompt_matrix(self, force: bool = False) -> None:
+        if not force and self._prompt_matrix is not None:
+            return
+        self._prompt_matrix = None
+        self._bundle_ids_for_matrix = []
+        self._vectorizer = None
 
 
-    # Thread-safe prompt matrix building
-    def build_prompt_matrix(self):
-        """Thread-safe prompt matrix building."""
-        with self._matrix_lock:
-            with self._cache_lock:
-                self.prompt_keys = []
-                self.prompt_index = []
+# ============================================================
+# Singleton factory
+# ------------------------------------------------------------
+_MANAGER_LOCK = threading.Lock()
+_MANAGER_SINGLETON: Optional[EmbeddingManager] = None
 
-                for md5, meta in self.meta.items():
-                    prompt = meta.get("prompt_text", "").strip()
-                    if prompt:
-                        self.prompt_keys.append(md5)
-                        self.prompt_index.append(prompt)
-
-            if not self.prompt_index:
-                self.prompt_matrix = None
-                return
-
-            vec = TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 6))
-            self.prompt_matrix = vec.fit_transform(self.prompt_index)
-            self.prompt_vectorizer = vec
-            print(f"[EmbeddingManager] built prompt matrix with {len(self.prompt_index)} entries.")
-
-    def lookup_prompt(self, query: str, top_k=5, thresh=0.25):
-        """Thread-safe prompt lookup."""
-        with self._matrix_lock:
-            if not self.prompt_matrix or not self.prompt_vectorizer:
-                raise RuntimeError("Prompt matrix not built. Call `build_prompt_matrix()` first.")
-
-            q_vec = self.prompt_vectorizer.transform([query])
-            sims = cosine_similarity(q_vec, self.prompt_matrix).flatten()
-
-        results = [(self.prompt_keys[i], sims[i]) for i in range(len(sims)) if sims[i] >= thresh]
-        results.sort(key=lambda x: x[1], reverse=True)
-        return results[:top_k]
-
-    # Add other methods with appropriate locking...
-
-
-
-
-# Singleton accessor functions
-_manager_instance = None
-_manager_lock = threading.Lock()
-
-
-def clear_cache(self):
-    """Clear all caches including loaded tensors."""
-    with self._cache_lock:
-        self.cache.clear()
-        self.meta.clear()
-        self._loaded_tensors.clear()
-
-
-# Singleton accessor
-def get_bank(path: Optional[str] = None, *, force_reload: bool = False) -> EmbeddingManager:
-    """Thread-safe singleton accessor for EmbeddingManager."""
-    if path is None:
-        path = str(Path(get_folder_paths("embeddings")[0]) / "cached_embeddings")
-
-    manager = EmbeddingManager()
-
-    if force_reload or not manager.cache:
-        if os.path.isdir(path):
-            manager.load_dir(path)
-
-    return manager
+def get_bank(
+    force_reload: bool = False,
+    dtype: torch.dtype = torch.float16,
+    device: str = "cpu",
+    subdir: str = "cached_embeddings",
+) -> EmbeddingManager:
+    """
+    Retrieve the process-local EmbeddingManager singleton.
+    • force_reload=True → re-index sidecars and clear derived caches
+    • dtype/device/subdir are applied on first creation; later calls can update device/dtype
+    """
+    global _MANAGER_SINGLETON
+    with _MANAGER_LOCK:
+        if _MANAGER_SINGLETON is None:
+            _MANAGER_SINGLETON = EmbeddingManager(dtype=dtype, device=device, subdir=subdir)
+        else:
+            # apply dynamic config changes
+            changed = False
+            if str(_MANAGER_SINGLETON.device) != str(device):
+                _MANAGER_SINGLETON.device = torch.device(device)
+                changed = True
+            if _MANAGER_SINGLETON.dtype != dtype:
+                _MANAGER_SINGLETON.dtype = dtype
+                changed = True
+            expected_dir = _EMBED_ROOT / subdir
+            if _MANAGER_SINGLETON.paths.dir != expected_dir:
+                _MANAGER_SINGLETON.load_dir(expected_dir)
+                changed = True
+            if force_reload and not changed:
+                _MANAGER_SINGLETON.reload()
+        return _MANAGER_SINGLETON

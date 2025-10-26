@@ -145,7 +145,7 @@ class Alucard(nn.Module):
                         entropy = compute_entropy(temp_pad_mask)  # [B, T]
                         entropy_scalar = entropy.mean(dim=-1, keepdim=True)  # [B, 1]
 
-                        entropy_weight = torch.sigmoid((entropy_scalar - 0.5) * 5.0)  # sharpen center around 0.5
+                        entropy_weight = torch.sigmoid((entropy_scalar - context.get("entropy_scale_center", 0.5)) * context.get("entropy_scale_magnitude", 5.0))  # sharpen center around 0.5
                         temp_pad_mask = temp_pad_mask * entropy_weight.unsqueeze(1)  # [B, T, 1] scaled
 
                     folded = padding.apply_padding(a, folded, temp_pad_mask)
@@ -193,7 +193,7 @@ class FieldWalker:
         d = d if d is not None else (b - a)
         context = context or {}
 
-        if pad_mask is None and context.get("use_alpha_mask", False) and context.get("use_rose_similarity", None):
+        if pad_mask is None and context.get("use_alpha_mask", False) and context.get("use_rose_similarity", False):
             try:
                 relation = d
                 purpose = context.get("rose_purpose", torch.ones_like(a))  # fallback = identity purpose

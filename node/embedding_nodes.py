@@ -1,47 +1,77 @@
 # abs_nodes/embedding_nodes.py
 # ============================================================
-import json, logging, uuid, re, torch
+import json
+import logging
+import uuid
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List
 
+import torch
 from folder_paths import get_folder_paths
+from server import PromptServer
+
 from ..embedding.embedding_manager import get_bank, EmbeddingManager
+from ..utils.conditioning_helper import ConditioningHelper, UsefulConditioning
+
+from comfy.utils import ProgressBar
+from ..text_encoders.symbolic_logic_manager import SymbolicLogicManager
+from ..text_encoders.symbolic_caption_data import SymbolicCaptionGenerator
+import random
 
 logger = logging.getLogger(__name__)
 
-from ..utils.conditioning_helper import ConditioningHelper, UsefulConditioning
+# -------------------------------------------------------------------------
+# Constants / categories
+CATEGORY_EMBED = "utils/embedding"
+CATEGORY_SYM   = "symbolic/logic"
+EVENT_REFRESH  = "abs.bundle.refresh"
+
 
 # -------------------------------------------------------------------------
 # helpers – path & bank
 def _default_embed_dir() -> str:
+    """Absolute path to the bank subdir under ComfyUI embeddings."""
     return str(Path(get_folder_paths("embeddings")[0]) / "cached_embeddings")
 
 
-def _bank(path: str = "", force=False) -> EmbeddingManager:
-    return get_bank(path or _default_embed_dir(), force_reload=force)
+def _bank(*, path: str = "", force: bool = False) -> EmbeddingManager:
+    """
+    Retrieve the singleton manager. We do not downcast dtypes here — use whatever
+    the manager was constructed with (you can change via get_bank(...) elsewhere).
+    """
+    if path:
+        # switch subdir if caller asks; manager persists this until changed again
+        subdir = Path(path).name
+        b = get_bank(force_reload=force, subdir=subdir)
+        b.load_dir(path)  # ensure absolute path (Windows-safe)
+        return b
+    # default bank
+    return get_bank(force_reload=force)
 
 
-# token parsing helpers
-def _parse_token_field(raw: str) -> List[int]:
-    """'101, 202 303' → [101,202,303]."""
-    return [int(v) for v in re.split(r"[,\s]+", raw.strip()) if v]
-
-
-def _extract_tokens_from_cond(cond: list) -> List[int]:
-    """Look for token-IDs embedded in conditioning extras."""
-    if len(cond) < 2:
-        return []
-    _, obj = cond  # Fixed: was unpacking incorrectly
-    if isinstance(obj, dict) and "token_ids" in obj:
-        return list(map(int, obj["token_ids"]))
-    return []
+def _bundle_labels() -> List[str]:
+    """
+    Display labels for dropdowns. We show triggers if present; else 8-char id.
+    Resolution during load uses manager._resolve_ident so labels can be either.
+    """
+    b = _bank()
+    ids = b.list_bundles()
+    if not ids:
+        return ["<no bundles>"]
+    labels = []
+    for bid in ids:
+        info = b.info(bid)
+        label = info.get("prompt_trigger") or bid[:8]
+        labels.append(label)
+    return labels
 
 
 # -------------------------------------------------------------------------
 # 1 ▸ SAVE NODE
 class ABS_SaveEmbedding:
     """
-    Save CONDITIONING bundle into the ABS bank.
+    Save a conditioning bundle into the ABS bank.
+    Input accepts either a plain list[[tensor, meta], ...] or UsefulConditioning.
     """
 
     @classmethod
@@ -53,232 +83,196 @@ class ABS_SaveEmbedding:
                 "prompt": ("STRING", {"default": "", "multiline": True}),
                 "meta_json": ("STRING", {"default": "{}", "multiline": True}),
                 "force": ("BOOLEAN", {"default": False}),
+            },
+            "hidden": {
+                "node_id": "UNIQUE_ID",
             }
         }
 
     RETURN_TYPES = ("CONDITIONING",)
     RETURN_NAMES = ("conditioning",)
-    CATEGORY = "utils/embedding"
+    CATEGORY = CATEGORY_EMBED
     FUNCTION = "save"
     OUTPUT_NODE = True
 
-    def save(self, conditioning, trigger, prompt, meta_json, force):
-        conditioning = UsefulConditioning(conditioning) if isinstance(conditioning, list) else conditioning
-        if not conditioning:
-            raise ValueError("conditioning list is empty")
+    def save(self, conditioning, trigger, prompt, meta_json, force, node_id=None):
+        # Normalize to the format the manager expects (your helper enforces shape)
+        try:
+            uc = conditioning if isinstance(conditioning, UsefulConditioning) \
+                 else ConditioningHelper.convert_conditioning(conditioning)
+        except Exception as e:
+            raise ValueError(f"[ABS_SaveEmbedding] invalid conditioning: {e}")
+
+        if len(uc) == 0:
+            raise ValueError("conditioning is empty")
 
         bank = _bank(force=force)
-
-        if not trigger:
-            trigger = f"auto_{uuid.uuid4().hex[:8]}"
-
-        # Check if trigger already exists
-        if not force:
-            for bundle_id, meta in bank.meta.items():
-                if meta.get("prompt_trigger") == trigger:
-                    logger.info(f"[ABS] trigger '{trigger}' exists – skip")
-                    return (conditioning,)
 
         try:
             extra_meta = json.loads(meta_json or "{}")
         except json.JSONDecodeError:
-            logger.warning(f"[ABS] Invalid meta_json, using empty dict")
+            logger.warning("[ABS_SaveEmbedding] invalid meta_json; using {}")
             extra_meta = {}
 
         bundle_id = bank.save_bundle(
-            trigger=trigger,
-            conditioning=conditioning,
-            prompt_text=prompt,
-            folder=bank.path,
-            meta_extra=extra_meta
+            trigger=trigger or f"auto_{uuid.uuid4().hex[:8]}",
+            conditioning=uc.to_list(),
+            prompt_text=prompt or "",
+            folder=bank.paths.dir,
+            meta_extra=extra_meta,
         )
 
-        logger.info(f"[ABS] saved bundle {bundle_id[:8]} as '{trigger}' | prompt='{prompt[:64]}…'")
+        # Nudge the UI to refresh dropdown options immediately
+        try:
+            PromptServer.instance.send_sync(EVENT_REFRESH, {
+                "bundle_id": bundle_id,
+                "trigger": trigger,
+                "node": node_id or "",
+            })
+        except Exception:
+            pass
+
+        # Pass-through (as conditioning). Keep the same object the graph already carries.
         return (conditioning,)
-
-
-# -------------------------------------------------------------------------
-# dropdown helper
-def _bundle_lists():
-    """Get lists of bundle IDs for dropdown display."""
-    b = _bank()
-    if not b.meta:
-        return (["<no bundles>"], [""])
-
-    vis, true = [], []
-    for bundle_id, meta in b.meta.items():
-        display_name = meta.get("prompt_trigger", bundle_id[:8])
-        vis.append(display_name)
-        true.append(bundle_id)
-    return vis, true
 
 
 # -------------------------------------------------------------------------
 # 2 ▸ LOAD NODE
 class ABS_LoadEmbedding:
-    """Load a stored bundle as CONDITIONING using UsefulConditioning."""
+    """Load a saved bundle into a UsefulConditioning-compatible list."""
 
     @classmethod
     def INPUT_TYPES(cls):
-        vis, _ = _bundle_lists()
-        if not vis:
-            vis = ["<no bundles>"]
-            default = "<no bundles>"
-        else:
-            default = vis[0]
-
+        labels = _bundle_labels()
         return {
             "required": {
-                "bundle_id": (vis, {"default": default}),
+                "bundle_id": (labels, {"default": labels[0]}),
                 "device": (["auto", "cpu", "cuda"], {"default": "auto"}),
+                "dtype": (["keep", "float16", "float32"], {"default": "keep"}),
             }
         }
 
     RETURN_TYPES = ("CONDITIONING",)
     RETURN_NAMES = ("conditioning",)
-    CATEGORY = "utils/embedding"
+    CATEGORY = CATEGORY_EMBED
     FUNCTION = "load"
 
-    def _resolve_bundle(self, ident: str) -> str:
-        """Resolve bundle ID from trigger name or partial ID."""
-        bank = _bank()
+    def _resolve_dtype(self, pref: str):
+        if pref == "float16":
+            return torch.float16
+        if pref == "float32":
+            return torch.float32
+        return None  # keep saved dtype
 
-        # Direct ID match
-        if ident in bank.meta:
-            return ident
-
-        # Search by trigger or partial ID
-        for bundle_id, meta in bank.meta.items():
-            if meta.get("prompt_trigger") == ident or bundle_id.startswith(ident):
-                return bundle_id
-
-        raise KeyError(f"bundle '{ident}' not found")
-
-    def load(self, bundle_id, device):
+    def load(self, bundle_id, device, dtype):
         if bundle_id == "<no bundles>":
             raise ValueError("No bundles available to load")
 
         bank = _bank()
 
-        # Resolve the actual bundle ID
-        resolved_id = self._resolve_bundle(bundle_id)
-
-        # Load the bundle as UsefulConditioning
-        useful_cond = bank.load_bundle(resolved_id)
-
-        # Determine device
+        # Resolve device
         if device == "auto":
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        # Convert to standard CONDITIONING format with proper device placement
-        conditioning_list = []
-        for i in range(len(useful_cond)):
-            tensor = useful_cond.get_tensor(i).to(device)
-            meta = useful_cond.get_all_metadata()[i].copy()
+        to_dtype = self._resolve_dtype(dtype)
 
-            # Ensure pooled_output is on correct device if present
-            if "pooled_output" in meta and isinstance(meta["pooled_output"], torch.Tensor):
-                meta["pooled_output"] = meta["pooled_output"].to(device)
-
-            conditioning_list.append([tensor, meta])
-
-        logger.info(
-            f"[ABS] loaded bundle {resolved_id[:8]} (trigger: {bank.meta[resolved_id].get('prompt_trigger', 'none')})")
-
-        return (conditioning_list,)
+        # Manager returns list[[tensor, meta], ...] already in correct shape
+        cond_list = bank.load_by_id(bundle_id, to_device=device, to_dtype=to_dtype)
+        return (cond_list,)
 
 
 # -------------------------------------------------------------------------
-# 3 ▸ SHAPER NODE (Fixed)
+# 3 ▸ SHAPER NODE
 class ABS_ShaperEmbedding:
     """
-    learn=True  → save incoming conditioning under trigger
-    learn=False → load and merge saved embedding with incoming conditioning
+    learn=True  → save incoming conditioning under 'bundle_id' (used as trigger)
+    learn=False → load and merge saved conditioning with incoming one
     """
 
     @classmethod
     def INPUT_TYPES(cls):
-        vis, _ = _bundle_lists()
-        if not vis:
-            vis = ["<no bundles>"]
-            default = "<no bundles>"
-        else:
-            default = vis[0]
-
+        labels = _bundle_labels()
         return {
             "required": {
                 "conditioning": ("CONDITIONING",),
-                "bundle_id": (vis, {"default": default}),
+                "bundle_id": (labels, {"default": labels[0]}),
                 "learn": ("BOOLEAN", {"default": False}),
                 "force": ("BOOLEAN", {"default": False}),
                 "mode": (["prepend", "append", "replace"], {"default": "prepend"}),
+            },
+            "hidden": {
+                "node_id": "UNIQUE_ID",
             }
         }
 
     RETURN_TYPES = ("CONDITIONING",)
     RETURN_NAMES = ("conditioning",)
-    CATEGORY = "utils/embedding"
+    CATEGORY = CATEGORY_EMBED
     FUNCTION = "apply"
     OUTPUT_NODE = True
 
-    def apply(self, conditioning, bundle_id, learn, force, mode):
-        if not conditioning:
-            raise ValueError("conditioning list empty")
+    def apply(self, conditioning, bundle_id, learn, force, mode, node_id=None):
+        # Normalize incoming
+        try:
+            uc = conditioning if isinstance(conditioning, UsefulConditioning) \
+                 else ConditioningHelper.convert_conditioning(conditioning)
+        except Exception as e:
+            raise ValueError(f"[ABS_ShaperEmbedding] invalid conditioning: {e}")
+
+        bank = _bank(force=force if learn else False)
 
         if learn:
-            # Save mode - use bundle_id as trigger
-            if bundle_id == "<no bundles>":
-                bundle_id = f"auto_{uuid.uuid4().hex[:8]}"
-
-            saver = ABS_SaveEmbedding()
-            return saver.save(
-                conditioning=conditioning,
-                trigger=bundle_id,
-                prompt="",
-                meta_json="{}",
-                force=force
+            trigger = bundle_id if bundle_id and bundle_id != "<no bundles>" else f"auto_{uuid.uuid4().hex[:8]}"
+            bundle_id = bank.save_bundle(
+                trigger=trigger,
+                conditioning=uc.to_list(),
+                prompt_text="",
+                folder=bank.paths.dir,
+                meta_extra={},
             )
-        else:
-            # Load and merge mode
-            if bundle_id == "<no bundles>":
-                raise ValueError("No bundle selected for loading")
+            try:
+                PromptServer.instance.send_sync(EVENT_REFRESH, {
+                    "bundle_id": bundle_id,
+                    "trigger": trigger,
+                    "node": node_id or "",
+                })
+            except Exception:
+                pass
+            return (conditioning,)
 
-            # Load the saved embedding
-            loader = ABS_LoadEmbedding()
-            loaded_cond = loader.load(bundle_id, "auto")[0]
+        # load & merge
+        if bundle_id == "<no bundles>":
+            raise ValueError("No bundle selected for loading")
 
-            # Merge based on mode
-            if mode == "replace":
-                return (loaded_cond,)
-            elif mode == "append":
-                return (conditioning + loaded_cond,)
-            else:  # prepend
-                return (loaded_cond + conditioning,)
+        loaded = bank.load_by_id(bundle_id, to_device="cuda" if torch.cuda.is_available() else "cpu")
+
+        if mode == "replace":
+            return (loaded,)
+        elif mode == "append":
+            merged = UsefulConditioning(uc.to_list() + loaded)
+            return (merged.to_list(),)
+        else:  # prepend
+            merged = UsefulConditioning(loaded + uc.to_list())
+            return (merged.to_list(),)
 
 
 # -------------------------------------------------------------------------
-# 4 ▸ EMBEDDING INSPECTOR NODE (New)
+# 4 ▸ EMBEDDING INSPECTOR NODE
 class ABS_InspectEmbedding:
-    """Inspect the contents of a saved embedding bundle."""
+    """Summarize a saved bundle (shapes, pooled presence, and sidecar fields)."""
 
     @classmethod
     def INPUT_TYPES(cls):
-        vis, _ = _bundle_lists()
-        if not vis:
-            vis = ["<no bundles>"]
-            default = "<no bundles>"
-        else:
-            default = vis[0]
-
+        labels = _bundle_labels()
         return {
             "required": {
-                "bundle_id": (vis, {"default": default}),
+                "bundle_id": (labels, {"default": labels[0]}),
             }
         }
 
     RETURN_TYPES = ("STRING", "STRING", "STRING")
     RETURN_NAMES = ("info", "prompt_text", "metadata")
-    CATEGORY = "utils/embedding"
+    CATEGORY = CATEGORY_EMBED
     FUNCTION = "inspect"
     OUTPUT_NODE = True
 
@@ -287,66 +281,41 @@ class ABS_InspectEmbedding:
             return ("No bundles available", "", "{}")
 
         bank = _bank()
+        side = bank.info(bundle_id)  # copy of sidecar dict
+        cond = bank.load_by_id(bundle_id, to_device="cpu")  # shapes are readable on CPU
 
-        # Resolve bundle
-        resolved_id = None
-        for bid, meta in bank.meta.items():
-            if meta.get("prompt_trigger") == bundle_id or bid.startswith(bundle_id):
-                resolved_id = bid
-                break
-
-        if not resolved_id:
-            return (f"Bundle '{bundle_id}' not found", "", "{}")
-
-        # Get metadata
-        meta = bank.meta[resolved_id]
-        useful_cond = bank.load_bundle(resolved_id)
-
-        # Build info string
-        info_parts = [
-            f"Bundle ID: {resolved_id[:16]}...",
-            f"Trigger: {meta.get('prompt_trigger', 'none')}",
-            f"Created: {meta.get('created_at', 'unknown')}",
-            f"Entries: {len(useful_cond)}",
-            f"Tensor Keys: {', '.join(meta.get('tensor_keys', []))}",
+        lines = [
+            f"Bundle ID: {side.get('bundle_id','')[:16]}...",
+            f"Trigger: {side.get('prompt_trigger','')}",
+            f"Created: {side.get('created_at','unknown')}",
+            f"Entries: {len(cond)}",
         ]
+        # Tensor shapes / pooled presence
+        for i, entry in enumerate(cond):
+            t = entry[0]
+            meta = entry[1] if len(entry) > 1 and isinstance(entry[1], dict) else {}
+            pooled = meta.get("pooled_output", None)
+            lines.append(f"  Entry {i}: tensor={tuple(t.shape)}, pooled={'yes' if isinstance(pooled, torch.Tensor) else 'no'}")
 
-        # Add tensor shapes
-        for i in range(len(useful_cond)):
-            tensor = useful_cond.get_tensor(i)
-            pooled = useful_cond.get_pooled(i)
-            info_parts.append(
-                f"  Entry {i}: tensor={tuple(tensor.shape)}, pooled={'yes' if pooled is not None else 'no'}")
-
-        info = "\n".join(info_parts)
-        prompt_text = meta.get("prompt_text", "")
-
-        # Clean metadata for display
-        display_meta = {
-            k: v for k, v in meta.items()
-            if k not in ["conditioning_extras", "tensor_keys", "dims"]
-        }
-        metadata = json.dumps(display_meta, indent=2)
-
-        return (info, prompt_text, metadata)
+        # Slim metadata for display (hide raw tensor key list if too long)
+        disp = {k: v for k, v in side.items() if k not in ["tensor_keys"]}
+        return ("\n".join(lines), side.get("prompt_text", ""), json.dumps(disp, indent=2))
 
 
-from comfy.utils import ProgressBar
-from ..embedding.embedding_manager import get_bank
-from ..text_encoders.symbolic_logic_manager import SymbolicLogicManager
-
-
+# -------------------------------------------------------------------------
+# 5 ▸ SYMBOLIC NODES (kept minimal, behavior unchanged)
 BEATRIX_CATEGORIES = [
-    "<subject>","<subject1>","<subject2>",
-    "<pose>","<emotion>","<surface>",
-    "<lighting>","<material>","<accessory>",
-    "<footwear>", "<upper_body_clothing>","<hair_style>",
-    "<hair_length>","<headwear>","<texture>",
-    "<pattern>","<grid>","<zone>",
-    "<offset>","<object_left>","<object_right>",
-    "<relation>","<intent>","<style>",
-    "<fabric>","<jewelry>"
+    "<subject>", "<subject1>", "<subject2>",
+    "<pose>", "<emotion>", "<surface>",
+    "<lighting>", "<material>", "<accessory>",
+    "<footwear>", "<upper_body_clothing>", "<hair_style>",
+    "<hair_length>", "<headwear>", "<texture>",
+    "<pattern>", "<grid>", "<zone>",
+    "<offset>", "<object_left>", "<object_right>",
+    "<relation>", "<intent>", "<style>",
+    "<fabric>", "<jewelry>",
 ]
+
 class SymbolicPromptRouter:
     @classmethod
     def INPUT_TYPES(cls):
@@ -362,35 +331,25 @@ class SymbolicPromptRouter:
             }
         }
 
-
     RETURN_TYPES = ("LIST",)
     RETURN_NAMES = ("symbolic_matches",)
     FUNCTION = "run"
-    CATEGORY = "symbolic/logic"
-
+    CATEGORY = CATEGORY_SYM
     OUTPUT_NODE = True
 
-
-
     def run(self, prompt, encoder_pipe, pad_first, slice_length, max_length, each_mode, top_k):
-
         encoder = encoder_pipe[0]
         if encoder is None:
             raise ValueError("No encoder pipeline provided")
-        else:
 
+        if "bert" not in encoder.get("config", {}).get("model_type", "").lower():
+            logger.warning(f"[SymbolicPromptRouter] pipeline not 'bert', got: {encoder.get('config', {}).get('model_type','')}")
+            raise ValueError("Encoder pipeline must be of type 'symbolic_logic'")
 
-            if "bert" not in encoder.get("config", {}).get("model_type", "").lower():
-                logger.warning(f"[SymbolicPromptRouter] Encoder pipeline type '{encoder}' is not 'bert'.")
-                logger.warning(f"[SymbolicPromptRouter] Config type: {encoder.get('config', {})} {encoder.get('config', {}).get('model_type', '')}")
-                raise ValueError("Encoder pipeline must be of type 'symbolic_logic'")
-            model = encoder.get("model", None)
-            tokenizer = encoder.get("tokenizer", None)
-
+        model = encoder.get("model", None)
+        tokenizer = encoder.get("tokenizer", None)
 
         pbar = ProgressBar(total=52)
-
-
         logic = SymbolicLogicManager(
             base_prompt=prompt,
             model=model,
@@ -403,32 +362,14 @@ class SymbolicPromptRouter:
         )
         logger.info(f"[SymbolicPromptRouter] Running symbolic logic with prompt: {prompt}")
 
-
         matches = logic.extract_alpha_similarities(
             embedding_manager=get_bank(),
             top_k=top_k
         )
-        """
-            candidates.append({
-                "md5": f"{special_token}_injection",
-                "score": float(score.item()),
-                "trigger": special_token,
-                "prompt_text": self.tokenizer.decode(modified_ids[0], skip_special_tokens=False),
-                "pooled": pooled.squeeze(0).cpu().tolist() if use_pooled else None
-            })
-        """
-        for match in matches:
-            logger.info(f"[SymbolicPromptRouter] Found match: {match.get('trigger', '<unknown>')} "
-                        f"with score: {match.get('score', 0.0)} ")
-                        #f"and prompt: {match.get('prompt_text', '<no prompt>')[:64]}…")
-
+        for m in matches:
+            logger.info(f"[SymbolicPromptRouter] match: {m.get('trigger','<unk>')} score={m.get('score',0.0)}")
         return (matches,)
 
-
-
-
-import random
-from ..text_encoders.symbolic_caption_data import SymbolicCaptionGenerator
 
 class BertPromptSimilarityFlood:
     """
@@ -437,7 +378,7 @@ class BertPromptSimilarityFlood:
 
     @classmethod
     def INPUT_TYPES(cls):
-        categories: list[str] = ["all"] + BEATRIX_CATEGORIES
+        categories: List[str] = ["all"] + BEATRIX_CATEGORIES
         return {
             "required": {
                 "prompt": ("STRING", {"default": "", "multiline": True}),
@@ -451,11 +392,10 @@ class BertPromptSimilarityFlood:
             }
         }
 
-
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("flooded_prompt",)
     FUNCTION = "flood"
-    CATEGORY = "symbolic/logic"
+    CATEGORY = CATEGORY_SYM
 
     def __init__(self):
         self.generator = SymbolicCaptionGenerator()
@@ -478,7 +418,6 @@ class BertPromptSimilarityFlood:
             all_text = prompts + ([prompt.strip()] if prompt.strip() else [])
         else:  # append
             all_text = ([prompt.strip()] if prompt.strip() else []) + prompts
-
 
         final_text = " ".join(all_text)
         tokens = final_text.split()

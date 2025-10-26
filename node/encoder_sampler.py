@@ -184,7 +184,7 @@ class ClipFoldingStackConfig:
                 "folding_formula":      ( FoldingKernels.to_list(), {"default": FoldingKernels.shiva} ),
                 "folding_scheduler":    ( SchedulerModes.to_list(), {"default": SchedulerModes.TAU} ),
                 "padding_mode":         ( FoldingPaddingTypes.to_list(), {"default": FoldingPaddingTypes.SPARSE} ),
-                "pooling_mode":         ( FoldingPoolingTypes.to_list(), {"default": FoldingPoolingTypes.BILINEAR} ),
+                "pooling_mode":         ( FoldingPoolingTypes.to_list(), {"default": FoldingPoolingTypes.NEAREST} ),
                 "steps":                ( "INT", {"default": 10, "min": 1, "max": 100_000} ),
                 "passes":               ( "INT", {"default": 10, "min": 1, "max": 100_000} ),
                 "pool_frozen":          ( "BOOLEAN", {"default": False, "tooltip": "This enables returning only one frozen pool."} ),
@@ -358,11 +358,13 @@ class ClipExperimentalConfigNode:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "use_entropy_scaling":   ("BOOLEAN", {"default": False}),
-                "use_rope_resonance":    ("BOOLEAN", {"default": False}),
-                "cfg_scale":             ("FLOAT",   {"default": 1.0, "min": 0.0, "max": 100.0}),
-                "guidance_scale":        ("FLOAT",   {"default": 5.0, "min": 0.0, "max": 100.0}),
-                "pos_embedding":         (["none", "cos", "sine", "cosine"], {"default": "none"}),
+                "use_entropy_scaling":      ("BOOLEAN", {"default": False}),
+                "enable_rope_spiral":       ("BOOLEAN", {"default": False}),
+                "entropy_scale_center":     ("FLOAT", {"default": 0.5, "min": -10000.0, "max": 10000.0}),
+                "entropy_scale_magnitude":  ("FLOAT", {"default": 5.0, "min": -10000.0, "max": 10000.0}),
+                "cfg_scale":                ("FLOAT",   {"default": 1.0, "min": 0.0, "max": 1000.0}),
+                "guidance_scale":           ("FLOAT",   {"default": 5.0, "min": 0.0, "max": 1000.0}),
+                "pos_embedding":            (["none", "cos", "sine", "cosine"], {"default": "none"}),
                 "normalization_anchor":  ([
                     "none", "l2", "l1", "heun", "surge", "sigma",
                     "delta", "gate", "bong"
@@ -377,14 +379,18 @@ class ClipExperimentalConfigNode:
 
     def configure(self,
                   use_entropy_scaling,
-                  use_rope_resonance,
+                  enable_rope_spiral,
+                  entropy_scale_center,
+                  entropy_scale_magnitude,
                   cfg_scale,
                   guidance_scale,
                   pos_embedding,
                   normalization_anchor):
         return ({
             "use_entropy_scaling":    use_entropy_scaling,
-            "use_rope_resonance":     use_rope_resonance,
+            "enable_rope_spiral":     enable_rope_spiral,
+            "entropy_scale_center":   entropy_scale_center,
+            "entropy_scale_magnitude": entropy_scale_magnitude,
             "cfg_scale":              cfg_scale,
             "guidance_scale":         guidance_scale,
             "pos_embedding":          pos_embedding,
@@ -440,6 +446,8 @@ ENCODER_SUPPORTED_MODEL_TYPES = [
 ]
 
 class ClipSampler:
+
+    LAST_ACTIVATED_CACHE = {}
     MODES = ["sdxl", "sd1", "flux", "hidream"]
 
     @classmethod

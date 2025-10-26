@@ -128,6 +128,9 @@ class SD3ClipModel(torch.nn.Module):
             self.t5xxl.reset_clip_options()
 
     def encode_token_weights(self, token_weight_pairs):
+        if not isinstance(token_weight_pairs, dict):
+            # Legacy single encoder input, assume t5xxl
+            token_weight_pairs = {"t5xxl": token_weight_pairs, "l": [], "g": []}
         token_weight_pairs_l = token_weight_pairs["l"]
         token_weight_pairs_g = token_weight_pairs["g"]
         token_weight_pairs_t5 = token_weight_pairs["t5xxl"]

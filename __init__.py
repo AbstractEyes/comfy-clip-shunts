@@ -22,13 +22,12 @@ import comfy
 import logging
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
 
 
 #from symbolic_model_core import  (
 #    model_core
 #)
-
 
 # asyncio.run(run_vram_test())  # Run the VRAM test to initialize the VramBank
 
@@ -42,6 +41,7 @@ from .node.encoder_nodes import (
     #EncoderSampler,
     RemoveSpecialTokens,
     EncoderStackerNode,
+
 )
 
 from .node.encoder_sampler import (
@@ -177,7 +177,8 @@ NODE_CLASS_MAPPINGS = {
 
     # Sampler nodes
     "EncoderSamplerConfig": EncoderSamplerConfig,  # Configuration node for sampling encoders
-    "ClipSampler": ClipSampler,  # Sampler node for encoders
+    "ClipSampler": ClipSamplerConfigured,  # Sampler node for encoders
+    "EncoderSampler": ClipSamplerConfigured,  # Sampler node for encoders (alias)
     "AModelSamplingDiscrete": AModelSamplingDiscrete,  # Discrete sampling node for model outputs
 
     # Shunt adapter loading and management nodes
@@ -189,9 +190,10 @@ NODE_CLASS_MAPPINGS = {
     # Conditioning Embeddings and Reshaping Nodes
     "ABS_ShaperEmbedding": ABS_ShaperEmbedding,  # Node to reshape embeddings for the ABS Shunt Adapters
     "ABS_SaveConditioning": ABS_SaveEmbedding,  # Saves embeddings to the embedding folder
-    "ABS_LoadConditioning": ABS_LoadEmbedding,  # Loads embeddings from the embedding folder
+    "ABS_LoadEmbedding": ABS_LoadEmbedding,  # Loads embeddings from the embedding folder
     "SymbolicPromptRouter": SymbolicPromptRouter,  # Routes symbolic prompts to appropriate embeddings
     "BertPromptSimilarityFlood": BertPromptSimilarityFlood,  # Floods prompts with BERT similarity embeddings
+
 
     # Multi-shunt management nodes
     "StackShuntAdapters": StackShuntAdapters,
@@ -320,6 +322,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     # Sampler nodes
     "EncoderSamplerConfig": "🎛️ Encoder Sampler Config",  # Configuration node for sampling encoders
     "EncoderSampler": "🎲 Clip Sampler",  # Sampler node for encoders
+    "ClipSampler": "🎲 Clip Sampler",  # Sampler node for encoders
     "AModelSamplingDiscrete": "🎲 Discrete Model Sampling",  # Discrete sampling node for model outputs
 
 
@@ -422,6 +425,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     #"TestNewCondTypeNode": "🔍 Test New Conditioning Type",  # Unused, but ready for future use
     "ConditioningSelector": "🔍 Conditioning Selector",  # Unused, but ready for future use
 
+
     # finalized CLIP nodes for production release
     "ClipSamplerConfigured": "🎲 Clip Sampler Configured",
     "ClipPromptConfig": "📝 Clip Prompt Config",
@@ -508,8 +512,34 @@ def print_system_summary():
 
 print_system_summary()
 
+
 logger.info("Loading ABS Shunt Suite...")
 logger.info("✅ Shunt adapters initialized")
 logger.info("⚡ Ready to bridge a multitude of embeddings")
 
-__all__ = [NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS]
+# __init__.py
+import os
+from pathlib import Path
+from aiohttp import web
+from server import PromptServer
+from folder_paths import get_folder_paths
+from .embedding.embedding_manager import get_bank  # adjust import if needed
+
+def _default_embed_dir() -> str:
+    return str(Path(get_folder_paths("embeddings")[0]) / "cached_embeddings")
+
+@PromptServer.instance.routes.get("/abs/bundle_list")
+async def abs_bundle_list(request):
+    bank = get_bank()
+    bank.load_dir(_default_embed_dir())
+    ids = bank.list_bundles()
+    labels = [bank.info(b).get("prompt_trigger", b[:8]) for b in ids]
+    if not labels:
+        labels, ids = ["<no bundles>"], [""]
+    return web.json_response({"labels": labels, "ids": ids})
+
+# Serve JS from an absolute path (Windows-safe)
+WEB_DIRECTORY = os.path.join(os.path.dirname(__file__), "js")
+
+# __all__ must be strings
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
