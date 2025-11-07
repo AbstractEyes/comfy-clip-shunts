@@ -142,7 +142,12 @@ class VAELyraLoader:
             model_path = hf_hub_download(repo_id=repo_id, filename="model.pt")
             config_path = hf_hub_download(repo_id=repo_id, filename="config.json")
         except Exception as e:
-            raise Exception(f"Failed to download VAE Lyra: {e}")
+            print(f"Failed to download VAE Lyra: {e} trying alternative method...")
+            try:
+                model_path = hf_hub_download(repo_id=repo_id, filename="best_model.pt")
+                config_path = hf_hub_download(repo_id=repo_id, filename="config.json")
+            except Exception as e2:
+                raise ValueError(f"Failed to download VAE Lyra model: {e2}")
 
         with open(config_path) as f:
             config_dict = json.load(f)
