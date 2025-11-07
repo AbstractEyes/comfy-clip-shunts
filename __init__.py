@@ -31,6 +31,7 @@ logger = logging.getLogger()
 
 # asyncio.run(run_vram_test())  # Run the VRAM test to initialize the VramBank
 
+from .multiencoders.nodes import LYRA_NODE_CLASS_MAPPINGS, LYRA_NODE_DISPLAY_NAME_MAPPINGS
 
 from .node.encoder_nodes import (
     # Importing all necessary nodes for the ABS Shunt Suite
@@ -314,6 +315,7 @@ NODE_CLASS_MAPPINGS = {
 
     "T5SummarizeCaption": T5SummarizeCaption,  # Node for summarizing captions using T5
 }
+NODE_CLASS_MAPPINGS.update(LYRA_NODE_CLASS_MAPPINGS)
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     # Checkpoint Nodes
@@ -436,9 +438,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ClipFoldingStackConfig": "📚 Clip Folding Stack Config",
 
     "T5SummarizeCaption": "📝 T5 Summarize Caption",  # Node for summarizing captions using T5
-
-
 }
+NODE_DISPLAY_NAME_MAPPINGS.update(LYRA_NODE_DISPLAY_NAME_MAPPINGS)
+
 
 
 # ASCII art banner

@@ -1108,7 +1108,7 @@ class ABS_WAS_ConditioningBlend:
     RETURN_NAMES = ("conditioning",)
     FUNCTION = "combine"
     CATEGORY = "conditioning"
-    DEPRECATED = True  # This node is deprecated, use the new ConditioningBlenderSampler instead.
+    DEPRECATED = False  # This node is deprecated, use the new ConditioningBlenderSampler instead.
 
     def combine(self,
                 conditioning_a,

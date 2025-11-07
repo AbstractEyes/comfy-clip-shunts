@@ -6,4 +6,5 @@ langdetect
 numpy
 scipy
 matplotlib
+git+https://github.com/AbstractEyes/lattice_vocabulary.git
 -e ./symbolic_model_core
