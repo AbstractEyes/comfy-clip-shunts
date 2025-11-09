@@ -251,6 +251,7 @@ class ShuntSampler:
 class ShuntConditioning:
     """Orchestrates the conditioning modification process"""
 
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -312,6 +313,9 @@ class ShuntConditioning:
         encoder_pipe = encoder_pipe.copy()  # Ensure we have a mutable copy
         adapter_pipe = list(adapter_pipe)  # Ensure we have a mutable copy
         conditioning = UsefulConditioning(conditioning) if not isinstance(conditioning, UsefulConditioning) else conditioning
+        print(encoder_pipe)
+        if isinstance(encoder_pipe, dict):
+            encoder_pipe = [encoder_pipe]
         device = torch.device(
             encoder_pipe[0].get("config", {}).get("device", "cuda" if torch.cuda.is_available() else "cpu")
         )

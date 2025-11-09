@@ -45,6 +45,12 @@ from .node.encoder_nodes import (
 
 )
 
+from .node.sigmas_nodes import (
+    SigmasCantorFlow,
+    FlowMatchingCantorSampler,
+    FlowMatchingCantorKSampler
+)
+
 from .node.encoder_sampler import (
     # Importing the ClipSampler node for sampling encoders
     ClipSampler,
@@ -314,6 +320,10 @@ NODE_CLASS_MAPPINGS = {
     "ClipFoldingStackConfig": ClipFoldingStackConfig,
 
     "T5SummarizeCaption": T5SummarizeCaption,  # Node for summarizing captions using T5
+
+    "SigmasCantorFlow": SigmasCantorFlow,
+    "FlowMatchingCantorSampler": FlowMatchingCantorSampler,
+    "FlowMatchingCantorKSampler": FlowMatchingCantorKSampler,
 }
 NODE_CLASS_MAPPINGS.update(LYRA_NODE_CLASS_MAPPINGS)
 
@@ -438,6 +448,11 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ClipFoldingStackConfig": "📚 Clip Folding Stack Config",
 
     "T5SummarizeCaption": "📝 T5 Summarize Caption",  # Node for summarizing captions using T5
+
+    "SigmasCantorFlow": "♾️ Sigmas Cantor Flow",
+    "FlowMatchingCantorSampler": "🌊 Flow Matching Cantor Sampler",
+    "FlowMatchingCantorKSampler": "🌊 Flow Matching Cantor K-Sampler",
+
 }
 NODE_DISPLAY_NAME_MAPPINGS.update(LYRA_NODE_DISPLAY_NAME_MAPPINGS)
 

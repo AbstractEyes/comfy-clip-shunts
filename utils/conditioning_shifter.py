@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 class ShiftConfig:
     """Unified configuration for all modifications"""
     prompt: str = ""
+    context_window: str = ""
     seed: int = -1  # -1 means no seed, use random
     strength: float = 1.0
     delta_mean: float = 0.0
@@ -53,7 +54,6 @@ class ShiftConfig:
                 logger.warning(f"ShiftConfig: Ignoring unknown key {key!r} in join_dict")
 
 
-
 @dataclass
 class AdapterOutput:
     """Raw output from adapter forward pass"""
@@ -88,7 +88,7 @@ class ConditioningShifter:
         """
 
         # 1) Prompt resolution and cleaning
-        prompt = config.get("context_window", "")
+        prompt = config.__getattribute__("context_window")
         # NOTE: could call RemoveSpecialTokens.remove_special_tokens(prompt) here if needed
 
         # 2) Tokenize & encode

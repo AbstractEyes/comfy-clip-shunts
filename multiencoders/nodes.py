@@ -208,6 +208,7 @@ class VAELyraEncode:
                 "clip": ("CLIP",),
                 "text": ("STRING", {"multiline": True, "default": "a beautiful sunset over mountains"}),
                 "target_modality": (["clip", "t5"], {"default": "clip"}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             }
         }
 
@@ -216,29 +217,34 @@ class VAELyraEncode:
     FUNCTION = "encode"
     CATEGORY = "VAE Lyra"
 
-    def encode(self, lyra_model, t5_model, t5_tokenizer, clip, text, target_modality):
+    def encode(self, lyra_model, t5_model, t5_tokenizer, clip, text, target_modality, seed):
         device = next(lyra_model.parameters()).device
+        seed_gen = torch.Generator(device)
+        seed = torch.random.seed() if seed == 0 else int(seed)
+        torch.manual_seed(seed)
+        seed_gen.manual_seed(seed)
 
         # Get CLIP embeddings
         tokens = clip.tokenize(text)
         cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
         clip_embed = cond.to(device)
         pooled = pooled.to(device)
-        original_shape = clip_embed.shape
 
-        # Handle SDXL by slicing first 768 dims only
-        is_sdxl = clip_embed.shape[-1] == 2048
-        if is_sdxl:
-            print("⚠️ SDXL CLIP detected (2048D), processing first 768D through VAE Lyra")
-            clip_embed_lyra = clip_embed[..., :768]  # Take first 768 dims
-            clip_embed_remainder = clip_embed[..., 768:]  # Keep rest for later
-            pooled_output = pooled  # Keep original SDXL pooled
-        elif clip_embed.shape[-1] == 768:
-            clip_embed_lyra = clip_embed
-            # For SD1.5, we'll transform the pooled output too
+        # Check dimensions
+        batch_size, seq_len, feat_dim = clip_embed.shape
+        print(f"📊 CLIP embed shape: {clip_embed.shape} (B={batch_size}, Seq={seq_len}, Feat={feat_dim})")
+
+        # Handle sequence length slicing for Lyra (77 token limit)
+        LYRA_MAX_TOKENS = 77
+        clip_extra_tokens = None
+
+        if seq_len > LYRA_MAX_TOKENS:
+            print(f"✂️ Slicing CLIP from {seq_len} to {LYRA_MAX_TOKENS} tokens for VAE Lyra")
+            clip_embed_lyra = clip_embed[:, :LYRA_MAX_TOKENS, :]  # First 77 tokens
+            clip_extra_tokens = clip_embed[:, LYRA_MAX_TOKENS:, :]  # Remaining tokens
+            print(f"   Lyra input: {clip_embed_lyra.shape}, Extra tokens: {clip_extra_tokens.shape}")
         else:
-            raise ValueError(
-                f"Unsupported CLIP dimension: {clip_embed.shape[-1]}. Expected 768 (SD1.5) or 2048 (SDXL).")
+            clip_embed_lyra = clip_embed
 
         # Get T5 embeddings
         t5_tokens = t5_tokenizer(
@@ -250,47 +256,71 @@ class VAELyraEncode:
         ).to(device)
         t5_embed = t5_model(**t5_tokens).last_hidden_state
 
-        if t5_embed.shape[-1] != 768:
-            raise ValueError(f"T5 must output 768D. Got {t5_embed.shape[-1]}D. Use t5-base.")
+        t5_seq_len = t5_embed.shape[1]
+        t5_extra_tokens = None
+
+        if t5_seq_len > LYRA_MAX_TOKENS:
+            print(f"✂️ Slicing T5 from {t5_seq_len} to {LYRA_MAX_TOKENS} tokens for VAE Lyra")
+            t5_embed_lyra = t5_embed[:, :LYRA_MAX_TOKENS, :]  # First 77 tokens
+            t5_extra_tokens = t5_embed[:, LYRA_MAX_TOKENS:, :]  # Remaining tokens
+            print(f"   Lyra input: {t5_embed_lyra.shape}, Extra tokens: {t5_extra_tokens.shape}")
+        else:
+            t5_embed_lyra = t5_embed
+
+        # Validate dimensions for Lyra
+        if t5_embed_lyra.shape[-1] != 768:
+            raise ValueError(f"T5 must output 768D. Got {t5_embed_lyra.shape[-1]}D. Use t5-base.")
+
+        if clip_embed_lyra.shape[-1] not in [768, 2048]:
+            raise ValueError(
+                f"Unsupported CLIP dimension: {clip_embed_lyra.shape[-1]}. Expected 768 (SD1.5) or 2048 (SDXL).")
 
         # Process through VAE Lyra
         modality_inputs = {
             'clip': clip_embed_lyra,
-            't5': t5_embed
+            't5': t5_embed_lyra
         }
 
         print(f"🎵 Transforming embeddings with VAE Lyra...")
-        print(f"   CLIP: {clip_embed_lyra.shape}, T5: {t5_embed.shape}")
+        print(f"   CLIP: {clip_embed_lyra.shape}, T5: {t5_embed_lyra.shape}")
 
         with torch.no_grad():
             reconstructions, mu, logvar = lyra_model(
                 modality_inputs,
-                target_modalities=[target_modality]
+                target_modalities=[target_modality],
+                generator=seed_gen
             )
 
             transformed_embed = reconstructions[target_modality]
 
-            # If SDXL, concatenate transformed 768D back with untouched remainder
-            if is_sdxl:
-                print("⚠️ Concatenating transformed 768D with untouched SDXL features")
-                transformed_embed = torch.cat([transformed_embed, clip_embed_remainder], dim=-1)
-                pooled_output = pooled  # Keep original pooled output for SDXL
-            else:
-                # For SD1.5, transform the pooled output through Lyra as well
-                # Use mean pooling of the transformed embeddings
+            print(f"   Lyra output: {transformed_embed.shape}")
+
+            # Reattach extra tokens if they exist
+            if clip_extra_tokens is not None:
+                print(f"🔗 Reattaching {clip_extra_tokens.shape[1]} extra CLIP tokens")
+                transformed_embed = torch.cat([transformed_embed, clip_extra_tokens], dim=1)
+                print(f"   Final shape: {transformed_embed.shape}")
+
+            # Handle pooled output
+            # For SDXL with original pooled, keep it; otherwise compute from transformed
+            if clip_embed.shape[-1] == 2048:  # SDXL
+                pooled_output = pooled  # Keep original SDXL pooled
+            else:  # SD1.5
                 pooled_output = transformed_embed.mean(dim=1)
 
             # Create conditioning
             conditioning = [[transformed_embed, {"pooled_output": pooled_output}]]
 
-            # Print transformation stats (only for the 768D portion)
-            diff = (transformed_embed[..., :768] - clip_embed_lyra).abs()
+            # Print transformation stats (compare first 77 tokens only)
+            diff = (transformed_embed[:, :LYRA_MAX_TOKENS, :] - clip_embed_lyra).abs()
             print(f"✓ Transformation complete:")
             print(f"   Max Δ: {diff.max().item():.4f}")
             print(f"   Mean Δ: {diff.mean().item():.4f}")
 
-            return (conditioning,)
+            if clip_extra_tokens is not None:
+                print(f"   Extra tokens preserved: {clip_extra_tokens.shape[1]}")
 
+            return (conditioning,)
 
 class VAELyraSD15Encode:
     """Specialized node for SD1.5 models only"""
