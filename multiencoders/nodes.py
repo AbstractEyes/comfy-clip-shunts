@@ -223,6 +223,7 @@ class VAELyraEncode:
         seed = torch.random.seed() if seed == 0 else int(seed)
         torch.manual_seed(seed)
         seed_gen.manual_seed(seed)
+        t5_text = text.replace("\n", " ").replace("(", " ").replace(")", " ").replace("[", " ").replace("]", " ")
 
         # Get CLIP embeddings
         tokens = clip.tokenize(text)
@@ -248,7 +249,7 @@ class VAELyraEncode:
 
         # Get T5 embeddings
         t5_tokens = t5_tokenizer(
-            [text],
+            [t5_text],
             max_length=77,
             padding='max_length',
             truncation=True,

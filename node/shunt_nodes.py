@@ -313,7 +313,7 @@ class ShuntConditioning:
         encoder_pipe = encoder_pipe.copy()  # Ensure we have a mutable copy
         adapter_pipe = list(adapter_pipe)  # Ensure we have a mutable copy
         conditioning = UsefulConditioning(conditioning) if not isinstance(conditioning, UsefulConditioning) else conditioning
-        print(encoder_pipe)
+        #print(encoder_pipe)
         if isinstance(encoder_pipe, dict):
             encoder_pipe = [encoder_pipe]
         device = torch.device(
@@ -322,7 +322,7 @@ class ShuntConditioning:
 
         # Create unified config with top-k parameters
         config = ShiftConfig(
-            prompt=prompt,
+            context_window=prompt,
             seed=torch.manual_seed(seed if seed >= 0 else torch.randint(0, 2**32, (1,)).item()).seed(),
             strength=strength,
             delta_mean=delta_mean,
@@ -354,7 +354,7 @@ class ShuntConditioning:
                 extracted = clip_model.encode_from_tokens_scheduled(tokens)
                 extracted = extracted[0][0].to(device)  # Extract the first tensor
             else:
-                extracted = ConditioningShifter.extract_encoder_embeddings(encoder, device, config)
+                extracted = ConditioningShifter.extract_encoder_embeddings(encoder, device, config.to_dict())
             if extracted is not None:
                 encoder_name = encoder.get("config", {}).get("model_type", "unknown")
                 all_embeddings.setdefault(encoder_name, []).append(extracted.clone().to(device))

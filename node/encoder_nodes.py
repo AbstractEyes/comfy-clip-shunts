@@ -1464,7 +1464,7 @@ class SimpleEncoderLoader:
             device=device_obj,
             dtype=torch.float32,  # Default dtype
             force_reload=False,
-            trust_remote_code=trust_remote_code,  # Default to not trusting remote code
+            trust_remote_code=trust_remote_code,
             config=model_config.config if model_config.config else {}
         )
         if not result:
@@ -1475,9 +1475,10 @@ class SimpleEncoderLoader:
             "model_id": model_id,
             "model_type": model_type,
             "model_name": model_name,
+            "model_config": model_config,
             "source": model_source,
             "device": str(device),
-            "trust_remote_code": False,  # Default to not trusting remote code
+            "trust_remote_code": trust_remote_code,
             "config": {
                 # attempt to seek the config details from the model config, then default if not found
                 "max_length": model_config.config.get("max_length", 77),
@@ -1495,11 +1496,11 @@ class SimpleEncoderLoader:
                 "sliding_window": model_config.config.get("sliding_window", True),
             }
         }
-        return ({
+        return ([{
             "model": model,
             "tokenizer": tokenizer,
             "config": config_dict,
-        },)
+        }],)
 
 
 class T5LoaderTest:

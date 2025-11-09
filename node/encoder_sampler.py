@@ -776,7 +776,7 @@ class ClipSamplerConfigured:
             "folding": "shiva",
             "folding_scheduler": "tau",
             "padding_mode": "sparse",
-            "pooling_mode": "bilinear",
+            "pooling_mode": "nearest",
             "steps": 100,
             "passes": 1,
             "conv_dim": 2,

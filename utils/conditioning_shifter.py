@@ -41,6 +41,34 @@ class ShiftConfig:
     eager_offloading: bool = True  # Whether to offload tensors to CPU after processing, or cache to disc if overwhelmed
     squash_similarity: bool = True  #
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "prompt": self.prompt,
+            "context_window": self.context_window,
+            "seed": self.seed,
+            "strength": self.strength,
+            "delta_mean": self.delta_mean,
+            "delta_scale": self.delta_scale,
+            "sigma_scale": self.sigma_scale,
+            "gate_probability": self.gate_probability,
+            "gate_threshold": self.gate_threshold,
+            "noise_injection": self.noise_injection,
+            "use_anchor": self.use_anchor,
+            "pool_method": self.pool_method,
+            "use_topk": self.use_topk,
+            "topk_percentage": self.topk_percentage,
+            "tau_temperature": self.tau_temperature,
+            "topk_mode": self.topk_mode,
+            "guidance_scale": self.guidance_scale,
+            "max_tokens": self.max_tokens,
+            "max_length": self.max_length,
+            "batch_size": self.batch_size,
+            "ram_capacity": self.ram_capacity,
+            "vram_capacity": self.vram_capacity,
+            "eager_offloading": self.eager_offloading,
+            "squash_similarity": self.squash_similarity
+        }
+
 
     # The models are very small, but the entire structure around calculating the embeddings is quite large;
     # This requires that we need to be careful with memory usage.
@@ -88,7 +116,7 @@ class ConditioningShifter:
         """
 
         # 1) Prompt resolution and cleaning
-        prompt = config.__getattribute__("context_window")
+        prompt = config.get("context_window", "")
         # NOTE: could call RemoveSpecialTokens.remove_special_tokens(prompt) here if needed
 
         # 2) Tokenize & encode
