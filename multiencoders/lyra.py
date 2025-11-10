@@ -638,6 +638,8 @@ class GeometricModalityFusion(nn.Module):
 # MULTI-MODAL VAE
 # ============================================================================
 
+# In vae_lyra.py - Update MultiModalVAE
+
 class MultiModalVAE(nn.Module):
     """
     Multi-modal VAE with advanced fusion and seed control.
@@ -726,6 +728,13 @@ class MultiModalVAE(nn.Module):
                 in_dim = out_dim
 
             self.decoders[name] = nn.Sequential(*decoder_layers)
+
+        # Cross-modal projection layers (for comparing different dimensions)
+        # These project all modalities to a common space for alignment
+        self.cross_modal_projections = nn.ModuleDict({
+            name: nn.Linear(dim, config.latent_dim)  # Project to latent_dim
+            for name, dim in config.modality_dims.items()
+        })
 
     def fuse_modalities(
             self,
@@ -816,6 +825,27 @@ class MultiModalVAE(nn.Module):
 
         return reconstructions
 
+    def project_for_cross_modal(
+            self,
+            reconstructions: Dict[str, torch.Tensor]
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Project reconstructions to common space for cross-modal comparison.
+
+        Args:
+            reconstructions: Dict of {name: [batch, seq, dim_i]}
+
+        Returns:
+            Dict of {name: [batch, seq, latent_dim]} - all same dimension
+        """
+        projected = {}
+        for name, recon in reconstructions.items():
+            proj = self.cross_modal_projections[name](recon)
+            proj = F.normalize(proj, dim=-1)  # Normalize for stability
+            projected[name] = proj
+
+        return projected
+
     def forward(
             self,
             modality_inputs: Dict[str, torch.Tensor],
@@ -844,20 +874,22 @@ class MultiModalVAE(nn.Module):
 # ============================================================================
 
 class MultiModalVAELoss(nn.Module):
-    """Loss for multi-modal VAE."""
+    """Loss for multi-modal VAE - now stateless."""
 
     def __init__(
             self,
             beta_kl: float = 0.1,
             beta_reconstruction: float = 1.0,
             beta_cross_modal: float = 0.05,
-            recon_type: str = 'mse'
+            recon_type: str = 'mse',
+            modality_weights: Optional[Dict[str, float]] = None
     ):
         super().__init__()
         self.beta_kl = beta_kl
         self.beta_reconstruction = beta_reconstruction
         self.beta_cross_modal = beta_cross_modal
         self.recon_type = recon_type
+        self.modality_weights = modality_weights or {}
 
     def forward(
             self,
@@ -865,6 +897,7 @@ class MultiModalVAELoss(nn.Module):
             reconstructions: Dict[str, torch.Tensor],
             mu: torch.Tensor,
             logvar: torch.Tensor,
+            projected_recons: Optional[Dict[str, torch.Tensor]] = None,  # <-- NEW
             return_components: bool = False
     ) -> Tuple[torch.Tensor, Optional[Dict[str, torch.Tensor]]]:
         """
@@ -874,6 +907,7 @@ class MultiModalVAELoss(nn.Module):
             inputs: Original inputs {name: [batch, seq, dim]}
             reconstructions: Reconstructed outputs {name: [batch, seq, dim]}
             mu, logvar: Latent parameters
+            projected_recons: Optional pre-projected reconstructions for cross-modal loss
             return_components: Return loss breakdown
 
         Returns:
@@ -881,8 +915,10 @@ class MultiModalVAELoss(nn.Module):
         """
         losses = {}
 
-        # 1. Reconstruction loss for each modality
+        # 1. Reconstruction loss for each modality (with per-modality weights)
         recon_losses = []
+        total_weight = 0.0
+
         for name in reconstructions.keys():
             if self.recon_type == 'mse':
                 recon_loss = F.mse_loss(reconstructions[name], inputs[name])
@@ -894,23 +930,29 @@ class MultiModalVAELoss(nn.Module):
                 cos_sim = (recon_norm * input_norm).sum(dim=-1)
                 recon_loss = (1 - cos_sim).mean()
 
-            losses[f'recon_{name}'] = recon_loss
-            recon_losses.append(recon_loss)
+            weight = self.modality_weights.get(name, 1.0)
+            weighted_loss = recon_loss * weight
 
-        total_recon = sum(recon_losses) / len(recon_losses)
+            losses[f'recon_{name}'] = recon_loss
+            recon_losses.append(weighted_loss)
+            total_weight += weight
+
+        total_recon = sum(recon_losses) / total_weight
 
         # 2. KL divergence
         kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
         kl_loss = kl_loss / (mu.shape[0] * mu.shape[1] * mu.shape[2])
         losses['kl'] = kl_loss
 
-        # 3. Cross-modal consistency (reconstructions should be similar)
-        if len(reconstructions) > 1:
-            recon_list = list(reconstructions.values())
+        # 3. Cross-modal consistency in common space
+        if len(reconstructions) > 1 and projected_recons is not None:
+            # Compare pre-projected reconstructions (all same dimension now)
+            projected_list = list(projected_recons.values())
             cross_modal_losses = []
-            for i in range(len(recon_list)):
-                for j in range(i + 1, len(recon_list)):
-                    cm_loss = F.mse_loss(recon_list[i], recon_list[j])
+
+            for i in range(len(projected_list)):
+                for j in range(i + 1, len(projected_list)):
+                    cm_loss = F.mse_loss(projected_list[i], projected_list[j])
                     cross_modal_losses.append(cm_loss)
 
             cross_modal = sum(cross_modal_losses) / len(cross_modal_losses)

@@ -77,8 +77,14 @@ class VAELyraLoader:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "lyra_checkpoint": (["abstractphil/vae-lyra", "local"], {"default": "abstractphil/vae-lyra"}),
-                "local_path": ("STRING", {"default": "./checkpoints_lyra/best_model.pt", "multiline": False}),
+                "lyra_checkpoint": ("STRING", {
+                    "default": "AbstractPhil/vae-lyra-sdxl-t5xl",
+                    "multiline": False
+                }),
+                "local_path": ("STRING", {
+                    "default": "./checkpoints_lyra/best_model.pt",
+                    "multiline": False
+                }),
             }
         }
 
@@ -90,13 +96,16 @@ class VAELyraLoader:
     def load_lyra(self, lyra_checkpoint, local_path):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        if lyra_checkpoint == "local" and Path(local_path).exists():
+        # If checkpoint string is "local", use local path
+        if lyra_checkpoint.lower() == "local" and Path(local_path).exists():
             model = self.load_lyra_from_local(local_path, device)
+        elif lyra_checkpoint.lower() == "local":
+            print(f"⚠️ Local checkpoint not found at: {local_path}")
+            print(f"   Falling back to default HuggingFace repo...")
+            model = self.load_lyra_from_hub("AbstractPhil/vae-lyra-sdxl-t5xl", device)
         else:
-            if lyra_checkpoint == "local":
-                print(f"⚠️ Local checkpoint not found at: {local_path}")
-                print(f"   Falling back to HuggingFace...")
-            model = self.load_lyra_from_hub("abstractphil/vae-lyra", device)
+            # Use the repo string directly
+            model = self.load_lyra_from_hub(lyra_checkpoint, device)
 
         return (model,)
 
@@ -110,8 +119,8 @@ class VAELyraLoader:
             raise ValueError("Checkpoint missing config")
 
         vae_config = MultiModalVAEConfig(
-            modality_dims=config_dict.get('modality_dims', {"clip": 768, "t5": 768}),
-            latent_dim=config_dict.get('latent_dim', 768),
+            modality_dims=config_dict.get('modality_dims', {"clip_l": 768, "clip_g": 1280, "t5_xl": 2048}),
+            latent_dim=config_dict.get('latent_dim', 2048),
             seq_len=config_dict.get('seq_len', 77),
             encoder_layers=config_dict.get('encoder_layers', 3),
             decoder_layers=config_dict.get('decoder_layers', 3),
@@ -139,22 +148,17 @@ class VAELyraLoader:
         print(f"🎵 Loading VAE Lyra from Hub: {repo_id}")
 
         try:
-            model_path = hf_hub_download(repo_id=repo_id, filename="model.pt")
-            config_path = hf_hub_download(repo_id=repo_id, filename="config.json")
+            model_path = hf_hub_download(repo_id=repo_id, filename="model.pt", repo_type="model")
+            config_path = hf_hub_download(repo_id=repo_id, filename="config.json", repo_type="model")
         except Exception as e:
-            print(f"Failed to download VAE Lyra: {e} trying alternative method...")
-            try:
-                model_path = hf_hub_download(repo_id=repo_id, filename="best_model.pt")
-                config_path = hf_hub_download(repo_id=repo_id, filename="config.json")
-            except Exception as e2:
-                raise ValueError(f"Failed to download VAE Lyra model: {e2}")
+            raise ValueError(f"Failed to download VAE Lyra model from '{repo_id}': {e}")
 
         with open(config_path) as f:
             config_dict = json.load(f)
 
         vae_config = MultiModalVAEConfig(
-            modality_dims=config_dict.get('modality_dims', {"clip": 768, "t5": 768}),
-            latent_dim=config_dict.get('latent_dim', 768),
+            modality_dims=config_dict.get('modality_dims', {"clip_l": 768, "clip_g": 1280, "t5_xl": 2048}),
+            latent_dim=config_dict.get('latent_dim', 2048),
             seq_len=config_dict.get('seq_len', 77),
             encoder_layers=config_dict.get('encoder_layers', 3),
             decoder_layers=config_dict.get('decoder_layers', 3),
@@ -179,7 +183,8 @@ class T5Loader:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "t5_model": (["t5-base", "t5-large"], {"default": "t5-base"}),
+                "t5_model": (["google/flan-t5-xl", "google/flan-t5-large", "google/flan-t5-base"],
+                           {"default": "google/flan-t5-xl"}),
             }
         }
 
@@ -198,6 +203,8 @@ class T5Loader:
 
 
 class VAELyraEncode:
+    """Universal VAE Lyra encoder - requires SDXL input, outputs both SD1.5 and SDXL conditioning"""
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -205,49 +212,79 @@ class VAELyraEncode:
                 "lyra_model": ("VAE_LYRA",),
                 "t5_model": ("T5_MODEL",),
                 "t5_tokenizer": ("T5_TOKENIZER",),
-                "clip": ("CLIP",),
+                "clip": ("CLIP",),  # Should be SDXL CLIP
                 "text": ("STRING", {"multiline": True, "default": "a beautiful sunset over mountains"}),
-                "target_modality": (["clip", "t5"], {"default": "clip"}),
+                "use_lyra": ("BOOLEAN", {"default": True, "label_on": "VAE Lyra", "label_off": "Standard"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             }
         }
 
-    RETURN_TYPES = ("CONDITIONING",)
-    RETURN_NAMES = ("conditioning",)
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING")
+    RETURN_NAMES = ("sd15_conditioning", "sdxl_conditioning")
     FUNCTION = "encode"
     CATEGORY = "VAE Lyra"
 
-    def encode(self, lyra_model, t5_model, t5_tokenizer, clip, text, target_modality, seed):
+    @torch.no_grad()
+    def encode(self, lyra_model, t5_model, t5_tokenizer, clip, text, use_lyra, seed):
         device = next(lyra_model.parameters()).device
-        seed_gen = torch.Generator(device)
-        seed = torch.random.seed() if seed == 0 else int(seed)
+
+        # Set seed
+        if seed == 0:
+            seed = torch.random.seed()
         torch.manual_seed(seed)
-        seed_gen.manual_seed(seed)
+        seed_gen = torch.Generator(device).manual_seed(int(seed))
+
+        # Clean text for T5
         t5_text = text.replace("\n", " ").replace("(", " ").replace(")", " ").replace("[", " ").replace("]", " ")
 
-        # Get CLIP embeddings
+        # Get CLIP embeddings from ComfyUI (should be SDXL)
         tokens = clip.tokenize(text)
         cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
         clip_embed = cond.to(device)
         pooled = pooled.to(device)
 
-        # Check dimensions
         batch_size, seq_len, feat_dim = clip_embed.shape
-        print(f"📊 CLIP embed shape: {clip_embed.shape} (B={batch_size}, Seq={seq_len}, Feat={feat_dim})")
+        print(f"📊 Input CLIP: {clip_embed.shape} (feat_dim={feat_dim})")
 
-        # Handle sequence length slicing for Lyra (77 token limit)
+        # Verify SDXL input
+        if feat_dim != 2048:
+            raise ValueError(
+                f"VAE Lyra Encode requires SDXL CLIP (2048d). Got {feat_dim}d.\n"
+                f"Please use an SDXL checkpoint with this node."
+            )
+
+        # Handle sequence length
         LYRA_MAX_TOKENS = 77
-        clip_extra_tokens = None
-
         if seq_len > LYRA_MAX_TOKENS:
-            print(f"✂️ Slicing CLIP from {seq_len} to {LYRA_MAX_TOKENS} tokens for VAE Lyra")
-            clip_embed_lyra = clip_embed[:, :LYRA_MAX_TOKENS, :]  # First 77 tokens
-            clip_extra_tokens = clip_embed[:, LYRA_MAX_TOKENS:, :]  # Remaining tokens
-            print(f"   Lyra input: {clip_embed_lyra.shape}, Extra tokens: {clip_extra_tokens.shape}")
+            print(f"✂️ Slicing from {seq_len} to {LYRA_MAX_TOKENS} tokens")
+            clip_embed_lyra = clip_embed[:, :LYRA_MAX_TOKENS, :]
+            clip_extra_tokens = clip_embed[:, LYRA_MAX_TOKENS:, :]
         else:
             clip_embed_lyra = clip_embed
+            clip_extra_tokens = None
 
-        # Get T5 embeddings
+        if not use_lyra:
+            # Standard mode - return original embeddings for both outputs
+            print("📋 Using standard embeddings (no VAE Lyra)")
+
+            # SDXL: Full 2048d
+            sdxl_cond = [[clip_embed, {"pooled_output": pooled}]]
+
+            # SD1.5: Just CLIP-L (first 768 dims)
+            clip_l_only = clip_embed[:, :, :768]
+            pooled_l = clip_l_only.mean(dim=1)
+            sd15_cond = [[clip_l_only, {"pooled_output": pooled_l}]]
+
+            return (sd15_cond, sdxl_cond)
+
+        # VAE Lyra mode
+        print("🎨 Processing SDXL input through VAE Lyra")
+
+        # Split SDXL embedding into CLIP-L + CLIP-G
+        clip_l_embed = clip_embed_lyra[:, :, :768]  # First 768 dims
+        clip_g_embed = clip_embed_lyra[:, :, 768:]  # Last 1280 dims
+
+        # Get T5-XL embeddings (2048d)
         t5_tokens = t5_tokenizer(
             [t5_text],
             max_length=77,
@@ -257,71 +294,68 @@ class VAELyraEncode:
         ).to(device)
         t5_embed = t5_model(**t5_tokens).last_hidden_state
 
-        t5_seq_len = t5_embed.shape[1]
-        t5_extra_tokens = None
-
-        if t5_seq_len > LYRA_MAX_TOKENS:
-            print(f"✂️ Slicing T5 from {t5_seq_len} to {LYRA_MAX_TOKENS} tokens for VAE Lyra")
-            t5_embed_lyra = t5_embed[:, :LYRA_MAX_TOKENS, :]  # First 77 tokens
-            t5_extra_tokens = t5_embed[:, LYRA_MAX_TOKENS:, :]  # Remaining tokens
-            print(f"   Lyra input: {t5_embed_lyra.shape}, Extra tokens: {t5_extra_tokens.shape}")
-        else:
-            t5_embed_lyra = t5_embed
-
-        # Validate dimensions for Lyra
-        if t5_embed_lyra.shape[-1] != 768:
-            raise ValueError(f"T5 must output 768D. Got {t5_embed_lyra.shape[-1]}D. Use t5-base.")
-
-        if clip_embed_lyra.shape[-1] not in [768, 2048]:
+        # Verify T5 is 2048d (T5-XL)
+        if t5_embed.shape[-1] != 2048:
             raise ValueError(
-                f"Unsupported CLIP dimension: {clip_embed_lyra.shape[-1]}. Expected 768 (SD1.5) or 2048 (SDXL).")
-
-        # Process through VAE Lyra
-        modality_inputs = {
-            'clip': clip_embed_lyra,
-            't5': t5_embed_lyra
-        }
-
-        print(f"🎵 Transforming embeddings with VAE Lyra...")
-        print(f"   CLIP: {clip_embed_lyra.shape}, T5: {t5_embed_lyra.shape}")
-
-        with torch.no_grad():
-            reconstructions, mu, logvar = lyra_model(
-                modality_inputs,
-                target_modalities=[target_modality],
-                generator=seed_gen
+                f"VAE Lyra requires T5-XL (2048d). Got {t5_embed.shape[-1]}d.\n"
+                f"Use 'google/flan-t5-xl' in the T5Loader node."
             )
 
-            transformed_embed = reconstructions[target_modality]
+        print(f"🎵 Transforming with VAE Lyra...")
+        print(f"   CLIP-L: {clip_l_embed.shape}, CLIP-G: {clip_g_embed.shape}, T5-XL: {t5_embed.shape}")
 
-            print(f"   Lyra output: {transformed_embed.shape}")
+        # Process through VAE Lyra with all three modalities
+        modality_inputs = {
+            'clip_l': clip_l_embed,
+            'clip_g': clip_g_embed,
+            't5_xl': t5_embed
+        }
 
-            # Reattach extra tokens if they exist
-            if clip_extra_tokens is not None:
-                print(f"🔗 Reattaching {clip_extra_tokens.shape[1]} extra CLIP tokens")
-                transformed_embed = torch.cat([transformed_embed, clip_extra_tokens], dim=1)
-                print(f"   Final shape: {transformed_embed.shape}")
+        reconstructions, mu, logvar = lyra_model(
+            modality_inputs,
+            target_modalities=['clip_l', 'clip_g'],
+            generator=seed_gen
+        )
 
-            # Handle pooled output
-            # For SDXL with original pooled, keep it; otherwise compute from transformed
-            if clip_embed.shape[-1] == 2048:  # SDXL
-                pooled_output = pooled  # Keep original SDXL pooled
-            else:  # SD1.5
-                pooled_output = transformed_embed.mean(dim=1)
+        lyra_clip_l = reconstructions['clip_l']
+        lyra_clip_g = reconstructions['clip_g']
 
-            # Create conditioning
-            conditioning = [[transformed_embed, {"pooled_output": pooled_output}]]
+        # SD1.5 output: CLIP-L only (768d)
+        sd15_embed = lyra_clip_l
 
-            # Print transformation stats (compare first 77 tokens only)
-            diff = (transformed_embed[:, :LYRA_MAX_TOKENS, :] - clip_embed_lyra).abs()
-            print(f"✓ Transformation complete:")
-            print(f"   Max Δ: {diff.max().item():.4f}")
-            print(f"   Mean Δ: {diff.mean().item():.4f}")
+        # Reattach extra tokens for SD1.5
+        if clip_extra_tokens is not None:
+            sd15_extra = clip_extra_tokens[:, :, :768]  # Only CLIP-L portion
+            sd15_embed = torch.cat([sd15_embed, sd15_extra], dim=1)
 
-            if clip_extra_tokens is not None:
-                print(f"   Extra tokens preserved: {clip_extra_tokens.shape[1]}")
+        # Compute pooled from CLIP-L
+        sd15_pooled = sd15_embed.mean(dim=1)
 
-            return (conditioning,)
+        # SDXL output: CLIP-L + CLIP-G concatenated (2048d)
+        sdxl_embed = torch.cat([lyra_clip_l, lyra_clip_g], dim=-1)
+
+        # Reattach extra tokens for SDXL
+        if clip_extra_tokens is not None:
+            print(f"🔗 Reattaching {clip_extra_tokens.shape[1]} extra tokens")
+            sdxl_embed = torch.cat([sdxl_embed, clip_extra_tokens], dim=1)
+
+        # Keep original SDXL pooled output
+        sdxl_pooled = pooled
+
+        # Stats
+        diff_l = (lyra_clip_l - clip_l_embed).abs()
+        diff_g = (lyra_clip_g - clip_g_embed).abs()
+        print(f"✓ Transformation complete:")
+        print(f"   CLIP-L Δ: max={diff_l.max().item():.4f}, mean={diff_l.mean().item():.4f}")
+        print(f"   CLIP-G Δ: max={diff_g.max().item():.4f}, mean={diff_g.mean().item():.4f}")
+        print(f"   SD1.5 output: {sd15_embed.shape} (768d)")
+        print(f"   SDXL output: {sdxl_embed.shape} (2048d)")
+
+        # Create conditioning outputs
+        sd15_cond = [[sd15_embed, {"pooled_output": sd15_pooled}]]
+        sdxl_cond = [[sdxl_embed, {"pooled_output": sdxl_pooled}]]
+
+        return (sd15_cond, sdxl_cond)
 
 class VAELyraSD15Encode:
     """Specialized node for SD1.5 models only"""
@@ -355,6 +389,7 @@ class VAELyraSD15Encode:
         if clip_embed.shape[-1] != 768:
             raise ValueError(
                 f"This node requires SD1.5 CLIP (768D). Got {clip_embed.shape[-1]}D. Use VAELyraEncode for SDXL.")
+
 
         # Get T5 embeddings
         t5_tokens = t5_tokenizer(
