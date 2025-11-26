@@ -31,7 +31,6 @@ logger = logging.getLogger()
 
 # asyncio.run(run_vram_test())  # Run the VRAM test to initialize the VramBank
 
-from .multiencoders.nodes import LYRA_NODE_CLASS_MAPPINGS, LYRA_NODE_DISPLAY_NAME_MAPPINGS
 
 from .node.encoder_nodes import (
     # Importing all necessary nodes for the ABS Shunt Suite
@@ -325,7 +324,6 @@ NODE_CLASS_MAPPINGS = {
     "FlowMatchingCantorSampler": FlowMatchingCantorSampler,
     "FlowMatchingCantorKSampler": FlowMatchingCantorKSampler,
 }
-NODE_CLASS_MAPPINGS.update(LYRA_NODE_CLASS_MAPPINGS)
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     # Checkpoint Nodes
@@ -454,7 +452,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FlowMatchingCantorKSampler": "🌊 Flow Matching Cantor K-Sampler",
 
 }
-NODE_DISPLAY_NAME_MAPPINGS.update(LYRA_NODE_DISPLAY_NAME_MAPPINGS)
 
 
 
